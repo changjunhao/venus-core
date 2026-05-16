@@ -1,0 +1,168 @@
+import { describe, it, expect } from 'bun:test';
+import { BaseAgent } from '../../src/agents/base-agent.js';
+import { defineProvider } from '../../src/providers/index.js';
+import { createMockProvider } from '../helpers/mock-provider.js';
+import { SchemaError } from '../../src/utils/errors.js';
+import { z } from 'zod';
+import type { LLMProvider } from '../../src/types.js';
+
+// ── Helpers ──
+
+const testSchema = z.object({
+  score: z.number(),
+  comment: z.string(),
+});
+
+function makeAgent(provider: LLMProvider, maxRetries?: number) {
+  return new BaseAgent('test-agent', provider, {
+    model: 'test-model',
+    maxRetries,
+  });
+}
+
+const VALID_JSON = JSON.stringify({ score: 8.5, comment: 'Great shot' });
+const IMAGE_URL = 'https://example.com/photo.jpg';
+
+describe('BaseAgent', () => {
+  // ── 正常调用 LLM 并解析 JSON 响应 ──
+  describe('Normal call — parse JSON response', () => {
+    it('should call provider and return parsed + validated result', async () => {
+      const provider = createMockProvider([{ content: VALID_JSON }]);
+      const agent = makeAgent(provider);
+
+      const { result, thinking } = await agent.call('system prompt', 'user prompt', IMAGE_URL, testSchema);
+
+      expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
+      expect(thinking).toBeNull();
+    });
+  });
+
+  // ── 思维链内容提取 ──
+  describe('Thinking content extraction', () => {
+    it('should return thinking when provider includes it', async () => {
+      const provider = createMockProvider([
+        { content: VALID_JSON, thinking: 'I analyzed the composition carefully...' },
+      ]);
+      const agent = makeAgent(provider);
+
+      const { result, thinking } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
+      expect(thinking).toBe('I analyzed the composition carefully...');
+    });
+  });
+
+  // ── 3次重试逻辑 ──
+  describe('Retry logic (3 attempts)', () => {
+    it('should retry and succeed on second attempt after invalid JSON', async () => {
+      const provider = createMockProvider([
+        { content: 'not json' }, // attempt 1: JSON parse fails
+        { content: VALID_JSON }, // attempt 2: success
+      ]);
+      const agent = makeAgent(provider, 3);
+
+      const { result } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
+    });
+
+    it('should retry and succeed on third attempt after schema errors', async () => {
+      const provider = createMockProvider([
+        { content: JSON.stringify({ score: 'wrong', comment: 123 }) }, // attempt 1: schema fail
+        { content: JSON.stringify({ score: 5 }) }, // attempt 2: missing field
+        { content: VALID_JSON }, // attempt 3: success
+      ]);
+      const agent = makeAgent(provider, 3);
+
+      const { result } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
+    });
+
+    it('should throw SchemaError after all retries exhausted', async () => {
+      const provider = createMockProvider([{ content: 'bad1' }, { content: 'bad2' }, { content: 'bad3' }]);
+      const agent = makeAgent(provider, 3);
+
+      await expect(agent.call('system', 'user', IMAGE_URL, testSchema)).rejects.toThrow(SchemaError);
+    });
+  });
+
+  // ── JSON 解析失败时的错误处理 ──
+  describe('JSON parse failure handling', () => {
+    it('should throw SchemaError with ProviderError details when JSON is invalid after all retries', async () => {
+      const provider = createMockProvider([
+        { content: '{ broken json' },
+        { content: '<<<not json>>>' },
+        { content: '' },
+      ]);
+      const agent = makeAgent(provider, 3);
+
+      try {
+        await agent.call('system', 'user', IMAGE_URL, testSchema);
+        expect(true).toBe(false); // should not reach
+      } catch (e) {
+        expect(e).toBeInstanceOf(SchemaError);
+        expect((e as SchemaError).message).toContain('3 次尝试后仍然失败');
+      }
+    });
+  });
+
+  // ── Provider 异常传播 ──
+  describe('Provider exception propagation', () => {
+    it('should throw SchemaError wrapping provider error after retries', async () => {
+      const failProvider = defineProvider({
+        name: 'fail-provider',
+        supportsVision: true,
+        chat: async () => {
+          throw new Error('Network timeout');
+        },
+      });
+      const agent = makeAgent(failProvider, 3);
+
+      try {
+        await agent.call('system', 'user', IMAGE_URL, testSchema);
+        expect(true).toBe(false);
+      } catch (e) {
+        expect(e).toBeInstanceOf(SchemaError);
+        expect((e as SchemaError).message).toContain('Network timeout');
+      }
+    });
+
+    it('should propagate the last error message', async () => {
+      let callCount = 0;
+      const errorProvider = defineProvider({
+        name: 'error-provider',
+        supportsVision: true,
+        chat: async () => {
+          callCount++;
+          throw new Error(`Error on call ${callCount}`);
+        },
+      });
+      const agent = makeAgent(errorProvider, 2);
+
+      try {
+        await agent.call('system', 'user', IMAGE_URL, testSchema);
+        expect(true).toBe(false);
+      } catch (e) {
+        expect((e as Error).message).toContain('Error on call 2');
+      }
+    });
+  });
+
+  // ── 空响应处理 ──
+  describe('Empty response handling', () => {
+    it('should fail gracefully on empty content string', async () => {
+      const provider = createMockProvider([{ content: '' }, { content: '' }, { content: '' }]);
+      const agent = makeAgent(provider, 3);
+
+      await expect(agent.call('system', 'user', IMAGE_URL, testSchema)).rejects.toThrow(SchemaError);
+    });
+
+    it('should fail gracefully on whitespace-only content', async () => {
+      const provider = createMockProvider([{ content: '   ' }, { content: '   ' }, { content: '   ' }]);
+      const agent = makeAgent(provider, 3);
+
+      await expect(agent.call('system', 'user', IMAGE_URL, testSchema)).rejects.toThrow(SchemaError);
+    });
+  });
+});

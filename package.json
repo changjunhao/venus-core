@@ -1,0 +1,121 @@
+{
+  "name": "@theogony/venus-core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Venus AI Photography Evaluation Engine - Framework-agnostic, runtime-agnostic TypeScript SDK",
+  "license": "Apache-2.0",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./hono": {
+      "import": {
+        "types": "./dist/adapters/hono.d.ts",
+        "default": "./dist/adapters/hono.js"
+      },
+      "require": {
+        "types": "./dist/adapters/hono.d.cts",
+        "default": "./dist/adapters/hono.cjs"
+      }
+    },
+    "./express": {
+      "import": {
+        "types": "./dist/adapters/express.d.ts",
+        "default": "./dist/adapters/express.js"
+      },
+      "require": {
+        "types": "./dist/adapters/express.d.cts",
+        "default": "./dist/adapters/express.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "bun run build:esm && bun run build:cjs && bun run build:types",
+    "build:esm": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts --outdir ./dist --target node --format esm --splitting --packages external",
+    "build:cjs": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts --outdir ./dist --target node --format cjs --entry-naming '[dir]/[name].cjs' --chunk-naming '[name]-[hash].cjs' --packages external",
+    "build:types": "tsc -p tsconfig.build.json && cp dist/index.d.ts dist/index.d.cts && cp dist/adapters/hono.d.ts dist/adapters/hono.d.cts && cp dist/adapters/express.d.ts dist/adapters/express.d.cts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
+    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'",
+    "lint:fix": "eslint --fix 'src/**/*.ts' 'test/**/*.ts'",
+    "prepublishOnly": "bun run lint && bun run build && bun test"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "openai": "^6.38.0",
+    "zod": "^4.4.3",
+    "hono": "^4.12.18",
+    "express": "^5.2.1",
+    "vectorjson": "^0.5.1"
+  },
+  "peerDependenciesMeta": {
+    "openai": {
+      "optional": false
+    },
+    "zod": {
+      "optional": false
+    },
+    "hono": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "vectorjson": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "^1.3.14",
+    "@types/express": "^5.0.6",
+    "eslint": "^10.0.1",
+    "eslint-config-prettier": "^10.1.8",
+    "express": "^5.2.1",
+    "hono": "^4.12.18",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "venus",
+    "ai",
+    "photography",
+    "evaluation",
+    "multi-agent",
+    "llm"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/changjunhao/venus-core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/changjunhao/venus-core/issues"
+  },
+  "homepage": "https://github.com/changjunhao/venus-core#readme"
+}
