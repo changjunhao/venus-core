@@ -19,7 +19,15 @@ export { createOpenAICompatProvider, defineProvider } from './providers/index.js
 export type { OpenAICompatOptions, DefineProviderOptions } from './providers/index.js';
 
 // ─── Schema ───────────────────────────────────────────────
-export { GenreEnum, getSchemas, getGenreConfig, getMetadata, getAllGenres } from './schema/index.js';
+export {
+  GenreEnum,
+  ExifDataSchema,
+  EvaluationContextSchema,
+  getSchemas,
+  getGenreConfig,
+  getMetadata,
+  getAllGenres,
+} from './schema/index.js';
 export type { SubtypeForGenre, DimensionForGenre } from './schema/index.js';
 
 // ─── Errors ───────────────────────────────────────────────
