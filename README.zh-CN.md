@@ -164,6 +164,17 @@ import { GenreEnum } from '@theogony/venus-core';
 // z.enum(['portrait','landscape','documentary','fine_art','commercial','architecture','nature','sports'])
 ```
 
+#### `ExifDataSchema` / `EvaluationContextSchema`
+
+`ExifData` 和 `EvaluationContext` 的 Zod Schema，导出供消费端校验使用：
+
+```ts
+import { ExifDataSchema, EvaluationContextSchema } from '@theogony/venus-core';
+
+const exif = ExifDataSchema.parse({ shutterSpeed: '1/2000', iso: 400 });
+const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
+```
+
 #### `getSchemas(genre: Genre)`
 
 返回 `{ proposalSchema, critiqueSchema, arbiterSchema }` — 指定门类的 Zod Schema。

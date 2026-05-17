@@ -164,6 +164,17 @@ import { GenreEnum } from '@theogony/venus-core';
 // z.enum(['portrait','landscape','documentary','fine_art','commercial','architecture','nature','sports'])
 ```
 
+#### `ExifDataSchema` / `EvaluationContextSchema`
+
+Zod schemas for `ExifData` and `EvaluationContext`, exported for consumer-side validation:
+
+```ts
+import { ExifDataSchema, EvaluationContextSchema } from '@theogony/venus-core';
+
+const exif = ExifDataSchema.parse({ shutterSpeed: '1/2000', iso: 400 });
+const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
+```
+
 #### `getSchemas(genre: Genre)`
 
 Returns `{ proposalSchema, critiqueSchema, arbiterSchema }` — Zod schemas for the given genre.
