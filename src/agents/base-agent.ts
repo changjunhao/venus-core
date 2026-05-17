@@ -10,7 +10,7 @@ import type {
   ChatMessage,
   StreamChunk,
 } from '../types.js';
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import { ProviderError, SchemaError } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -159,29 +159,64 @@ export class BaseAgent {
       return (await this.call<T>(systemPrompt, userPrompt, imageUrl, schema, callConfig)) as AgentCallResult<T>;
     }
 
-    const messages = this.#buildMessages(systemPrompt, userPrompt, imageUrl);
     const { enableThinking, thinkingBudget } = this.#resolveThinking(callConfig);
+    let lastError: Error | null = null;
+    const history: ChatMessage[] = [];
 
-    this.logger.info('流式调用...');
-    this.logger.debug(
-      `Calling provider (stream): role=${this.name}, model=${callConfig?.model ?? this.config.model}, thinking=${enableThinking ? `enabled(budget=${thinkingBudget ?? 'default'})` : 'disabled'}`,
-    );
+    for (let attempt = 0; attempt < this.#maxRetries; attempt++) {
+      const requestMessages = this.#buildMessages(
+        systemPrompt,
+        userPrompt,
+        imageUrl,
+        attempt > 0 ? history : undefined,
+      );
 
-    let thinking = '';
-    let finalContent = '';
+      this.logger.info(`流式第 ${attempt + 1} 次调用...`);
+      this.logger.debug(
+        `Calling provider (stream): role=${this.name}, model=${callConfig?.model ?? this.config.model}, thinking=${enableThinking ? `enabled(budget=${thinkingBudget ?? 'default'})` : 'disabled'}, attempt=${attempt + 1}/${this.#maxRetries}`,
+      );
 
-    for await (const chunk of this.provider.chatStream({
-      model: callConfig?.model ?? this.config.model,
-      messages,
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-      thinking: enableThinking ? { enabled: true, budget_tokens: thinkingBudget ?? undefined } : undefined,
-    })) {
-      if (chunk.thinking) thinking += chunk.thinking;
-      if (chunk.content) finalContent += chunk.content;
-      yield chunk;
+      let thinking = '';
+      let finalContent = '';
+
+      for await (const chunk of this.provider.chatStream({
+        model: callConfig?.model ?? this.config.model,
+        messages: requestMessages,
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+        thinking: enableThinking ? { enabled: true, budget_tokens: thinkingBudget ?? undefined } : undefined,
+      })) {
+        if (chunk.thinking) thinking += chunk.thinking;
+        if (chunk.content) finalContent += chunk.content;
+        yield chunk;
+      }
+
+      try {
+        return this.#parseResponse<T>(finalContent, schema, thinking || null, '流式');
+      } catch (err: unknown) {
+        lastError = err as Error;
+        this.logger.warn(
+          `流式第 ${attempt + 1} 次验证失败: ${err instanceof z.ZodError ? err.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; ') : String(err)}`,
+        );
+
+        // 将错误信息加入对话历史，让模型在下一次流式尝试中自我修正（与 call() 重试模式一致）
+        if (attempt < this.#maxRetries - 1) {
+          history.push({
+            role: 'user' as const,
+            content: this.#buildUserContent(userPrompt, imageUrl),
+          });
+          history.push({
+            role: 'assistant' as const,
+            content: lastError.message.includes('JSON') ? '{"error": "format error"}' : '{}',
+          });
+          history.push({
+            role: 'user' as const,
+            content: `你的上次输出格式有误: ${lastError.message}。请严格按照要求的 JSON 格式重新输出，不要包含任何多余文字。`,
+          });
+        }
+      }
     }
 
-    return this.#parseResponse<T>(finalContent, schema, thinking || null, '流式');
+    throw new SchemaError(`[${this.name}] 在 ${this.#maxRetries} 次流式尝试后仍然失败: ${lastError?.message}`);
   }
 }
