@@ -345,5 +345,54 @@ describe('Provider Layer', () => {
       expect(requestBody.enable_thinking).toBeUndefined();
       expect(requestBody.thinking_budget).toBeUndefined();
     });
+
+    // ── 集成测试：验证真实 provider 发送的请求体 ──
+    describe('integration: real provider request body', () => {
+      afterEach(() => restoreFetch());
+
+      it('should send enable_thinking: false when thinking is explicitly disabled', async () => {
+        let capturedBody: any = null;
+
+        mockFetch(async (_input, init) => {
+          capturedBody = JSON.parse(init?.body as string);
+          return makeChatCompletion({ content: 'ok' });
+        });
+        const provider = createOpenAICompatProvider({
+          baseURL: 'https://mock-thinking.test/v1',
+          apiKey: 'test-key',
+        });
+
+        await provider.chat({
+          model: 'test',
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { enabled: false },
+        });
+
+        expect(capturedBody.enable_thinking).toBe(false);
+        expect(capturedBody.thinking_budget).toBeUndefined();
+      });
+
+      it('should send enable_thinking: true and thinking_budget when thinking is enabled', async () => {
+        let capturedBody: any = null;
+
+        mockFetch(async (_input, init) => {
+          capturedBody = JSON.parse(init?.body as string);
+          return makeChatCompletion({ content: 'ok' });
+        });
+        const provider = createOpenAICompatProvider({
+          baseURL: 'https://mock-thinking.test/v1',
+          apiKey: 'test-key',
+        });
+
+        await provider.chat({
+          model: 'test',
+          messages: [{ role: 'user', content: 'hi' }],
+          thinking: { enabled: true, budget_tokens: 4096 },
+        });
+
+        expect(capturedBody.enable_thinking).toBe(true);
+        expect(capturedBody.thinking_budget).toBe(4096);
+      });
+    });
   });
 });

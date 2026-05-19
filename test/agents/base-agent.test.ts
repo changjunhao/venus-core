@@ -165,4 +165,94 @@ describe('BaseAgent', () => {
       await expect(agent.call('system', 'user', IMAGE_URL, testSchema)).rejects.toThrow(SchemaError);
     });
   });
+
+  // ── thinking 参数传递（验证 enable_thinking 显式发送至 provider）──
+  describe('Thinking parameter passing', () => {
+    it('should pass thinking: { enabled: false } to provider when thinking is disabled', async () => {
+      let capturedParams: Parameters<LLMProvider['chat']>[0] | null = null;
+      const spyProvider = defineProvider({
+        name: 'spy',
+        supportsVision: true,
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, thinking: null };
+        },
+      });
+      const agent = new BaseAgent('test', spyProvider, { model: 'test', enableThinking: false });
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(capturedParams).not.toBeNull();
+      expect(capturedParams!.thinking).toEqual({ enabled: false });
+    });
+
+    it('should pass thinking with budget when enabled', async () => {
+      let capturedParams: Parameters<LLMProvider['chat']>[0] | null = null;
+      const spyProvider = defineProvider({
+        name: 'spy',
+        supportsVision: true,
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, thinking: null };
+        },
+      });
+      const agent = new BaseAgent('test', spyProvider, {
+        model: 'test',
+        enableThinking: true,
+        thinkingBudget: 4096,
+      });
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(capturedParams!.thinking).toEqual({ enabled: true, budget_tokens: 4096 });
+    });
+
+    it('should use callConfig override over agent config for thinking', async () => {
+      let capturedParams: Parameters<LLMProvider['chat']>[0] | null = null;
+      const spyProvider = defineProvider({
+        name: 'spy',
+        supportsVision: true,
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, thinking: null };
+        },
+      });
+      // Agent-level thinking disabled, callConfig enables it
+      const agent = new BaseAgent('test', spyProvider, { model: 'test', enableThinking: false });
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema, {
+        enableThinking: true,
+        thinkingBudget: 2048,
+      });
+
+      expect(capturedParams!.thinking).toEqual({ enabled: true, budget_tokens: 2048 });
+    });
+
+    it('should pass thinking: { enabled: false } in callStream when thinking disabled', async () => {
+      let capturedParams: Parameters<NonNullable<LLMProvider['chatStream']>>[0] | null = null;
+      const spyProvider = defineProvider({
+        name: 'spy-stream',
+        supportsVision: true,
+        chatStream: async function* (params) {
+          capturedParams = params;
+          yield { content: VALID_JSON };
+        },
+        chat: async (params) => {
+          return { content: VALID_JSON, thinking: null };
+        },
+      });
+      const agent = new BaseAgent('test', spyProvider, { model: 'test', enableThinking: false });
+
+      // consume generator; params captured on first call
+      try {
+        for await (const _ of agent.callStream('system', 'user', IMAGE_URL, testSchema)) {
+          /* drain */
+        }
+      } catch {
+        /* retry exhaustion is expected for empty stream; params already captured */
+      }
+
+      expect(capturedParams!.thinking).toEqual({ enabled: false });
+    });
+  });
 });
