@@ -14,6 +14,7 @@ import type { OpenAICompatOptions } from './types.js';
 import { ProviderError } from '../utils/errors.js';
 import type { ProviderErrorCode } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
+import { defineProvider } from './factory.js';
 
 export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMProvider {
   const client = new OpenAI({
@@ -51,7 +52,7 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
     return body;
   }
 
-  const provider: LLMProvider = {
+  const provider = defineProvider({
     name: `openai-compat(${options.baseURL})`,
     supportsVision: true,
     supportsThinking: true,
@@ -174,7 +175,7 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
         throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
       }
     },
-  };
+  });
 
   return provider;
 }
