@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-19
+
+### Fixed
+
+- `BaseAgent.call()` and `callStream()` now always pass an explicit `{ enabled: boolean }`
+  thinking object to the provider, instead of conditionally omitting the `thinking`
+  parameter when disabled. This ensures `enable_thinking: false` is sent to the API,
+  preventing Qwen3-series models from silently defaulting to thinking mode despite the
+  engine configuration explicitly disabling it.
+
+### Changed
+
+- `createOpenAICompatProvider` internal implementation now uses the `defineProvider`
+  factory instead of a manual object literal, aligning with the public provider API.
+
 ## [0.2.0] - 2026-05-17
 
 ### Added
