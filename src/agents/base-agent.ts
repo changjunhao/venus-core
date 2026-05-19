@@ -111,7 +111,7 @@ export class BaseAgent {
           messages: requestMessages,
           temperature: 0.3,
           response_format: { type: 'json_object' },
-          thinking: enableThinking ? { enabled: true, budget_tokens: thinkingBudget ?? undefined } : undefined,
+          thinking: { enabled: enableThinking, budget_tokens: enableThinking ? (thinkingBudget ?? undefined) : undefined },
         });
 
         thinking = response.thinking ?? null;
@@ -184,7 +184,7 @@ export class BaseAgent {
         messages: requestMessages,
         temperature: 0.3,
         response_format: { type: 'json_object' },
-        thinking: enableThinking ? { enabled: true, budget_tokens: thinkingBudget ?? undefined } : undefined,
+        thinking: { enabled: enableThinking, budget_tokens: enableThinking ? (thinkingBudget ?? undefined) : undefined },
       })) {
         if (chunk.thinking) thinking += chunk.thinking;
         if (chunk.content) finalContent += chunk.content;
