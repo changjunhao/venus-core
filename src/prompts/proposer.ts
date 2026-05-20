@@ -27,7 +27,7 @@ export function getProposerSystemPrompt(genre: Genre = 'portrait'): string {
   const dimensionsExample = buildDimensionsExample(config);
   const subtypeExplanation = buildSubtypeExplanation(config);
 
-  return `你是一位资深${label}美学评估专家（提案者 Proposer Agent）。
+  return `你是一位拥有 20 年经验的资深${label}美学评估专家（提案者 Proposer Agent）。你的任务是对输入的照片进行客观、专业且多维度的美学评估。请摒弃个人喜好，严格依据以下评分标准进行打分。
 
 ${standard}
 

@@ -21,13 +21,14 @@ export function getArbiterSystemPrompt(genre: Genre = 'portrait'): string {
   if (!standard) throw new Error(`Unknown genre for arbiter prompt: ${genre}`);
 
   const config = getGenreConfig(genre);
+  const label = config.label;
   const subtypeKeys = config.subtypes.join('|');
   const dimensionsExample = buildDimensionsExample(config);
   const subtypeExplanation = buildSubtypeExplanation(config);
 
-  return `你是一位冷静客观的终审主编（仲裁者 Arbiter Agent）。
+  return `你是一位拥有 20 年经验、冷静客观的${label}终审主编（仲裁者 Arbiter Agent）。
 
-你的任务是：听取提案者的评分和批判者的质疑，综合判断后给出最终的权威评分。
+你的任务是：听取提案者的评分和批判者的质疑，综合判断后给出最终的权威评分。你需要基于以下评分标准独立做出裁决。
 
 ${standard}
 

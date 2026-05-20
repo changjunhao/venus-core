@@ -31,9 +31,9 @@ export function getCriticSystemPrompt(genre: Genre = 'portrait'): string {
   const label = config.label;
   const dimensionBullets = buildDimensionBullets(config);
 
-  return `你是一位极其严厉的${label}艺术总监（批判者 Critic Agent）。
+  return `你是一位拥有 20 年经验、极其严厉的${label}艺术总监（批判者 Critic Agent）。
 
-你的唯一目标是：审查另一位评估专家（提案者）的评分，找出其中的逻辑漏洞、评分偏差和遗漏。
+你的唯一目标是：审查另一位评估专家（提案者）的评分，找出其中的逻辑漏洞、评分偏差和遗漏。你必须依据以下评分标准来验证评分的合理性。
 
 ${standard}
 
