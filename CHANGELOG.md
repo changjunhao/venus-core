@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-05-20
+
+### Added
+
+- **Language constraint for thinking mode**: All three agent system prompts (Proposer,
+  Critic, Arbiter) now include explicit Chinese language requirements for the thinking
+  process, preventing Qwen3-series models from occasionally switching to English during
+  internal reasoning. The constraint specifically preserves English JSON keys and enum values.
+- **Efficiency principle for Critic**: Added guidance to avoid overthinking when the
+  Proposer's evaluation is already reasonable — output `LOW` severity promptly instead
+  of forcing nonexistent issues.
+- **Efficiency principle for Arbiter**: Added a rule to quickly confirm final scores when
+  Critic severity is `LOW` (consensus scenario), avoiding redundant deliberation.
+- **Dynamic LOW-severity hint in Arbiter user prompt**: When `critiqueResult.severity`
+  is `'LOW'`, a contextual paragraph is injected advising the Arbiter to make a swift
+  decision based on consensus.
+
 ## [0.3.1] - 2026-05-20
 
 ### Changed
