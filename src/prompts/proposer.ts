@@ -55,7 +55,10 @@ ${dimensionsExample}
 }
 
 scene_type 取值说明：
-${subtypeExplanation}`;
+${subtypeExplanation}
+
+## 语言要求
+你的思考过程和所有自然语言文本（包括 critique、suggestions 等字段的内容）必须全程使用中文。JSON 的键名和枚举值请严格遵循上述输出格式中的定义。`;
 }
 
 export function getProposerUserPrompt(genre: Genre = 'portrait', context?: EvaluationContext): string {

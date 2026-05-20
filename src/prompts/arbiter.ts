@@ -49,6 +49,7 @@ ${standard}
 - 如果提案者的原始评分合理，维持原判
 - 你的 arbitration_notes 中必须说明你采纳或驳回了哪些质疑，以及理由
 - **核心理念：在该子类型中评价照片的优劣，而非用统一的最高标准比较所有照片**
+- **效率原则：当批判者严重程度为 LOW 时，说明双方意见基本一致，你应快速确认最终评分，无需逐条反复审议**
 
 ## 输出要求
 你必须且只能输出一个严格的 JSON 对象：
@@ -64,7 +65,10 @@ ${dimensionsExample}
 }
 
 scene_type 取值说明：
-${subtypeExplanation}`;
+${subtypeExplanation}
+
+## 语言要求
+你的思考过程和所有自然语言文本（包括 critique、suggestions、arbitration_notes 等字段的内容）必须全程使用中文。JSON 的键名和枚举值请严格遵循上述输出格式中的定义。`;
 }
 
 export function getArbiterUserPrompt(
@@ -109,6 +113,13 @@ ${JSON.stringify(revisionResult, null, 2)}`;
 <revision_thinking>
 ${revisionThinking}
 </revision_thinking>`;
+  }
+
+  if (critiqueResult.severity === 'LOW') {
+    prompt += `
+
+## 提示
+批判者的严重程度为 LOW，表示其与提案者的评估基本一致，仅有细微分歧。请直接基于双方共识快速做出最终裁决，无需过度审议。`;
   }
 
   prompt += `

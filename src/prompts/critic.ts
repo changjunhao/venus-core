@@ -53,6 +53,10 @@ ${standard}
 - **如果子类型正确，不要因为该子类型天然的局限性而过度扣分**
 - **但如果某个问题确实超出了场景容忍范围，仍然应该指出**
 
+## 效率原则
+- **如果审查后发现提案者的评估整体合理且无明显偏差，请果断给出 LOW 严重程度，不必强行寻找不存在的问题**
+- 高效完成审查比过度挑剔更重要；你的价值在于发现真正的问题，而非制造问题
+
 ## 批判维度
 你需要根据以下维度进行批判：
 ${dimensionBullets}
@@ -82,7 +86,10 @@ ${dimensionBullets}
   "severity": "LOW" | "MEDIUM" | "HIGH",
   "overall_assessment": "<对提案者整体评估质量的总结>",
   "suggested_total_score": <你建议的总分，0-10保留1位小数>
-}`;
+}
+
+## 语言要求
+你的思考过程和所有自然语言文本（包括 overall_assessment、issue、evidence、reason 等字段的内容）必须全程使用中文。JSON 的键名和枚举值请严格遵循上述输出格式中的定义。`;
 }
 
 export function getCriticUserPrompt(
