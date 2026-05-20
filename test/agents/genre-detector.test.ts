@@ -5,7 +5,7 @@ import { describe, it, expect } from 'bun:test';
 import { GenreDetectorAgent } from '../../src/agents/genre-detector.js';
 import { defineProvider } from '../../src/providers/index.js';
 import { createMockProvider } from '../helpers/mock-provider.js';
-import type { Genre } from '../../src/types.js';
+import type { Genre, StreamChunk } from '../../src/types.js';
 
 // ── Helpers ──
 
@@ -130,6 +130,112 @@ describe('GenreDetectorAgent', () => {
 
       await agent.detect(IMAGE_URL);
       expect(capturedModel).toBe('genre-detector-model');
+    });
+  });
+
+  describe('detectStream()', () => {
+    /** Helper: create a provider with chatStream support */
+    function createStreamingProvider(chunks: StreamChunk[], opts?: { name?: string }) {
+      return defineProvider({
+        name: opts?.name ?? 'streaming-mock-provider',
+        supportsVision: true,
+        supportsThinking: true,
+        chat: async () => {
+          // Fallback: assemble content from chunks
+          const content = chunks.map((c) => c.content ?? '').join('');
+          const thinking = chunks.map((c) => c.thinking ?? '').join('') || null;
+          return { content, thinking };
+        },
+        chatStream: async function* (_params) {
+          for (const chunk of chunks) {
+            yield chunk;
+          }
+        },
+      });
+    }
+
+    it('should return an AsyncGenerator that can be iterated', async () => {
+      const json = makeGenreDetectionJSON('portrait', 0.95);
+      const provider = createStreamingProvider([{ content: json }]);
+      const agent = new GenreDetectorAgent(provider, { model: 'test-model' });
+
+      const gen = agent.detectStream(IMAGE_URL);
+
+      // Should be an async generator (has next method)
+      expect(typeof gen.next).toBe('function');
+      expect(typeof gen.return).toBe('function');
+      expect(typeof gen.throw).toBe('function');
+
+      // Iterate to completion
+      const chunks: StreamChunk[] = [];
+      let result: Awaited<ReturnType<typeof gen.next>>;
+      do {
+        result = await gen.next();
+        if (!result.done && result.value) {
+          chunks.push(result.value);
+        }
+      } while (!result.done);
+
+      // Final return value should contain the parsed result
+      expect(result.value.result.genre).toBe('portrait');
+      expect(result.value.result.confidence).toBe(0.95);
+    });
+
+    it('should yield thinking chunks during streaming', async () => {
+      const json = makeGenreDetectionJSON('landscape', 0.88);
+      const provider = createStreamingProvider([
+        { thinking: 'Analyzing composition...' },
+        { thinking: ' Checking horizon line...' },
+        { content: json },
+      ]);
+      const agent = new GenreDetectorAgent(provider, { model: 'test-model' });
+
+      const chunks: StreamChunk[] = [];
+      const gen = agent.detectStream(IMAGE_URL);
+
+      let iterResult = await gen.next();
+      while (!iterResult.done) {
+        chunks.push(iterResult.value);
+        iterResult = await gen.next();
+      }
+      const finalResult = iterResult.value;
+
+      // Verify thinking chunks were yielded
+      const thinkingChunks = chunks.filter((c) => c.thinking);
+      expect(thinkingChunks.length).toBe(2);
+      expect(thinkingChunks[0]!.thinking).toBe('Analyzing composition...');
+      expect(thinkingChunks[1]!.thinking).toBe(' Checking horizon line...');
+
+      // Final result should contain combined thinking
+      expect(finalResult.thinking).toBe('Analyzing composition... Checking horizon line...');
+    });
+
+    it('should produce correct genre and confidence in final stream result', async () => {
+      makeGenreDetectionJSON('fine_art', 0.91);
+      const provider = createStreamingProvider([
+        { thinking: 'Evaluating artistic style...' },
+        { content: '{"genre"' },
+        { content: ':"fine_art","confidence":0.91}' },
+      ]);
+      const agent = new GenreDetectorAgent(provider, { model: 'test-model' });
+
+      const chunks: StreamChunk[] = [];
+      const gen = agent.detectStream(IMAGE_URL);
+
+      let iterResult = await gen.next();
+      while (!iterResult.done) {
+        chunks.push(iterResult.value);
+        iterResult = await gen.next();
+      }
+
+      const finalResult = iterResult.value;
+      expect(finalResult.result.genre).toBe('fine_art');
+      expect(finalResult.result.confidence).toBe(0.91);
+      expect(finalResult.thinking).toBe('Evaluating artistic style...');
+
+      // Verify content chunks were also yielded
+      const contentChunks = chunks.filter((c) => c.content);
+      expect(contentChunks.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

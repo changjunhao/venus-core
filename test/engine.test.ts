@@ -2,8 +2,9 @@ import { describe, it, expect } from 'bun:test';
 import { createVenusEngine } from '../src/engine.js';
 import { defineProvider } from '../src/providers/index.js';
 import { createMockEngine } from './helpers/mock-engine.js';
-import type { EvaluationStreamEvent, EvaluationEvent } from '../src/types.js';
+import type { EvaluationStreamEvent, EvaluationEvent, EvaluationContext } from '../src/types.js';
 import { PORTRAIT_DIMS, makeDimensions } from './helpers/mock-data.js';
+import { createMockProvider } from './helpers/mock-provider.js';
 
 // ── Mock Response Builders ──
 function makeProposalJSON(opts: { severity?: string; score?: number } = {}) {
@@ -77,20 +78,62 @@ describe('Engine Layer', () => {
       expect(result.genre).toBe('portrait');
       expect(result.sceneType).toBe('studio');
       expect(result.totalScore).toBe(7.2);
-      expect(result.dimensions).toBeDefined();
-      expect(Object.keys(result.dimensions)).toHaveLength(5);
-      expect(result.critique).toBeTruthy();
-      expect(result.suggestions).toBeTruthy();
-      expect(result.arbitrationNotes).toBeTruthy();
+      expect(result.dimensions).toEqual(makeDimensions(PORTRAIT_DIMS, 7.2));
+      expect(result.critique).toBe('Well-executed studio portrait with good technical quality.');
+      expect(result.suggestions).toBe('Work on capturing more natural expressions in future shoots.');
+      expect(result.arbitrationNotes).toBe(
+        'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+      );
       expect(result.metadata.rounds).toBe(3);
       expect(result.metadata.durationMs).toBeGreaterThanOrEqual(0);
       expect(result.metadata.evaluatedAt).toBeTruthy();
 
-      // Process should have no revision
-      expect(result.process.proposal).toBeDefined();
-      expect(result.process.critique).toBeDefined();
+      // Process should contain exact agent outputs
+      expect(result.process.proposal).toEqual({
+        result: {
+          scene_type: 'studio',
+          total_score: 7.5,
+          dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
+          critique: 'Good portrait with nice lighting and composition.',
+          suggestions: 'Consider adjusting the background for better contrast.',
+        },
+        thinking: 'Proposer thinking...',
+      });
+      expect(result.process.critique).toEqual({
+        result: {
+          scene_type_review: {
+            proposer_scene: 'studio',
+            is_correct: true,
+            correct_scene: null,
+            reason: 'Correct classification as studio portrait.',
+          },
+          challenges: [
+            {
+              dimension: 'facial_expression',
+              issue: 'Expression could be more natural.',
+              evidence: 'Slight tension visible in jaw area.',
+              suggested_score: 6.5,
+            },
+          ],
+          severity: 'MEDIUM',
+          overall_assessment: 'Generally solid evaluation with minor adjustments needed.',
+          suggested_total_score: 7.0,
+        },
+        thinking: 'Critic thinking...',
+      });
       expect(result.process.revision).toBeUndefined();
-      expect(result.process.arbitration).toBeDefined();
+      expect(result.process.arbitration).toEqual({
+        result: {
+          scene_type: 'studio',
+          total_score: 7.2,
+          dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
+          critique: 'Well-executed studio portrait with good technical quality.',
+          suggestions: 'Work on capturing more natural expressions in future shoots.',
+          arbitration_notes:
+            'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+        },
+        thinking: 'Arbiter thinking...',
+      });
     });
 
     it('should complete with 3 rounds when severity is LOW', async () => {
@@ -122,9 +165,16 @@ describe('Engine Layer', () => {
       const result = await engine.evaluate(TEST_IMAGE, 'portrait');
 
       expect(result.metadata.rounds).toBe(4);
-      expect(result.process.revision).toBeDefined();
-      expect(result.process.revision!.result.total_score).toBe(7.0);
-      expect(result.process.revision!.thinking).toBe('Revised after critique...');
+      expect(result.process.revision).toEqual({
+        result: {
+          scene_type: 'studio',
+          total_score: 7.0,
+          dimensions: makeDimensions(PORTRAIT_DIMS, 7.0),
+          critique: 'Revised assessment accounting for expression concerns.',
+          suggestions: 'Focus on coaching subjects for more relaxed expressions.',
+        },
+        thinking: 'Revised after critique...',
+      });
     });
   });
 
@@ -244,9 +294,30 @@ describe('Engine Layer', () => {
         expect(result.totalScore).toBe(7.2);
         expect(result.sceneType).toBe('studio');
         expect(result.metadata.rounds).toBe(3);
-        expect(result.process.proposal).toBeDefined();
-        expect(result.process.critique).toBeDefined();
-        expect(result.process.arbitration).toBeDefined();
+        expect(result.process.proposal).toEqual({
+          result: {
+            scene_type: 'studio',
+            total_score: 7.5,
+            dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
+            critique: 'Good portrait with nice lighting and composition.',
+            suggestions: 'Consider adjusting the background for better contrast.',
+          },
+          thinking: null,
+        });
+        expect(result.process.critique.result.severity).toBe('LOW');
+        expect(result.process.critique.thinking).toBeNull();
+        expect(result.process.arbitration).toEqual({
+          result: {
+            scene_type: 'studio',
+            total_score: 7.2,
+            dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
+            critique: 'Well-executed studio portrait with good technical quality.',
+            suggestions: 'Work on capturing more natural expressions in future shoots.',
+            arbitration_notes:
+              'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+          },
+          thinking: null,
+        });
       }
     });
   });
@@ -301,9 +372,109 @@ describe('Engine Layer', () => {
 
       const errorEvent = events.find((e) => e.type === 'error');
       expect(errorEvent).toBeDefined();
+      expect(errorEvent!.type).toBe('error');
       if (errorEvent && errorEvent.type === 'error') {
-        expect(errorEvent.error.message).toBeTruthy();
+        expect(errorEvent.error.message).toContain('Stream provider failed');
       }
+    });
+  });
+
+  // ── #buildGenreDetector() — 间接测试通过 genre auto-detection ──
+  describe('Genre detection integration (indirect #buildGenreDetector)', () => {
+    it('should auto-detect genre when genre is not provided and genreDetector provider is configured', async () => {
+      const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.92 });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          genreDetector: createMockProvider([{ content: genreDetectionJSON, thinking: 'Detected portrait scene' }]),
+          proposer: createMockProvider([{ content: makeProposalJSON() }]),
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+      });
+
+      // Call evaluate without genre → triggers #buildGenreDetector() + #detectGenre()
+      const result = await engine.evaluate(TEST_IMAGE);
+
+      expect(result.genre).toBe('portrait');
+      expect(result.process.genreDetection).toEqual({
+        result: { genre: 'portrait', confidence: 0.92 },
+        thinking: 'Detected portrait scene',
+      });
+    });
+  });
+
+  // ── #augmentContextWithGenreThinking() — 间接边界测试 ──
+  describe('Context augmentation with genre thinking (indirect #augmentContextWithGenreThinking)', () => {
+    it('should return original context when genreDetectionOut is undefined (genre provided manually)', async () => {
+      const context: EvaluationContext = { exif: { camera: 'Canon EOS R5' } };
+
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('LOW') }],
+        arbiterResponses: [{ content: makeArbiterJSON() }],
+      });
+
+      // Provide genre explicitly → no genre detection → genreDetectionOut is undefined
+      const result = await engine.evaluate(TEST_IMAGE, 'portrait', context);
+
+      // genreDetection should not exist in process (no auto-detection performed)
+      expect(result.process.genreDetection).toBeUndefined();
+      // Context passed through should not have genreDetectionThinking injected
+      if (result.metadata.context) {
+        expect(result.metadata.context.genreDetectionThinking).toBeUndefined();
+      }
+    });
+
+    it('should merge thinking into context when genre detection has thinking', async () => {
+      const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.95 });
+      const context: EvaluationContext = { exif: { camera: 'Sony A7III' } };
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          genreDetector: createMockProvider([{ content: genreDetectionJSON, thinking: 'Subject is centered, portrait orientation' }]),
+          proposer: createMockProvider([{ content: makeProposalJSON() }]),
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+      });
+
+      // Do not provide genre → auto-detection triggers → thinking should be merged into context
+      const result = await engine.evaluate(TEST_IMAGE, undefined, context);
+
+      expect(result.genre).toBe('portrait');
+      expect(result.process.genreDetection).toEqual({
+        result: { genre: 'portrait', confidence: 0.95 },
+        thinking: 'Subject is centered, portrait orientation',
+      });
+    });
+
+    it('should create new context when context is undefined but thinking exists', async () => {
+      const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.87 });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          genreDetector: createMockProvider([{ content: genreDetectionJSON, thinking: 'Natural elements detected' }]),
+          proposer: createMockProvider([{ content: makeProposalJSON() }]),
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+      });
+
+      // No context provided, no genre provided → auto-detection + context creation from thinking
+      const result = await engine.evaluate(TEST_IMAGE);
+
+      expect(result.genre).toBe('portrait');
+      expect(result.process.genreDetection).toEqual({
+        result: { genre: 'portrait', confidence: 0.87 },
+        thinking: 'Natural elements detected',
+      });
     });
   });
 });

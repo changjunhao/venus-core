@@ -237,7 +237,7 @@ describe('BaseAgent', () => {
           capturedParams = params;
           yield { content: VALID_JSON };
         },
-        chat: async (params) => {
+        chat: async () => {
           return { content: VALID_JSON, thinking: null };
         },
       });

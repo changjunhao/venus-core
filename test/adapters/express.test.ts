@@ -5,25 +5,7 @@ import { VenusError, ValidationError } from '../../src/utils/errors.js';
 import { getMetadata } from '../../src/schema/index.js';
 import type { VenusEngine } from '../../src/engine.js';
 import type { Server } from 'node:http';
-import { MOCK_EVALUATION_RESULT, MOCK_STREAM_EVENTS } from '../helpers/mock-data.js';
-
-// ── Mock Engine Factory ────────────────────────────────
-
-function createMockEngine(overrides?: {
-  evaluate?: VenusEngine['evaluate'];
-  evaluateStream?: VenusEngine['evaluateStream'];
-}): VenusEngine {
-  return {
-    evaluate: overrides?.evaluate ?? (async () => MOCK_EVALUATION_RESULT),
-    evaluateStream:
-      overrides?.evaluateStream ??
-      async function* () {
-        for (const event of MOCK_STREAM_EVENTS) {
-          yield event;
-        }
-      },
-  } as unknown as VenusEngine;
-}
+import { createMockEngine, MOCK_STREAM_EVENTS } from '../helpers/mock-adapter-engine.js';
 
 // ── Helper: start Express on random port ───────────────
 
@@ -227,6 +209,173 @@ describe('Express Adapter', () => {
       const lastEvent = JSON.parse(lines[lines.length - 1]!.replace('data: ', ''));
       expect(lastEvent.type).toBe('error');
       expect(lastEvent.error.message).toBe('Stream exploded');
+    });
+  });
+
+  // ── POST /evaluate/stream/jsonl — JSON Lines ──
+  describe('POST /evaluate/stream/jsonl', () => {
+    it('should return JSONL formatted response with correct headers', async () => {
+      const baseUrl = await setup();
+
+      const res = await fetch(`${baseUrl}/evaluate/stream/jsonl`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg', genre: 'portrait' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('application/x-ndjson');
+      expect(res.headers.get('cache-control')).toBe('no-cache');
+      expect(res.headers.get('x-accel-buffering')).toBe('no');
+
+      const text = await res.text();
+      // Each event terminated by \n; trailing \n produces empty last segment
+      const segments = text.split('\n');
+      const lines = segments.filter((l) => l.length > 0);
+
+      expect(lines.length).toBe(MOCK_STREAM_EVENTS.length);
+
+      // Verify JSONL format: each line is valid JSON, separated by \n
+      for (const line of lines) {
+        const parsed = JSON.parse(line);
+        expect(parsed.type).toBeTruthy();
+        expect(parsed.timestamp).toBeDefined();
+      }
+
+      // Verify the event sequence matches the mock
+      const types = lines.map((l) => JSON.parse(l).type);
+      expect(types).toEqual(MOCK_STREAM_EVENTS.map((e) => e.type));
+    });
+
+    it('should return 400 for invalid request', async () => {
+      const baseUrl = await setup();
+
+      const res = await fetch(`${baseUrl}/evaluate/stream/jsonl`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'not-a-url' }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should write formatted error chunk when engine stream throws', async () => {
+      const engine = createMockEngine({
+        evaluateStream: async function* () {
+          yield {
+            type: 'evaluation_start' as const,
+            data: { imageUrl: 'https://example.com/photo.jpg', genre: 'portrait' as const },
+            timestamp: Date.now(),
+          };
+          throw new Error('JSONL stream exploded');
+        },
+      });
+      const baseUrl = await setup(engine);
+
+      const res = await fetch(`${baseUrl}/evaluate/stream/jsonl`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg', genre: 'portrait' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('application/x-ndjson');
+
+      const text = await res.text();
+      const lines = text.split('\n').filter((l) => l.length > 0);
+
+      // Last line should be the error chunk
+      const lastEvent = JSON.parse(lines[lines.length - 1]!);
+      expect(lastEvent.type).toBe('error');
+      expect(lastEvent.error.message).toBe('JSONL stream exploded');
+      expect(lastEvent.timestamp).toBeDefined();
+
+      // All lines should still be valid JSON terminated by \n
+      for (const line of lines) {
+        expect(() => JSON.parse(line)).not.toThrow();
+      }
+    });
+  });
+
+  // ── Outer try/catch → next(error) path (express.ts line 81 / 112) ──
+  describe('next(error) error middleware path', () => {
+    /**
+     * Start a server with a middleware that overrides req.body to throw on access,
+     * which causes resolveStreamParams() to throw inside the outer try block,
+     * triggering next(error) and the error middleware.
+     */
+    function startServerWithBrokenBody(engine: VenusEngine): Promise<{ baseUrl: string; server: Server }> {
+      return new Promise((resolve) => {
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+          Object.defineProperty(req, 'body', {
+            configurable: true,
+            get() {
+              throw new Error('req.body access failed');
+            },
+          });
+          next();
+        });
+        app.use('/', createExpressAdapter(engine));
+        const server = app.listen(0, () => {
+          const addr = server.address();
+          const port = typeof addr === 'object' && addr ? addr.port : 0;
+          resolve({ baseUrl: `http://127.0.0.1:${port}`, server });
+        });
+      });
+    }
+
+    async function setupBroken(engine?: VenusEngine) {
+      const { baseUrl, server } = await startServerWithBrokenBody(engine ?? createMockEngine());
+      servers.push(server);
+      return baseUrl;
+    }
+
+    it('should route SSE handler errors through next(error) → error middleware (line 81)', async () => {
+      const baseUrl = await setupBroken();
+
+      const res = await fetch(`${baseUrl}/evaluate/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as any;
+      expect(body.error.code).toBe('INTERNAL_ERROR');
+      expect(body.error.message).toBe('req.body access failed');
+    });
+
+    it('should route JSONL handler errors through next(error) → error middleware', async () => {
+      const baseUrl = await setupBroken();
+
+      const res = await fetch(`${baseUrl}/evaluate/stream/jsonl`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as any;
+      expect(body.error.code).toBe('INTERNAL_ERROR');
+      expect(body.error.message).toBe('req.body access failed');
+    });
+
+    it('should route /evaluate handler errors through next(error)', async () => {
+      const baseUrl = await setupBroken();
+
+      const res = await fetch(`${baseUrl}/evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as any;
+      expect(body.error.code).toBe('INTERNAL_ERROR');
     });
   });
 

@@ -53,6 +53,7 @@
     "build:types": "tsc -p tsconfig.build.json && cp dist/index.d.ts dist/index.d.cts && cp dist/adapters/hono.d.ts dist/adapters/hono.d.cts && cp dist/adapters/express.d.ts dist/adapters/express.d.cts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:integration": "RUN_INTEGRATION=1 bun test test/integration/",
     "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'",

@@ -118,20 +118,6 @@ describe('Provider Layer', () => {
     });
   });
 
-  // ── defaultExtra merge via defineProvider mock ──
-  describe('defaultExtra merge logic', () => {
-    it('should demonstrate per-call extra overrides defaultExtra', async () => {
-      // Simulate what openai-compat does with defaultExtra merge
-      // by testing the pattern directly
-      const defaultExtra = { top_p: 0.9, custom_param: 'default' };
-      const callExtra = { custom_param: 'override' };
-      const merged = { ...defaultExtra, ...callExtra };
-
-      expect(merged.top_p).toBe(0.9);
-      expect(merged.custom_param).toBe('override');
-    });
-  });
-
   // ── CoT (Chain-of-Thought) extraction from different vendors ──
   describe('CoT extraction — reasoning_content vs thinking', () => {
     afterEach(() => restoreFetch());

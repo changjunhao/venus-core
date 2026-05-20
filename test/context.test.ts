@@ -373,6 +373,117 @@ describe('Context Extension — context-formatter', () => {
       // Light level uses summary format, not full list
       expect(result).not.toContain('重要参考');
     });
+
+    it('commercial genre should use light injection level', () => {
+      const result = formatContextForProposer({ exif }, 'commercial');
+
+      expect(result).toContain('参考技术参数');
+      expect(result).not.toContain('重要参考');
+      expect(result).not.toContain('技术参数参考');
+    });
+
+    it('documentary genre should use light injection level', () => {
+      const result = formatContextForProposer({ exif }, 'documentary');
+
+      expect(result).toContain('参考技术参数');
+      expect(result).not.toContain('重要参考');
+    });
+
+    it('landscape genre should use standard injection level', () => {
+      const result = formatContextForProposer({ exif }, 'landscape');
+
+      expect(result).toContain('技术参数参考');
+      expect(result).not.toContain('重要参考');
+      expect(result).not.toContain('仅供参考');
+    });
+
+    it('unknown genre should fall back to standard injection level (default branch)', () => {
+      // Cast to any to exercise the default branch in getExifInjectionLevel
+      const result = formatContextForProposer({ exif }, 'unknown_genre' as any);
+
+      expect(result).toContain('技术参数参考');
+      expect(result).not.toContain('重要参考');
+    });
+
+    it('fine_art minimal mode should produce the full expected output format', () => {
+      const minimalExif: ExifData = {
+        shutterSpeed: '1/125',
+        fNumber: 5.6,
+        iso: 200,
+        focalLength: 50,
+      };
+      const result = formatContextForProposer({ exif: minimalExif }, 'fine_art');
+
+      // Minimal block structure: disclaimer line + 参数 summary line + EXIF disclaimer
+      expect(result).toContain('以下技术参数仅供参考，请以艺术表达效果为最终判断依据。');
+      expect(result).toContain('参数：快门 1/125s、光圈 f/5.6、ISO 200、焦距 50mm');
+      expect(result).toContain('注意：EXIF 数据可能经后期修改，请以照片实际视觉效果为最终评判依据。');
+      // Minimal mode should NOT include the bullet list or "完整参数" header used by other modes
+      expect(result).not.toContain('完整参数');
+      expect(result).not.toContain('- 快门速度');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // formatCustomMetadata 边界条件（通过公共 API 间接测试）
+  // ─────────────────────────────────────────────────────────
+  describe('Custom Metadata Formatting', () => {
+    it('should return empty string when all custom values are null/undefined', () => {
+      const result = formatContextForProposer(
+        { custom: { a: null, b: undefined, c: null } },
+        'portrait',
+      );
+      expect(result).toBe('');
+    });
+
+    it('should return empty string for empty custom object', () => {
+      const result = formatContextForProposer({ custom: {} }, 'portrait');
+      expect(result).toBe('');
+    });
+
+    it('should JSON.stringify nested object values', () => {
+      const result = formatContextForProposer(
+        { custom: { meta: { tripName: '北疆', day: 3 } } },
+        'portrait',
+      );
+
+      expect(result).toContain('## 补充信息');
+      expect(result).toContain('- meta：');
+      expect(result).toContain('"tripName":"北疆"');
+      expect(result).toContain('"day":3');
+    });
+
+    it('should JSON.stringify array values (typeof object)', () => {
+      const result = formatContextForProposer(
+        { custom: { tags: ['portrait', 'studio'] } },
+        'portrait',
+      );
+
+      expect(result).toContain('- tags：["portrait","studio"]');
+    });
+
+    it('should filter out null/undefined entries while keeping valid ones', () => {
+      const result = formatContextForProposer(
+        {
+          custom: {
+            location: 'Tokyo',
+            event: null,
+            note: undefined,
+            count: 0,
+            isPublic: false,
+          },
+        },
+        'portrait',
+      );
+
+      expect(result).toContain('## 补充信息');
+      expect(result).toContain('- location：Tokyo');
+      // 0 and false should be preserved (only null/undefined are filtered)
+      expect(result).toContain('- count：0');
+      expect(result).toContain('- isPublic：false');
+      expect(result).not.toContain('- event');
+      expect(result).not.toContain('- note');
+    });
   });
 });
 
