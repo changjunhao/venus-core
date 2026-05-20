@@ -1,6 +1,6 @@
 {
   "name": "@theogony/venus-core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Venus AI Photography Evaluation Engine - Framework-agnostic, runtime-agnostic TypeScript SDK",
   "license": "Apache-2.0",

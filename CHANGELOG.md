@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-20
+
+### Changed
+
+- **Prompt architecture refactor**: Decoupled role definitions between Standards layer
+  and Agent Prompt layer to eliminate conflicting identity instructions sent to the LLM.
+  - 8 scoring standard documents (`src/prompts/standards/*.ts`) no longer contain
+    first-person role definitions ("你是一位拥有20年经验的资深X摄影艺术总监...").
+    They are now pure evaluation reference documents with neutral domain descriptions.
+  - Agent prompt files (`proposer.ts`, `critic.ts`, `arbiter.ts`) are now the single
+    source of truth for each agent's identity, with enriched professional background
+    context (20-year expertise, task directives, objectivity constraints).
+  - `getArbiterSystemPrompt()` now uses genre-specific `label` in the role definition
+    for consistency with Proposer and Critic.
+
 ## [0.3.0] - 2026-05-19
 
 ### Fixed
