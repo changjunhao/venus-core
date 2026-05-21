@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-21
+
+### Changed
+
+- **BREAKING — Reasoning configuration system standardized across providers**:
+  Replaces the previous Qwen-flavored `ThinkingConfig` with an OpenAI-aligned
+  `ReasoningConfig` and a new provider-agnostic adapter layer.
+  - `ThinkingConfig` / `AgentThinkingConfig` → `ReasoningConfig` /
+    `AgentReasoningConfig`, exposing OpenAI-style `effort: 'minimal' | 'low' |
+    'medium' | 'high'` plus optional `budgetTokens` and per-agent `enabled`
+    overrides.
+  - `VenusEngineConfig.thinking` → `VenusEngineConfig.reasoning`. Per-agent
+    resolution is unified through `Engine#getReasoningConfig(role)` with a
+    three-level precedence: per-agent override → global → disabled.
+  - `BaseAgent.call()` / `callStream()` now take a single normalized
+    `reasoning` parameter and pass it straight through; provider-specific shape
+    translation has been moved out of the agent layer.
+- **BREAKING — Streaming event renamed**: `thinking_chunk` →
+  `reasoning_chunk` in `EvaluationStreamEvent` and across all SSE / JSON Lines
+  outputs. Adapter consumers must update their event-type matching.
+- **BREAKING — `ProviderCapabilities` shape**: `supportsVision` /
+  `supportsThinking` flags replaced by a structured `capabilities` object with
+  required fields `reasoning`, `reasoningBudget`, `vision`, `streaming`.
+  `defineProvider` and `createOpenAICompatProvider` updated accordingly.
+
+### Added
+
+- **`src/providers/reasoning-adapter.ts`**: provider-agnostic adapter that
+  converts the standardized `ReasoningConfig` into the native request shape for
+  OpenAI, Anthropic, Qwen, Kimi, DeepSeek, and Gemini, so callers no longer
+  need to know vendor-specific parameter names (`thinking`, `reasoning_effort`,
+  `enable_thinking`, `thinking_budget`, etc.).
+- README.md and README.zh-CN.md fully synchronized with the new reasoning API,
+  including updated configuration examples, supported providers table, and
+  streaming event reference.
+
+### Migration
+
+- Rename `thinking` → `reasoning` in `VenusEngineConfig` and per-agent
+  overrides; replace boolean `enabled` semantics with the new `effort` enum
+  when you want graded control (legacy `enabled: false` ≈ omitting reasoning).
+- Replace stream consumers' `event.type === 'thinking_chunk'` checks with
+  `'reasoning_chunk'`.
+- If you implemented a custom provider, migrate to the new `capabilities`
+  object on `defineProvider`.
+
 ## [0.3.2] - 2026-05-20
 
 ### Added
