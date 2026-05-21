@@ -39,12 +39,13 @@ graph LR
 - **多智能体对抗管线** — 提案者 → 批判者 → 修正 → 仲裁者，确保评分稳健、减少偏差
 - **8 大摄影门类** — 人像、风光、纪实、艺术、商业、建筑、自然、体育
 - **多模型路由** — 支持按智能体选择模型和自定义 LLM 提供商
+- **多提供商推理适配** — 自动适配 Qwen（通义千问）和 Kimi（月之暗面）的推理参数
 - **双模式评估 API** — `evaluate()` 同步返回结果，`evaluateStream()` 支持 SSE 流式输出
-- **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时思维链 + JSON 增量）
+- **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时推理 + JSON 增量）
 - **上下文扩展** — 丰富的 `EvaluationContext`，支持 EXIF 元数据、用户备注和自定义数据，按门类智能注入
 - **事件系统** — `onEvent` 回调实现对每个管线阶段的实时可观测性
 - **Web 框架适配器** — 一流的 Hono 和 Express 集成，共享 Zod 校验
-- **思维链支持** — 按智能体配置思考/推理预算，跨模型 CoT 提取
+- **推理链支持** — 按智能体配置推理 effort 级别和 token 预算，跨提供商自动适配
 - **动态 Zod Schema** — 按门类生成 Schema 并缓存，用于输入输出校验
 - **结构化错误** — 细粒度错误层级，含提供商级别错误码
 - **完整 TypeScript** — 所有公共 API 均有完整类型定义
@@ -130,11 +131,11 @@ interface EvaluationResult {
 | 事件类型 | 说明 |
 |------------|-------------|
 | `evaluation_start` | 评估已开始 |
-| `genre_detected` | 门类自动检测结果（含思维链） |
+| `genre_detected` | 门类自动检测结果（含推理） |
 | `agent_call` | 某个智能体轮次开始 |
-| `thinking_chunk` | 实时思维/推理文本（仅 `updates` 模式） |
+| `reasoning_chunk` | 实时推理文本（仅 `updates` 模式） |
 | `result_chunk` | 增量 JSON 片段（仅 `updates` 模式） |
-| `agent_complete` | 某个智能体轮次完成（含结果 + 思维链） |
+| `agent_complete` | 某个智能体轮次完成（含结果 + 推理） |
 | `evaluation_complete` | 最终结果就绪 |
 | `error` | 发生错误 |
 
@@ -151,7 +152,7 @@ interface EvaluationResult {
 | 模式 | 行为 |
 |------|----------|
 | `values` | 仅发送里程碑事件：`agent_call`、`agent_complete`、`evaluation_start`、`genre_detected`、`evaluation_complete`、`error` |
-| `updates` | 包含 `values` 全部事件，外加实时 `thinking_chunk` 和 `result_chunk` 事件用于增量 UI 更新 |
+| `updates` | 包含 `values` 全部事件，外加实时 `reasoning_chunk` 和 `result_chunk` 事件用于增量 UI 更新 |
 
 ### Schema 与门类工具
 
@@ -243,26 +244,46 @@ const provider = createOpenAICompatProvider({
 | 选项 | 类型 | 默认值 | 说明 |
 |--------|------|---------|-------------|
 | `name` | `string` | *必填* | 用于日志的提供商名称 |
-| `supportsVision` | `boolean` | `false` | 提供商是否支持图像输入 |
-| `supportsThinking` | `boolean` | `false` | 提供商是否支持思维链 |
+| `capabilities` | `ProviderCapabilities` | — | 提供商能力标志 |
 | `chat` | `(params: ChatParams) => Promise<ChatResponse>` | *必填* | 聊天补全实现 |
 | `chatStream` | `(params: ChatParams) => AsyncIterable<StreamChunk>` | — | 可选的流式实现 |
+
+`ProviderCapabilities`：
+
+```ts
+interface ProviderCapabilities {
+  reasoning: boolean;       // 支持推理/思维模式
+  reasoningBudget: boolean; // 支持显式 token 预算
+  vision: boolean;          // 支持图像输入
+  streaming: boolean;       // 支持流式
+}
+```
 
 ```ts
 import { createVenusEngine, defineProvider } from '@theogony/venus-core';
 
 const myProvider = defineProvider({
   name: 'my-llm',
-  supportsVision: true,
-  supportsThinking: false,
+  capabilities: {
+    vision: true,
+    reasoning: true,
+    reasoningBudget: true,
+  },
   async chat(params) {
     const res = await fetch('https://my-llm-api.com/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: params.model, messages: params.messages }),
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        reasoning: params.reasoning,  // 访问推理参数
+      }),
     });
     const data = await res.json();
-    return { content: data.text, thinking: null };
+    return {
+      content: data.text,
+      reasoning: data.reasoning_content ?? null,
+    };
   },
 });
 
@@ -314,6 +335,7 @@ try {
 
 ```ts
 import type {
+  // 核心类型
   Genre,
   GenreConfig,
   GenreMetadata,
@@ -325,21 +347,43 @@ import type {
   EvaluationStreamEvent,
   EvaluateStreamOptions,
   StreamMode,
+  
+  // 提供商类型
   LLMProvider,
+  ProviderCapabilities,
   ChatParams,
   ChatResponse,
   ChatMessage,
+  ChatContentPart,
   StreamChunk,
+  TokenUsage,
+  ReasoningEffort,
+  ReasoningConfig,
+  AgentReasoningConfig,
+  ChatReasoningParams,
+  OpenAICompatOptions,
+  DefineProviderOptions,
+  ProviderStyle,
+  
+  // 引擎和智能体类型
   VenusEngineConfig,
-  ProviderErrorCode,
   AgentRole,
   AgentConfig,
   AgentCallResult,
-  ProposerResult,
-  ArbitrationResult,
   ModelConfig,
   ProviderConfig,
-  ThinkingConfig,
+  
+  // 结果类型
+  ProposerResult,
+  ArbitrationResult,
+  CritiqueResult,
+  CritiqueChallenge,
+  SceneTypeReview,
+  
+  // 错误类型
+  ProviderErrorCode,
+  
+  // 适配器类型
   AdapterOptions,
   MetadataResponse,
 } from '@theogony/venus-core';
@@ -386,14 +430,14 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 
 #### `updates` 模式流式
 
-如需实时思维链和增量 JSON 片段，使用 `mode: 'updates'`：
+如需实时推理和增量 JSON 片段，使用 `mode: 'updates'`：
 
 ```ts
 for await (const event of engine.evaluateStream('https://example.com/photo.jpg', {
   mode: 'updates',
 })) {
   switch (event.type) {
-    case 'thinking_chunk':
+    case 'reasoning_chunk':
       // 实时流式输出智能体推理过程
       process.stdout.write(event.content);
       break;
@@ -451,7 +495,8 @@ app.listen(3000);
 | 方法 | 路径 | 说明 |
 |--------|------|-------------|
 | `POST` | `/evaluate` | 同步评估 |
-| `POST` | `/evaluate/stream` | 流式评估（SSE） |
+| `POST` | `/evaluate/stream` | 流式评估（SSE / `text/event-stream`） |
+| `POST` | `/evaluate/stream/jsonl` | 流式评估（JSON Lines / `application/x-ndjson`） |
 | `GET` | `/metadata` | 门类元数据和维度信息 |
 
 ### 上下文扩展
@@ -561,7 +606,7 @@ const engine = createVenusEngine({
 | `round_start` | `{ round, agent, data }` |
 | `round_complete` | `{ round }` |
 | `agent_call` | `{ round, agent }` |
-| `agent_complete` | `{ round, agent, data: { result, thinking } }` |
+| `agent_complete` | `{ round, agent, data: { result, reasoning } }` |
 | `error` | `{ agent, data: { error } }` |
 
 ---
@@ -592,22 +637,24 @@ const engine = createVenusEngine({
 | `defaultModel` | `string` | `'qwen3-vl-flash'` | 所有智能体的默认模型 |
 | `models` | `ModelConfig` | — | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`） |
 | `providers` | `ProviderConfig` | — | 按智能体自定义提供商实例 |
-| `thinking` | `ThinkingConfig` | — | 思维链配置，支持全局 `enabled` 和按智能体 `agents` 覆盖 |
+| `reasoning` | `ReasoningConfig` | — | 推理配置，支持全局 `effort`/`budgetTokens` 和按智能体 `agents` 覆盖 |
 | `maxRetries` | `number` | — | 每次智能体 LLM 调用的最大重试次数 |
 | `timeout` | `number` | — | 请求超时时间（毫秒） |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | 用于可观测性的事件回调 |
 
-### 思维链配置
+### 推理配置
 
 ```ts
-interface ThinkingConfig {
-  /** 全局默认值（默认 false）。可被按智能体覆盖 */
-  enabled?: boolean;
-  /** 按智能体覆盖配置 */
+interface ReasoningConfig {
+  /** 应用于所有智能体的默认推理 effort（设置时） */
+  effort?: 'low' | 'medium' | 'high';
+  /** 推理的默认 token 预算 */
+  budgetTokens?: number;
+  /** 按智能体覆盖；设置为 `false` 可禁用特定智能体的推理 */
   agents?: Partial<Record<AgentRole, {
-    enabled?: boolean;   // 覆盖全局 enabled
-    budget?: number;     // 思维链 token 预算
-  }>>;
+    effort: 'low' | 'medium' | 'high';  // 必填
+    budgetTokens?: number;
+  } | false>>;
 }
 ```
 
@@ -623,13 +670,14 @@ const engine = createVenusEngine({
     critic: 'qwen3-vl-flash',
     arbiter: 'qwen3-vl-flash',
   },
-  thinking: {
-    enabled: true,
+  reasoning: {
+    effort: 'medium',
+    budgetTokens: 4096,
     agents: {
-      proposer: { budget: 4096 },
-      critic: { budget: 4096 },
-      arbiter: { budget: 8192 },
-      genreDetector: { enabled: false },
+      proposer: { effort: 'medium', budgetTokens: 4096 },
+      critic: { effort: 'medium', budgetTokens: 4096 },
+      arbiter: { effort: 'high', budgetTokens: 8192 },
+      genreDetector: false,  // 禁用门类检测器的推理
     },
   },
   onEvent(event) {
@@ -637,6 +685,12 @@ const engine = createVenusEngine({
   },
 });
 ```
+
+引擎会自动将推理参数适配到不同的提供商 API：
+- **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
+- **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
+
+> **注意**：推理适配器也包含了 OpenAI、Anthropic、DeepSeek 和 Gemini API 的适配代码，但这些提供商尚未在 Venus 评估管线中使用视觉模型进行实际测试。DeepSeek 不支持视觉输入。
 
 ---
 

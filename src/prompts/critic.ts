@@ -95,7 +95,7 @@ ${dimensionBullets}
 export function getCriticUserPrompt(
   genre: Genre,
   proposalResult: ProposerResult,
-  proposerThinking: string | null,
+  proposerReasoning: string | null,
   context?: EvaluationContext,
 ): string {
   const config = getGenreConfig(genre);
@@ -105,13 +105,13 @@ export function getCriticUserPrompt(
 提案者评估结果：
 ${JSON.stringify(proposalResult, null, 2)}
 ${
-  proposerThinking
+  proposerReasoning
     ? `
 ## 提案者的推理过程
 以下是提案者在评估时的内心思考过程，请仔细审阅其推理逻辑，找出论证中的漏洞或偏差：
-<proposer_thinking>
-${proposerThinking}
-</proposer_thinking>
+<proposer_reasoning>
+${proposerReasoning}
+</proposer_reasoning>
 `
     : ''
 }

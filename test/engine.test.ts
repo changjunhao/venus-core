@@ -68,9 +68,9 @@ describe('Engine Layer', () => {
   describe('evaluate() — 3-round flow (severity MEDIUM)', () => {
     it('should complete with 3 rounds when severity is MEDIUM', async () => {
       const engine = createMockEngine({
-        proposerResponses: [{ content: makeProposalJSON(), thinking: 'Proposer thinking...' }],
-        criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), thinking: 'Critic thinking...' }],
-        arbiterResponses: [{ content: makeArbiterJSON(), thinking: 'Arbiter thinking...' }],
+        proposerResponses: [{ content: makeProposalJSON(), reasoning: 'Proposer reasoning...' }],
+        criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), reasoning: 'Critic reasoning...' }],
+        arbiterResponses: [{ content: makeArbiterJSON(), reasoning: 'Arbiter reasoning...' }],
       });
 
       const result = await engine.evaluate(TEST_IMAGE, 'portrait');
@@ -97,7 +97,7 @@ describe('Engine Layer', () => {
           critique: 'Good portrait with nice lighting and composition.',
           suggestions: 'Consider adjusting the background for better contrast.',
         },
-        thinking: 'Proposer thinking...',
+        reasoning: 'Proposer reasoning...',
       });
       expect(result.process.critique).toEqual({
         result: {
@@ -119,7 +119,7 @@ describe('Engine Layer', () => {
           overall_assessment: 'Generally solid evaluation with minor adjustments needed.',
           suggested_total_score: 7.0,
         },
-        thinking: 'Critic thinking...',
+        reasoning: 'Critic reasoning...',
       });
       expect(result.process.revision).toBeUndefined();
       expect(result.process.arbitration).toEqual({
@@ -132,7 +132,7 @@ describe('Engine Layer', () => {
           arbitration_notes:
             'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
         },
-        thinking: 'Arbiter thinking...',
+        reasoning: 'Arbiter reasoning...',
       });
     });
 
@@ -155,11 +155,11 @@ describe('Engine Layer', () => {
       const engine = createMockEngine({
         // Proposer is called twice: evaluate + revise
         proposerResponses: [
-          { content: makeProposalJSON(), thinking: 'Initial assessment...' },
-          { content: makeRevisionJSON(), thinking: 'Revised after critique...' },
+          { content: makeProposalJSON(), reasoning: 'Initial assessment...' },
+          { content: makeRevisionJSON(), reasoning: 'Revised after critique...' },
         ],
-        criticResponses: [{ content: makeCritiqueJSON('HIGH'), thinking: 'Severe issues found...' }],
-        arbiterResponses: [{ content: makeArbiterJSON(), thinking: 'Final judgment...' }],
+        criticResponses: [{ content: makeCritiqueJSON('HIGH'), reasoning: 'Severe issues found...' }],
+        arbiterResponses: [{ content: makeArbiterJSON(), reasoning: 'Final judgment...' }],
       });
 
       const result = await engine.evaluate(TEST_IMAGE, 'portrait');
@@ -173,7 +173,7 @@ describe('Engine Layer', () => {
           critique: 'Revised assessment accounting for expression concerns.',
           suggestions: 'Focus on coaching subjects for more relaxed expressions.',
         },
-        thinking: 'Revised after critique...',
+        reasoning: 'Revised after critique...',
       });
     });
   });
@@ -302,10 +302,10 @@ describe('Engine Layer', () => {
             critique: 'Good portrait with nice lighting and composition.',
             suggestions: 'Consider adjusting the background for better contrast.',
           },
-          thinking: null,
+          reasoning: null,
         });
         expect(result.process.critique.result.severity).toBe('LOW');
-        expect(result.process.critique.thinking).toBeNull();
+        expect(result.process.critique.reasoning).toBeNull();
         expect(result.process.arbitration).toEqual({
           result: {
             scene_type: 'studio',
@@ -316,7 +316,7 @@ describe('Engine Layer', () => {
             arbitration_notes:
               'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
           },
-          thinking: null,
+          reasoning: null,
         });
       }
     });
@@ -327,7 +327,7 @@ describe('Engine Layer', () => {
     it('evaluate() should throw when provider fails', async () => {
       const errorProvider = defineProvider({
         name: 'error-provider',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async () => {
           throw new Error('Provider exploded');
         },
@@ -349,7 +349,7 @@ describe('Engine Layer', () => {
     it('evaluateStream() should yield error event when provider fails', async () => {
       const errorProvider = defineProvider({
         name: 'error-provider',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async () => {
           throw new Error('Stream provider failed');
         },
@@ -388,7 +388,7 @@ describe('Engine Layer', () => {
         baseURL: 'https://mock.test/v1',
         apiKey: 'mock-key',
         providers: {
-          genreDetector: createMockProvider([{ content: genreDetectionJSON, thinking: 'Detected portrait scene' }]),
+          genreDetector: createMockProvider([{ content: genreDetectionJSON, reasoning: 'Detected portrait scene' }]),
           proposer: createMockProvider([{ content: makeProposalJSON() }]),
           critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
           arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
@@ -401,15 +401,15 @@ describe('Engine Layer', () => {
       expect(result.genre).toBe('portrait');
       expect(result.process.genreDetection).toEqual({
         result: { genre: 'portrait', confidence: 0.92 },
-        thinking: 'Detected portrait scene',
+        reasoning: 'Detected portrait scene',
       });
     });
   });
 
-  // ── #augmentContextWithGenreThinking() — 间接边界测试 ──
-  describe('Context augmentation with genre thinking (indirect #augmentContextWithGenreThinking)', () => {
+  // ── #augmentContextWithGenreReasoning() — 间接边界测试 ──
+  describe('Context augmentation with genre reasoning (indirect #augmentContextWithGenreReasoning)', () => {
     it('should return original context when genreDetectionOut is undefined (genre provided manually)', async () => {
-      const context: EvaluationContext = { exif: { camera: 'Canon EOS R5' } };
+      const context: EvaluationContext = { exif: { cameraModel: 'Canon EOS R5' } };
 
       const engine = createMockEngine({
         proposerResponses: [{ content: makeProposalJSON() }],
@@ -422,58 +422,60 @@ describe('Engine Layer', () => {
 
       // genreDetection should not exist in process (no auto-detection performed)
       expect(result.process.genreDetection).toBeUndefined();
-      // Context passed through should not have genreDetectionThinking injected
+      // Context passed through should not have genreDetectionReasoning injected
       if (result.metadata.context) {
-        expect(result.metadata.context.genreDetectionThinking).toBeUndefined();
+        expect(result.metadata.context.genreDetectionReasoning).toBeUndefined();
       }
     });
 
-    it('should merge thinking into context when genre detection has thinking', async () => {
+    it('should merge reasoning into context when genre detection has reasoning', async () => {
       const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.95 });
-      const context: EvaluationContext = { exif: { camera: 'Sony A7III' } };
+      const context: EvaluationContext = { exif: { cameraModel: 'Sony A7III' } };
 
       const engine = createVenusEngine({
         baseURL: 'https://mock.test/v1',
         apiKey: 'mock-key',
         providers: {
-          genreDetector: createMockProvider([{ content: genreDetectionJSON, thinking: 'Subject is centered, portrait orientation' }]),
+          genreDetector: createMockProvider([
+            { content: genreDetectionJSON, reasoning: 'Subject is centered, portrait orientation' },
+          ]),
           proposer: createMockProvider([{ content: makeProposalJSON() }]),
           critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
           arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
         },
       });
 
-      // Do not provide genre → auto-detection triggers → thinking should be merged into context
+      // Do not provide genre → auto-detection triggers → reasoning should be merged into context
       const result = await engine.evaluate(TEST_IMAGE, undefined, context);
 
       expect(result.genre).toBe('portrait');
       expect(result.process.genreDetection).toEqual({
         result: { genre: 'portrait', confidence: 0.95 },
-        thinking: 'Subject is centered, portrait orientation',
+        reasoning: 'Subject is centered, portrait orientation',
       });
     });
 
-    it('should create new context when context is undefined but thinking exists', async () => {
+    it('should create new context when context is undefined but reasoning exists', async () => {
       const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.87 });
 
       const engine = createVenusEngine({
         baseURL: 'https://mock.test/v1',
         apiKey: 'mock-key',
         providers: {
-          genreDetector: createMockProvider([{ content: genreDetectionJSON, thinking: 'Natural elements detected' }]),
+          genreDetector: createMockProvider([{ content: genreDetectionJSON, reasoning: 'Natural elements detected' }]),
           proposer: createMockProvider([{ content: makeProposalJSON() }]),
           critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
           arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
         },
       });
 
-      // No context provided, no genre provided → auto-detection + context creation from thinking
+      // No context provided, no genre provided → auto-detection + context creation from reasoning
       const result = await engine.evaluate(TEST_IMAGE);
 
       expect(result.genre).toBe('portrait');
       expect(result.process.genreDetection).toEqual({
         result: { genre: 'portrait', confidence: 0.87 },
-        thinking: 'Natural elements detected',
+        reasoning: 'Natural elements detected',
       });
     });
   });

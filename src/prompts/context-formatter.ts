@@ -174,13 +174,13 @@ function buildBaseContext(context: EvaluationContext, genre: Genre): string {
 export function formatContextForProposer(context: EvaluationContext, genre: Genre): string {
   let block = '';
 
-  // 门类检测思维链：让 Proposer 了解门类判定依据
-  if (context.genreDetectionThinking) {
+  // 门类检测推理链：让 Proposer 了解门类判定依据
+  if (context.genreDetectionReasoning) {
     block += `\n## 门类检测依据
 以下是对本照片门类判定的推理过程，可作为评估参考：
-<genre_detection_thinking>
-${context.genreDetectionThinking}
-</genre_detection_thinking>`;
+<genre_detection_reasoning>
+${context.genreDetectionReasoning}
+</genre_detection_reasoning>`;
   }
 
   block += buildBaseContext(context, genre);

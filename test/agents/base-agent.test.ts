@@ -30,25 +30,25 @@ describe('BaseAgent', () => {
       const provider = createMockProvider([{ content: VALID_JSON }]);
       const agent = makeAgent(provider);
 
-      const { result, thinking } = await agent.call('system prompt', 'user prompt', IMAGE_URL, testSchema);
+      const { result, reasoning } = await agent.call('system prompt', 'user prompt', IMAGE_URL, testSchema);
 
       expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
-      expect(thinking).toBeNull();
+      expect(reasoning).toBeNull();
     });
   });
 
-  // ── 思维链内容提取 ──
-  describe('Thinking content extraction', () => {
-    it('should return thinking when provider includes it', async () => {
+  // ── 推理链内容提取 ──
+  describe('Reasoning content extraction', () => {
+    it('should return reasoning when provider includes it', async () => {
       const provider = createMockProvider([
-        { content: VALID_JSON, thinking: 'I analyzed the composition carefully...' },
+        { content: VALID_JSON, reasoning: 'I analyzed the composition carefully...' },
       ]);
       const agent = makeAgent(provider);
 
-      const { result, thinking } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+      const { result, reasoning } = await agent.call('system', 'user', IMAGE_URL, testSchema);
 
       expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
-      expect(thinking).toBe('I analyzed the composition carefully...');
+      expect(reasoning).toBe('I analyzed the composition carefully...');
     });
   });
 
@@ -112,7 +112,7 @@ describe('BaseAgent', () => {
     it('should throw SchemaError wrapping provider error after retries', async () => {
       const failProvider = defineProvider({
         name: 'fail-provider',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async () => {
           throw new Error('Network timeout');
         },
@@ -132,7 +132,7 @@ describe('BaseAgent', () => {
       let callCount = 0;
       const errorProvider = defineProvider({
         name: 'error-provider',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async () => {
           callCount++;
           throw new Error(`Error on call ${callCount}`);
@@ -166,82 +166,80 @@ describe('BaseAgent', () => {
     });
   });
 
-  // ── thinking 参数传递（验证 enable_thinking 显式发送至 provider）──
-  describe('Thinking parameter passing', () => {
-    it('should pass thinking: { enabled: false } to provider when thinking is disabled', async () => {
+  // ── reasoning 参数传递（验证 reasoning 显式发送至 provider）──
+  describe('Reasoning parameter passing', () => {
+    it('should not pass reasoning to provider when reasoning is not configured', async () => {
       let capturedParams: Parameters<LLMProvider['chat']>[0] | null = null;
       const spyProvider = defineProvider({
         name: 'spy',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async (params) => {
           capturedParams = params;
-          return { content: VALID_JSON, thinking: null };
+          return { content: VALID_JSON, reasoning: null };
         },
       });
-      const agent = new BaseAgent('test', spyProvider, { model: 'test', enableThinking: false });
+      const agent = new BaseAgent('test', spyProvider, { model: 'test' });
 
       await agent.call('system', 'user', IMAGE_URL, testSchema);
 
       expect(capturedParams).not.toBeNull();
-      expect(capturedParams!.thinking).toEqual({ enabled: false });
+      expect(capturedParams!.reasoning).toBeUndefined();
     });
 
-    it('should pass thinking with budget when enabled', async () => {
+    it('should pass reasoning with budget when configured', async () => {
       let capturedParams: Parameters<LLMProvider['chat']>[0] | null = null;
       const spyProvider = defineProvider({
         name: 'spy',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async (params) => {
           capturedParams = params;
-          return { content: VALID_JSON, thinking: null };
+          return { content: VALID_JSON, reasoning: null };
         },
       });
       const agent = new BaseAgent('test', spyProvider, {
         model: 'test',
-        enableThinking: true,
-        thinkingBudget: 4096,
+        reasoning: { effort: 'medium', budgetTokens: 4096 },
       });
 
       await agent.call('system', 'user', IMAGE_URL, testSchema);
 
-      expect(capturedParams!.thinking).toEqual({ enabled: true, budget_tokens: 4096 });
+      expect(capturedParams!.reasoning).toEqual({ effort: 'medium', budgetTokens: 4096 });
     });
 
-    it('should use callConfig override over agent config for thinking', async () => {
+    it('should use callConfig override over agent config for reasoning', async () => {
       let capturedParams: Parameters<LLMProvider['chat']>[0] | null = null;
       const spyProvider = defineProvider({
         name: 'spy',
-        supportsVision: true,
+        capabilities: { vision: true },
         chat: async (params) => {
           capturedParams = params;
-          return { content: VALID_JSON, thinking: null };
+          return { content: VALID_JSON, reasoning: null };
         },
       });
-      // Agent-level thinking disabled, callConfig enables it
-      const agent = new BaseAgent('test', spyProvider, { model: 'test', enableThinking: false });
+      // Agent-level reasoning unset; callConfig provides it
+      const agent = new BaseAgent('test', spyProvider, { model: 'test' });
 
       await agent.call('system', 'user', IMAGE_URL, testSchema, {
-        enableThinking: true,
-        thinkingBudget: 2048,
+        reasoning: { effort: 'medium', budgetTokens: 2048 },
       });
 
-      expect(capturedParams!.thinking).toEqual({ enabled: true, budget_tokens: 2048 });
+      expect(capturedParams!.reasoning).toEqual({ effort: 'medium', budgetTokens: 2048 });
     });
 
-    it('should pass thinking: { enabled: false } in callStream when thinking disabled', async () => {
+    it('should not pass reasoning in callStream when reasoning is not configured', async () => {
       let capturedParams: Parameters<NonNullable<LLMProvider['chatStream']>>[0] | null = null;
       const spyProvider = defineProvider({
         name: 'spy-stream',
-        supportsVision: true,
+        capabilities: { vision: true },
         chatStream: async function* (params) {
           capturedParams = params;
           yield { content: VALID_JSON };
         },
         chat: async () => {
-          return { content: VALID_JSON, thinking: null };
+          return { content: VALID_JSON, reasoning: null };
         },
       });
-      const agent = new BaseAgent('test', spyProvider, { model: 'test', enableThinking: false });
+      const agent = new BaseAgent('test', spyProvider, { model: 'test' });
 
       // consume generator; params captured on first call
       try {
@@ -252,7 +250,7 @@ describe('BaseAgent', () => {
         /* retry exhaustion is expected for empty stream; params already captured */
       }
 
-      expect(capturedParams!.thinking).toEqual({ enabled: false });
+      expect(capturedParams!.reasoning).toBeUndefined();
     });
   });
 });

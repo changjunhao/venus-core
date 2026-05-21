@@ -282,7 +282,7 @@ describe('Error Handling — Engine Error Event Propagation', () => {
 
     const errorProvider = defineProvider({
       name: 'failing-provider',
-      supportsVision: true,
+      capabilities: { vision: true },
       chat: async () => {
         throw new ProviderError('Provider network failure', 'failing-provider', 'network');
       },
@@ -314,7 +314,7 @@ describe('Error Handling — Engine Error Event Propagation', () => {
   it('should propagate error (wrapped as SchemaError by BaseAgent) through evaluate()', async () => {
     const errorProvider = defineProvider({
       name: 'auth-fail-provider',
-      supportsVision: true,
+      capabilities: { vision: true },
       chat: async () => {
         throw new ProviderError('Auth failed', 'auth-fail-provider', 'auth_error', 401);
       },
@@ -343,7 +343,7 @@ describe('Error Handling — Engine Error Event Propagation', () => {
   it('should yield error event in evaluateStream() with correct error info', async () => {
     const errorProvider = defineProvider({
       name: 'stream-fail-provider',
-      supportsVision: true,
+      capabilities: { vision: true },
       chat: async () => {
         throw new ProviderError('Timeout!', 'stream-fail-provider', 'timeout');
       },

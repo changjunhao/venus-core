@@ -7,8 +7,15 @@
  * Utility for creating custom LLM providers.
  */
 
-import type { LLMProvider } from '../types.js';
+import type { LLMProvider, ProviderCapabilities } from '../types.js';
 import type { DefineProviderOptions } from './types.js';
+
+const DEFAULT_CAPABILITIES: ProviderCapabilities = {
+  reasoning: false,
+  reasoningBudget: false,
+  vision: false,
+  streaming: false,
+};
 
 /**
  * Create a custom LLM provider.
@@ -17,20 +24,25 @@ import type { DefineProviderOptions } from './types.js';
  * ```ts
  * const myProvider = defineProvider({
  *   name: 'my-llm',
- *   supportsVision: true,
- *   supportsThinking: false,
+ *   capabilities: { vision: true, reasoning: false },
  *   async chat(params) {
  *     // custom implementation
- *     return { content: '...', thinking: null };
+ *     return { content: '...', reasoning: null };
  *   },
  * });
  * ```
  */
 export function defineProvider(options: DefineProviderOptions): LLMProvider {
+  const capabilities: ProviderCapabilities = {
+    ...DEFAULT_CAPABILITIES,
+    // Streaming capability inferred from presence of chatStream when not explicitly set
+    streaming: options.chatStream !== undefined,
+    ...options.capabilities,
+  };
+
   return {
     name: options.name,
-    supportsVision: options.supportsVision ?? false,
-    supportsThinking: options.supportsThinking ?? false,
+    capabilities,
     chat: options.chat,
     chatStream: options.chatStream,
   };

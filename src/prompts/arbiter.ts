@@ -76,8 +76,8 @@ export function getArbiterUserPrompt(
   proposalResult: ProposerResult,
   critiqueResult: CritiqueResult,
   revisionResult: ProposerResult | null,
-  critiqueThinking: string | null,
-  revisionThinking: string | null,
+  critiqueReasoning: string | null,
+  revisionReasoning: string | null,
   context?: EvaluationContext,
 ): string {
   const config = getGenreConfig(genre);
@@ -90,13 +90,13 @@ ${JSON.stringify(proposalResult, null, 2)}
 ## 批判者的质疑（包含子类型审查）：
 ${JSON.stringify(critiqueResult, null, 2)}`;
 
-  if (critiqueThinking) {
+  if (critiqueReasoning) {
     prompt += `
 
 ## 批判者的推理过程
-<critic_thinking>
-${critiqueThinking}
-</critic_thinking>`;
+<critic_reasoning>
+${critiqueReasoning}
+</critic_reasoning>`;
   }
 
   if (revisionResult) {
@@ -106,13 +106,13 @@ ${critiqueThinking}
 ${JSON.stringify(revisionResult, null, 2)}`;
   }
 
-  if (revisionThinking) {
+  if (revisionReasoning) {
     prompt += `
 
 ## 修正者的推理过程
-<revision_thinking>
-${revisionThinking}
-</revision_thinking>`;
+<revision_reasoning>
+${revisionReasoning}
+</revision_reasoning>`;
   }
 
   if (critiqueResult.severity === 'LOW') {

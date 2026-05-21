@@ -24,14 +24,14 @@ export class CriticAgent extends BaseAgent {
   #prepareAttack(
     genre: Genre,
     proposalResult: ProposerResult,
-    proposerThinking: string | null,
+    proposerReasoning: string | null,
     context?: EvaluationContext,
   ) {
     const { critiqueSchema } = getSchemas(genre);
     return {
       schema: critiqueSchema,
       systemPrompt: getCriticSystemPrompt(genre),
-      userPrompt: getCriticUserPrompt(genre, proposalResult, proposerThinking, context),
+      userPrompt: getCriticUserPrompt(genre, proposalResult, proposerReasoning, context),
     };
   }
 
@@ -39,11 +39,11 @@ export class CriticAgent extends BaseAgent {
   async attack(
     imageUrl: string,
     proposalResult: ProposerResult,
-    proposerThinking: string | null,
+    proposerReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
   ): Promise<AgentCallResult<CritiqueResult>> {
-    const { schema, systemPrompt, userPrompt } = this.#prepareAttack(genre, proposalResult, proposerThinking, context);
+    const { schema, systemPrompt, userPrompt } = this.#prepareAttack(genre, proposalResult, proposerReasoning, context);
     return await this.call(systemPrompt, userPrompt, imageUrl, schema);
   }
 
@@ -51,11 +51,11 @@ export class CriticAgent extends BaseAgent {
   attackStream(
     imageUrl: string,
     proposalResult: ProposerResult,
-    proposerThinking: string | null,
+    proposerReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
   ): AsyncGenerator<StreamChunk, AgentCallResult<CritiqueResult>, unknown> {
-    const { schema, systemPrompt, userPrompt } = this.#prepareAttack(genre, proposalResult, proposerThinking, context);
+    const { schema, systemPrompt, userPrompt } = this.#prepareAttack(genre, proposalResult, proposerReasoning, context);
     return this.callStream<CritiqueResult>(systemPrompt, userPrompt, imageUrl, schema);
   }
 }

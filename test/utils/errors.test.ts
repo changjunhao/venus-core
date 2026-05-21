@@ -2,13 +2,7 @@
 // Copyright 2026 Venus Contributors
 
 import { describe, it, expect } from 'bun:test';
-import {
-  VenusError,
-  ValidationError,
-  ProviderError,
-  SchemaError,
-  TimeoutError,
-} from '../../src/utils/errors.js';
+import { VenusError, ValidationError, ProviderError, SchemaError, TimeoutError } from '../../src/utils/errors.js';
 
 describe('Errors — TimeoutError', () => {
   it('should use default message "Evaluation timed out" when constructed without arguments', () => {

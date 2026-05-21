@@ -365,8 +365,8 @@ function buildProposerResultSchema(genre: Genre) {
   if (!proposalCache[genre]) proposalCache[genre] = proposal;
   if (!arbiterCache[genre]) arbiterCache[genre] = arbiter;
 
-  // AgentCallResult 包装: { result: T, thinking: string | null }
-  const agentCallResult = (schema: z.ZodTypeAny) => z.object({ result: schema, thinking: z.string().nullable() });
+  // AgentCallResult 包装: { result: T, reasoning: string | null }
+  const agentCallResult = (schema: z.ZodTypeAny) => z.object({ result: schema, reasoning: z.string().nullable() });
 
   const genreDetectionResult = z.object({ genre: GenreEnum, confidence: z.number().min(0).max(1) });
 
@@ -417,8 +417,8 @@ export type ExifData = z.infer<typeof ExifDataSchema>;
 // 10. 评估上下文 Schema
 // ============================================================
 export const EvaluationContextSchema = z.object({
-  /** 门类检测器的思维链输出（引擎内部注入，用于传播到 Proposer） */
-  genreDetectionThinking: z.string().nullable().optional(),
+  /** 门类检测器的推理链输出（引擎内部注入，用于传播到 Proposer） */
+  genreDetectionReasoning: z.string().nullable().optional(),
   exif: ExifDataSchema.optional(),
   userNotes: z.string().max(2000).optional(),
   custom: z.record(z.string(), z.unknown()).optional(),

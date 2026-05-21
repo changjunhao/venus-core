@@ -96,10 +96,7 @@ describe('Integration — Error recovery and propagation', () => {
         proposerFetchCount++;
         // 第 1 次返回 429，第 2 次（重试后）返回成功
         if (proposerFetchCount === 1) {
-          return makeOpenAIResponse(
-            { error: { message: 'Rate limit exceeded', type: 'rate_limit_error' } },
-            429,
-          );
+          return makeOpenAIResponse({ error: { message: 'Rate limit exceeded', type: 'rate_limit_error' } }, 429);
         }
         return makeChatCompletion(makeProposalContent());
       }
@@ -125,9 +122,7 @@ describe('Integration — Error recovery and propagation', () => {
 
   // ── Scenario 2: 不可恢复错误传播（401）──
   it('should propagate 401 auth error through evaluate() as VenusError', async () => {
-    mockFetch(async () =>
-      makeOpenAIResponse({ error: { message: 'Invalid API key', type: 'auth_error' } }, 401),
-    );
+    mockFetch(async () => makeOpenAIResponse({ error: { message: 'Invalid API key', type: 'auth_error' } }, 401));
 
     const engine = createVenusEngine({
       baseURL: 'https://mock-api.test/v1',
@@ -151,9 +146,7 @@ describe('Integration — Error recovery and propagation', () => {
   });
 
   it('should yield error event in evaluateStream() when 401 occurs', async () => {
-    mockFetch(async () =>
-      makeOpenAIResponse({ error: { message: 'Invalid API key', type: 'auth_error' } }, 401),
-    );
+    mockFetch(async () => makeOpenAIResponse({ error: { message: 'Invalid API key', type: 'auth_error' } }, 401));
 
     const engine = createVenusEngine({
       baseURL: 'https://mock-api.test/v1',

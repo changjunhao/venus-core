@@ -30,13 +30,13 @@ function createTestEngine() {
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: API_KEY!,
     defaultModel: 'qwen3.6-plus',
-    thinking: {
-      enabled: true,
+    reasoning: {
+      effort: 'medium',
       agents: {
-        genreDetector: { budget: 2048 },
-        proposer: { budget: 2048 },
-        critic: { budget: 2048 },
-        arbiter: { budget: 2048 },
+        genreDetector: { effort: 'medium', budgetTokens: 2048 },
+        proposer: { effort: 'medium', budgetTokens: 2048 },
+        critic: { effort: 'medium', budgetTokens: 2048 },
+        arbiter: { effort: 'medium', budgetTokens: 2048 },
       },
     },
     timeout: 180_000,
@@ -107,9 +107,9 @@ describe.skipIf(!runIntegration)('Real Provider - Stream Integration', () => {
       expect(errors).toEqual([]);
 
       // values 模式：禁止细粒度事件
-      const thinkingChunks = events.filter((e) => e.type === 'thinking_chunk');
+      const reasoningChunks = events.filter((e) => e.type === 'reasoning_chunk');
       const resultChunks = events.filter((e) => e.type === 'result_chunk');
-      expect(thinkingChunks.length).toBe(0);
+      expect(reasoningChunks.length).toBe(0);
       expect(resultChunks.length).toBe(0);
 
       // 必须包含粗粒度事件
@@ -137,10 +137,10 @@ describe.skipIf(!runIntegration)('Real Provider - Stream Integration', () => {
       const errors = events.filter((e) => e.type === 'error');
       expect(errors).toEqual([]);
 
-      // updates 模式：必须含至少一个细粒度事件（thinking_chunk 或 result_chunk）
-      const thinkingChunks = events.filter((e) => e.type === 'thinking_chunk');
+      // updates 模式：必须含至少一个细粒度事件（reasoning_chunk 或 result_chunk）
+      const reasoningChunks = events.filter((e) => e.type === 'reasoning_chunk');
       const resultChunks = events.filter((e) => e.type === 'result_chunk');
-      expect(thinkingChunks.length + resultChunks.length).toBeGreaterThan(0);
+      expect(reasoningChunks.length + resultChunks.length).toBeGreaterThan(0);
 
       // 同时必须保留所有粗粒度事件
       const types = new Set(events.map((e) => e.type));
@@ -151,8 +151,8 @@ describe.skipIf(!runIntegration)('Real Provider - Stream Integration', () => {
       expect(types.has('evaluation_complete')).toBe(true);
 
       // 校验细粒度事件字段类型
-      for (const ev of thinkingChunks) {
-        if (ev.type === 'thinking_chunk') {
+      for (const ev of reasoningChunks) {
+        if (ev.type === 'reasoning_chunk') {
           expect(typeof ev.agent).toBe('string');
           expect(typeof ev.content).toBe('string');
         }

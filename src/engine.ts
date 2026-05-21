@@ -17,6 +17,7 @@ import type {
   CritiqueResult,
   ArbitrationResult,
   EvaluationContext,
+  ChatReasoningParams,
 } from './types.js';
 import { createOpenAICompatProvider } from './providers/index.js';
 import { ProposerAgent } from './agents/proposer.js';
@@ -62,13 +63,12 @@ export class VenusEngine {
   #buildGenreDetector(): GenreDetectorAgent {
     return new GenreDetectorAgent(this.#getProvider('genreDetector'), {
       model: this.#getModel('genreDetector'),
-      enableThinking: this.#getThinkingEnabled('genreDetector'),
-      thinkingBudget: this.#getThinkingBudget('genreDetector'),
+      reasoning: this.#getReasoningConfig('genreDetector'),
       maxRetries: this.#config.maxRetries,
     });
   }
 
-  /** Build all agents for an evaluation run (per-agent thinking config) */
+  /** Build all agents for an evaluation run (per-agent reasoning config) */
   #buildAgents() {
     const proposerCfg = this.#getAgentConfig('proposer');
     const revCfg = this.#getAgentConfig('revision');
@@ -76,26 +76,23 @@ export class VenusEngine {
       proposerCfg.provider,
       {
         model: proposerCfg.model,
-        enableThinking: proposerCfg.enableThinking,
-        thinkingBudget: proposerCfg.thinkingBudget,
+        reasoning: proposerCfg.reasoning,
         maxRetries: this.#config.maxRetries,
       },
-      { model: revCfg.model, enableThinking: revCfg.enableThinking, thinkingBudget: revCfg.thinkingBudget },
+      { model: revCfg.model, reasoning: revCfg.reasoning },
     );
 
     const criticCfg = this.#getAgentConfig('critic');
     const critic = new CriticAgent(criticCfg.provider, {
       model: criticCfg.model,
-      enableThinking: criticCfg.enableThinking,
-      thinkingBudget: criticCfg.thinkingBudget,
+      reasoning: criticCfg.reasoning,
       maxRetries: this.#config.maxRetries,
     });
 
     const arbiterCfg = this.#getAgentConfig('arbiter');
     const arbiter = new ArbiterAgent(arbiterCfg.provider, {
       model: arbiterCfg.model,
-      enableThinking: arbiterCfg.enableThinking,
-      thinkingBudget: arbiterCfg.thinkingBudget,
+      reasoning: arbiterCfg.reasoning,
       maxRetries: this.#config.maxRetries,
     });
 
@@ -176,34 +173,56 @@ export class VenusEngine {
     return this.#config.defaultModel ?? 'qwen3-vl-flash';
   }
 
-  /** Get thinking enabled flag for a specific agent role (per-agent override > global > default false) */
-  #getThinkingEnabled(role: AgentRole): boolean {
-    const thinking = this.#config.thinking;
-    if (!thinking) return false;
-    // Per-agent override takes priority
-    const agent = thinking.agents?.[role];
-    if (agent?.enabled !== undefined) return agent.enabled;
-    return thinking.enabled ?? false;
+  /**
+   * Resolve effective reasoning config for a specific agent role.
+   *
+   * Resolution order:
+   * 1. No reasoning config → undefined (standard mode)
+   * 2. Per-agent override === false → undefined (explicitly disabled)
+   * 3. Per-agent override (object) → use it (with global budgetTokens fallback)
+   * 4. Global default effort → use it
+   * 5. Otherwise → undefined (standard mode)
+   */
+  #getReasoningConfig(role: AgentRole): ChatReasoningParams | undefined {
+    const config = this.#config.reasoning;
+    if (!config) return undefined;
+
+    const agentOverride = config.agents?.[role];
+
+    // Explicitly disabled for this role
+    if (agentOverride === false) return undefined;
+
+    // Agent-level config takes priority
+    if (agentOverride) {
+      return {
+        effort: agentOverride.effort,
+        budgetTokens: agentOverride.budgetTokens ?? config.budgetTokens,
+      };
+    }
+
+    // Fall back to global default
+    if (config.effort) {
+      return {
+        effort: config.effort,
+        budgetTokens: config.budgetTokens,
+      };
+    }
+
+    return undefined;
   }
 
-  /** Get thinking budget for a specific agent role */
-  #getThinkingBudget(role: AgentRole): number | undefined {
-    const thinking = this.#config.thinking;
-    return thinking?.agents?.[role]?.budget;
-  }
-
-  /** Augment context with genre detection thinking (shared by evaluate / evaluateStream) */
-  #augmentContextWithGenreThinking(
+  /** Augment context with genre detection reasoning (shared by evaluate / evaluateStream) */
+  #augmentContextWithGenreReasoning(
     context: EvaluationContext | undefined,
     genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined,
   ): EvaluationContext | undefined {
-    if (!genreDetectionOut?.thinking) return context;
+    if (!genreDetectionOut?.reasoning) return context;
     return context
-      ? { ...context, genreDetectionThinking: genreDetectionOut.thinking }
-      : { genreDetectionThinking: genreDetectionOut.thinking };
+      ? { ...context, genreDetectionReasoning: genreDetectionOut.reasoning }
+      : { genreDetectionReasoning: genreDetectionOut.reasoning };
   }
 
-  /** Detect the genre of an image (returns full AgentCallResult including thinking for downstream propagation) */
+  /** Detect the genre of an image (returns full AgentCallResult including reasoning for downstream propagation) */
   async #detectGenre(imageUrl: string): Promise<AgentCallResult<{ genre: Genre; confidence: number }>> {
     const detector = this.#buildGenreDetector();
     return await detector.detect(imageUrl);
@@ -229,21 +248,23 @@ export class VenusEngine {
       detectedGenre = genre;
     }
 
-    const augmentedContext = this.#augmentContextWithGenreThinking(context, genreDetectionOut);
+    const augmentedContext = this.#augmentContextWithGenreReasoning(context, genreDetectionOut);
 
     return { detectedGenre, genreDetectionOut, augmentedContext };
   }
 
-  /** Retrieve agent config tuple (provider, model, thinking settings) */
+  /** Retrieve agent config tuple (provider, model, reasoning settings) */
   #getAgentConfig(role: AgentRole) {
     const provider = this.#getProvider(role);
     const model = this.#getModel(role);
-    const enableThinking = this.#getThinkingEnabled(role);
-    const thinkingBudget = this.#getThinkingBudget(role);
+    const reasoning = this.#getReasoningConfig(role);
+    const reasoningLog = reasoning
+      ? `effort=${reasoning.effort}${reasoning.budgetTokens ? `, budget=${reasoning.budgetTokens}` : ''}`
+      : 'standard';
     this.#logger.debug(
-      `Agent initialized: role=${role}, provider=${provider.name}, model=${model}, thinking=${enableThinking ? `enabled(budget=${thinkingBudget ?? 'default'})` : 'disabled'}`,
+      `Agent initialized: role=${role}, provider=${provider.name}, model=${model}, reasoning=${reasoningLog}`,
     );
-    return { provider, model, enableThinking, thinkingBudget };
+    return { provider, model, reasoning };
   }
 
   /** Run a full evaluation on an image */
@@ -260,7 +281,7 @@ export class VenusEngine {
 
     if (genreDetectionOut) {
       const genreLabel = getGenreConfig(detectedGenre).label;
-      this.#logger.info(`检测结果: ${genreLabel}${genreDetectionOut.thinking ? ' (有思维链)' : ''}`);
+      this.#logger.info(`检测结果: ${genreLabel}${genreDetectionOut.reasoning ? ' (有推理链)' : ''}`);
     }
 
     this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrl, genre: detectedGenre } });
@@ -281,7 +302,7 @@ export class VenusEngine {
         type: 'agent_complete',
         round: 1,
         agent: 'proposer',
-        data: { result: proposalOut.result, thinking: proposalOut.thinking },
+        data: { result: proposalOut.result, reasoning: proposalOut.reasoning },
       });
       this.#emit({ type: 'round_complete', round: 1 });
       this.#logger.info(`初始总分: ${proposalOut.result.total_score}`);
@@ -292,7 +313,7 @@ export class VenusEngine {
       const critiqueOut: AgentCallResult<CritiqueResult> = await critic.attack(
         imageUrl,
         proposalOut.result,
-        proposalOut.thinking,
+        proposalOut.reasoning,
         detectedGenre,
         augmentedContext,
       );
@@ -300,7 +321,7 @@ export class VenusEngine {
         type: 'agent_complete',
         round: 2,
         agent: 'critic',
-        data: { result: critiqueOut.result, thinking: critiqueOut.thinking },
+        data: { result: critiqueOut.result, reasoning: critiqueOut.reasoning },
       });
       this.#emit({ type: 'round_complete', round: 2 });
       const critiqueSeverity = critiqueOut.result.severity;
@@ -315,7 +336,7 @@ export class VenusEngine {
           imageUrl,
           proposalOut.result,
           critiqueOut.result,
-          critiqueOut.thinking,
+          critiqueOut.reasoning,
           detectedGenre,
           augmentedContext,
         );
@@ -323,7 +344,7 @@ export class VenusEngine {
           type: 'agent_complete',
           round: 3,
           agent: 'proposer',
-          data: { result: revisionOut.result, thinking: revisionOut.thinking },
+          data: { result: revisionOut.result, reasoning: revisionOut.reasoning },
         });
         this.#emit({ type: 'round_complete', round: 3 });
         this.#logger.info(`修正总分: ${revisionOut.result.total_score}`);
@@ -338,9 +359,9 @@ export class VenusEngine {
         proposalOut.result,
         critiqueOut.result,
         revisionOut?.result ?? null,
-        proposalOut.thinking,
-        critiqueOut.thinking,
-        revisionOut?.thinking ?? null,
+        proposalOut.reasoning,
+        critiqueOut.reasoning,
+        revisionOut?.reasoning ?? null,
         detectedGenre,
         augmentedContext,
       );
@@ -348,7 +369,7 @@ export class VenusEngine {
         type: 'agent_complete',
         round: finalRound,
         agent: 'arbiter',
-        data: { result: arbitrationOut.result, thinking: arbitrationOut.thinking },
+        data: { result: arbitrationOut.result, reasoning: arbitrationOut.reasoning },
       });
       this.#emit({ type: 'round_complete', round: finalRound });
       const arb = arbitrationOut.result;
@@ -392,14 +413,14 @@ export class VenusEngine {
       const chunk = next.value;
       // Convert provider-level StreamChunk → engine-level EvaluationStreamEvent
       const events: EvaluationStreamEvent[] = [];
-      if (chunk.thinking) {
-        events.push({ type: 'thinking_chunk', agent: agentName, content: chunk.thinking, timestamp: Date.now() });
+      if (chunk.reasoning) {
+        events.push({ type: 'reasoning_chunk', agent: agentName, content: chunk.reasoning, timestamp: Date.now() });
       }
       if (chunk.partial) {
         events.push({ type: 'result_chunk', agent: agentName, partial: chunk.partial, timestamp: Date.now() });
       }
       for (const event of events) {
-        if (mode === 'updates' || (event.type !== 'thinking_chunk' && event.type !== 'result_chunk')) {
+        if (mode === 'updates' || (event.type !== 'reasoning_chunk' && event.type !== 'result_chunk')) {
           yield event;
         }
       }
@@ -411,7 +432,7 @@ export class VenusEngine {
       type: 'agent_complete',
       round,
       agent: agentName,
-      data: { result: result.result, thinking: result.thinking },
+      data: { result: result.result, reasoning: result.reasoning },
       timestamp: Date.now(),
     };
 
@@ -446,13 +467,13 @@ export class VenusEngine {
         );
         detectedGenre = genreDetectionOut.result.genre;
 
-        augmentedContext = this.#augmentContextWithGenreThinking(context, genreDetectionOut);
+        augmentedContext = this.#augmentContextWithGenreReasoning(context, genreDetectionOut);
 
         const genreLabel = getGenreConfig(detectedGenre).label;
-        this.#logger.info(`[stream] 检测结果: ${genreLabel}${genreDetectionOut.thinking ? ' (有思维链)' : ''}`);
+        this.#logger.info(`[stream] 检测结果: ${genreLabel}${genreDetectionOut.reasoning ? ' (有推理链)' : ''}`);
         yield {
           type: 'genre_detected',
-          data: { genre: detectedGenre, thinking: genreDetectionOut.thinking },
+          data: { genre: detectedGenre, reasoning: genreDetectionOut.reasoning },
           timestamp: Date.now(),
         };
       } else {
@@ -478,7 +499,7 @@ export class VenusEngine {
       // ── 第2轮：批判者攻击 ──
       this.#logger.info('[stream] 第2轮：批判者攻击');
       const critiqueOut = yield* this.#runStreamRound<CritiqueResult>(
-        critic.attackStream(imageUrl, proposalOut.result, proposalOut.thinking, detectedGenre, augmentedContext),
+        critic.attackStream(imageUrl, proposalOut.result, proposalOut.reasoning, detectedGenre, augmentedContext),
         'critic',
         2,
         mode,
@@ -495,7 +516,7 @@ export class VenusEngine {
             imageUrl,
             proposalOut.result,
             critiqueOut.result,
-            critiqueOut.thinking,
+            critiqueOut.reasoning,
             detectedGenre,
             augmentedContext,
           ),
@@ -515,9 +536,9 @@ export class VenusEngine {
           proposalOut.result,
           critiqueOut.result,
           revisionOut?.result ?? null,
-          proposalOut.thinking,
-          critiqueOut.thinking,
-          revisionOut?.thinking ?? null,
+          proposalOut.reasoning,
+          critiqueOut.reasoning,
+          revisionOut?.reasoning ?? null,
           detectedGenre,
           augmentedContext,
         ),

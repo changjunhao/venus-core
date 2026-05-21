@@ -39,14 +39,14 @@ export class ProposerAgent extends BaseAgent {
     genre: Genre,
     originalProposal: ProposerResult,
     critiqueResult: CritiqueResult,
-    critiqueThinking: string | null,
+    critiqueReasoning: string | null,
     context?: EvaluationContext,
   ) {
     const { proposalSchema } = getSchemas(genre);
     return {
       schema: proposalSchema,
       systemPrompt: getProposerSystemPrompt(genre),
-      userPrompt: getRevisionUserPrompt(genre, originalProposal, critiqueResult, critiqueThinking, context),
+      userPrompt: getRevisionUserPrompt(genre, originalProposal, critiqueResult, critiqueReasoning, context),
     };
   }
 
@@ -65,7 +65,7 @@ export class ProposerAgent extends BaseAgent {
     imageUrl: string,
     originalProposal: ProposerResult,
     critiqueResult: CritiqueResult,
-    critiqueThinking: string | null,
+    critiqueReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
   ): Promise<AgentCallResult<ProposerResult>> {
@@ -73,7 +73,7 @@ export class ProposerAgent extends BaseAgent {
       genre,
       originalProposal,
       critiqueResult,
-      critiqueThinking,
+      critiqueReasoning,
       context,
     );
     return await this.call(systemPrompt, userPrompt, imageUrl, schema, this.#revisionConfig);
@@ -94,7 +94,7 @@ export class ProposerAgent extends BaseAgent {
     imageUrl: string,
     originalProposal: ProposerResult,
     critiqueResult: CritiqueResult,
-    critiqueThinking: string | null,
+    critiqueReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
   ): AsyncGenerator<StreamChunk, AgentCallResult<ProposerResult>, unknown> {
@@ -102,7 +102,7 @@ export class ProposerAgent extends BaseAgent {
       genre,
       originalProposal,
       critiqueResult,
-      critiqueThinking,
+      critiqueReasoning,
       context,
     );
     return this.callStream<ProposerResult>(systemPrompt, userPrompt, imageUrl, schema, this.#revisionConfig);

@@ -78,7 +78,7 @@ export function getRevisionUserPrompt(
   genre: Genre,
   originalProposal: ProposerResult,
   critiqueResult: CritiqueResult,
-  critiqueThinking: string | null,
+  critiqueReasoning: string | null,
   context?: EvaluationContext,
 ): string {
   let prompt = `你之前对这张照片的评估被质疑了。请重新审视照片，考虑以下批判意见，给出修正后的评分。
@@ -89,12 +89,12 @@ ${JSON.stringify(originalProposal, null, 2)}
 批判者的质疑：
 ${JSON.stringify(critiqueResult, null, 2)}
 ${
-  critiqueThinking
+  critiqueReasoning
     ? `
 批判者的推理过程：
-<critic_thinking>
-${critiqueThinking}
-</critic_thinking>
+<critic_reasoning>
+${critiqueReasoning}
+</critic_reasoning>
 `
     : ''
 }

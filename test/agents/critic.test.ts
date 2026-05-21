@@ -47,14 +47,14 @@ describe('CriticAgent', () => {
   describe('attack() — critique logic', () => {
     it('should return a valid CritiqueResult', async () => {
       const provider = createMockProvider([
-        { content: makeCritiqueJSON('MEDIUM'), thinking: 'Analyzing proposal weaknesses...' },
+        { content: makeCritiqueJSON('MEDIUM'), reasoning: 'Analyzing proposal weaknesses...' },
       ]);
       const agent = new CriticAgent(provider, { model: 'test-model' });
 
-      const { result, thinking } = await agent.attack(
+      const { result, reasoning } = await agent.attack(
         IMAGE_URL,
         MOCK_PROPOSAL,
-        'Proposer was thinking about lighting...',
+        'Proposer was reasoning about lighting...',
         'portrait',
       );
 
@@ -65,10 +65,10 @@ describe('CriticAgent', () => {
       expect(result.challenges[0]!.dimension).toBe('facial_expression');
       expect(result.overall_assessment).toBeTruthy();
       expect(result.suggested_total_score).toBe(7.0);
-      expect(thinking).toBe('Analyzing proposal weaknesses...');
+      expect(reasoning).toBe('Analyzing proposal weaknesses...');
     });
 
-    it('should handle null proposer thinking', async () => {
+    it('should handle null proposer reasoning', async () => {
       const provider = createMockProvider([{ content: makeCritiqueJSON('LOW') }]);
       const agent = new CriticAgent(provider, { model: 'test-model' });
 

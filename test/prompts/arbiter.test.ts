@@ -123,7 +123,7 @@ describe('Arbiter Prompts', () => {
       expect(prompt).toContain('"total_score": 7');
     });
 
-    it('should include critic thinking when provided', () => {
+    it('should include critic reasoning when provided', () => {
       const prompt = getArbiterUserPrompt(
         'portrait',
         SAMPLE_PROPOSAL,
@@ -132,11 +132,11 @@ describe('Arbiter Prompts', () => {
         'Critic reasoning about severity...',
         null,
       );
-      expect(prompt).toContain('critic_thinking');
+      expect(prompt).toContain('critic_reasoning');
       expect(prompt).toContain('Critic reasoning about severity...');
     });
 
-    it('should include revision thinking when provided', () => {
+    it('should include revision reasoning when provided', () => {
       const prompt = getArbiterUserPrompt(
         'portrait',
         SAMPLE_PROPOSAL,
@@ -145,27 +145,27 @@ describe('Arbiter Prompts', () => {
         null,
         'Revision reasoning after critique...',
       );
-      expect(prompt).toContain('revision_thinking');
+      expect(prompt).toContain('revision_reasoning');
       expect(prompt).toContain('Revision reasoning after critique...');
     });
 
-    it('should include both critic and revision thinking when both provided', () => {
+    it('should include both critic and revision reasoning when both provided', () => {
       const prompt = getArbiterUserPrompt(
         'portrait',
         SAMPLE_PROPOSAL,
         SAMPLE_CRITIQUE,
         SAMPLE_REVISION,
-        'Critic thinking...',
-        'Revision thinking...',
+        'Critic reasoning...',
+        'Revision reasoning...',
       );
-      expect(prompt).toContain('critic_thinking');
-      expect(prompt).toContain('revision_thinking');
+      expect(prompt).toContain('critic_reasoning');
+      expect(prompt).toContain('revision_reasoning');
     });
 
-    it('should not include thinking sections when null', () => {
+    it('should not include reasoning sections when null', () => {
       const prompt = getArbiterUserPrompt('portrait', SAMPLE_PROPOSAL, SAMPLE_CRITIQUE, null, null, null);
-      expect(prompt).not.toContain('critic_thinking');
-      expect(prompt).not.toContain('revision_thinking');
+      expect(prompt).not.toContain('critic_reasoning');
+      expect(prompt).not.toContain('revision_reasoning');
     });
 
     it('should include EXIF context when provided', () => {

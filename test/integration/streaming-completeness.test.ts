@@ -13,7 +13,7 @@
  *  - 流式事件 timestamp 严格非递减
  *  - 每个 agent_call 必有同 agent + 同 round 的 agent_complete 配对
  *  - evaluation_start 为首事件，evaluation_complete 为末事件
- *  - values 模式不包含 thinking_chunk / result_chunk
+ *  - values 模式不包含 reasoning_chunk / result_chunk
  *  - evaluation_complete.data 与 evaluate() 返回结构字段一致
  */
 
@@ -109,9 +109,9 @@ function assertAgentCallCompletePaired(events: EvaluationStreamEvent[]): void {
 describe('Mock - Streaming completeness rules', () => {
   it('event timestamps should be monotonically non-decreasing (3-round flow)', async () => {
     const engine = createMockEngine({
-      proposerResponses: [{ content: makeProposalJSON(), thinking: 'thinking-p' }],
-      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), thinking: 'thinking-c' }],
-      arbiterResponses: [{ content: makeArbiterJSON(), thinking: 'thinking-a' }],
+      proposerResponses: [{ content: makeProposalJSON(), reasoning: 'reasoning-p' }],
+      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), reasoning: 'reasoning-c' }],
+      arbiterResponses: [{ content: makeArbiterJSON(), reasoning: 'reasoning-a' }],
     });
 
     const events: EvaluationStreamEvent[] = [];
@@ -213,11 +213,11 @@ describe('Mock - Streaming completeness rules', () => {
     expect(last.type).toBe('evaluation_complete');
   });
 
-  it('values mode should NOT contain thinking_chunk or result_chunk', async () => {
+  it('values mode should NOT contain reasoning_chunk or result_chunk', async () => {
     const engine = createMockEngine({
-      proposerResponses: [{ content: makeProposalJSON(), thinking: 'thinking-p' }],
-      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), thinking: 'thinking-c' }],
-      arbiterResponses: [{ content: makeArbiterJSON(), thinking: 'thinking-a' }],
+      proposerResponses: [{ content: makeProposalJSON(), reasoning: 'reasoning-p' }],
+      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), reasoning: 'reasoning-c' }],
+      arbiterResponses: [{ content: makeArbiterJSON(), reasoning: 'reasoning-a' }],
     });
 
     const events: EvaluationStreamEvent[] = [];
@@ -225,7 +225,7 @@ describe('Mock - Streaming completeness rules', () => {
       events.push(event);
     }
 
-    const fineGrained = events.filter((e) => e.type === 'thinking_chunk' || e.type === 'result_chunk');
+    const fineGrained = events.filter((e) => e.type === 'reasoning_chunk' || e.type === 'result_chunk');
     expect(fineGrained.length).toBe(0);
   });
 
@@ -241,24 +241,24 @@ describe('Mock - Streaming completeness rules', () => {
       events.push(event);
     }
 
-    const fineGrained = events.filter((e) => e.type === 'thinking_chunk' || e.type === 'result_chunk');
+    const fineGrained = events.filter((e) => e.type === 'reasoning_chunk' || e.type === 'result_chunk');
     expect(fineGrained.length).toBe(0);
   });
 
   it('evaluation_complete.data should match evaluate() return structure (same mock inputs)', async () => {
     // Engine A: evaluate()
     const engineA = createMockEngine({
-      proposerResponses: [{ content: makeProposalJSON(), thinking: 't-p' }],
-      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), thinking: 't-c' }],
-      arbiterResponses: [{ content: makeArbiterJSON(), thinking: 't-a' }],
+      proposerResponses: [{ content: makeProposalJSON(), reasoning: 't-p' }],
+      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), reasoning: 't-c' }],
+      arbiterResponses: [{ content: makeArbiterJSON(), reasoning: 't-a' }],
     });
     const evaluateResult = await engineA.evaluate(MOCK_IMAGE, 'portrait');
 
     // Engine B: evaluateStream()（独立 mock provider，避免响应被消费）
     const engineB = createMockEngine({
-      proposerResponses: [{ content: makeProposalJSON(), thinking: 't-p' }],
-      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), thinking: 't-c' }],
-      arbiterResponses: [{ content: makeArbiterJSON(), thinking: 't-a' }],
+      proposerResponses: [{ content: makeProposalJSON(), reasoning: 't-p' }],
+      criticResponses: [{ content: makeCritiqueJSON('MEDIUM'), reasoning: 't-c' }],
+      arbiterResponses: [{ content: makeArbiterJSON(), reasoning: 't-a' }],
     });
     const events: EvaluationStreamEvent[] = [];
     for await (const event of engineB.evaluateStream(MOCK_IMAGE, { genre: 'portrait' })) {
@@ -299,13 +299,13 @@ function createRealEngine() {
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: API_KEY!,
     defaultModel: 'qwen3.6-plus',
-    thinking: {
-      enabled: true,
+    reasoning: {
+      effort: 'medium',
       agents: {
-        genreDetector: { budget: 2048 },
-        proposer: { budget: 2048 },
-        critic: { budget: 2048 },
-        arbiter: { budget: 2048 },
+        genreDetector: { effort: 'medium', budgetTokens: 2048 },
+        proposer: { effort: 'medium', budgetTokens: 2048 },
+        critic: { effort: 'medium', budgetTokens: 2048 },
+        arbiter: { effort: 'medium', budgetTokens: 2048 },
       },
     },
     timeout: 180_000,

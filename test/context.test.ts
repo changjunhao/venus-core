@@ -429,10 +429,7 @@ describe('Context Extension — context-formatter', () => {
   // ─────────────────────────────────────────────────────────
   describe('Custom Metadata Formatting', () => {
     it('should return empty string when all custom values are null/undefined', () => {
-      const result = formatContextForProposer(
-        { custom: { a: null, b: undefined, c: null } },
-        'portrait',
-      );
+      const result = formatContextForProposer({ custom: { a: null, b: undefined, c: null } }, 'portrait');
       expect(result).toBe('');
     });
 
@@ -442,10 +439,7 @@ describe('Context Extension — context-formatter', () => {
     });
 
     it('should JSON.stringify nested object values', () => {
-      const result = formatContextForProposer(
-        { custom: { meta: { tripName: '北疆', day: 3 } } },
-        'portrait',
-      );
+      const result = formatContextForProposer({ custom: { meta: { tripName: '北疆', day: 3 } } }, 'portrait');
 
       expect(result).toContain('## 补充信息');
       expect(result).toContain('- meta：');
@@ -454,10 +448,7 @@ describe('Context Extension — context-formatter', () => {
     });
 
     it('should JSON.stringify array values (typeof object)', () => {
-      const result = formatContextForProposer(
-        { custom: { tags: ['portrait', 'studio'] } },
-        'portrait',
-      );
+      const result = formatContextForProposer({ custom: { tags: ['portrait', 'studio'] } }, 'portrait');
 
       expect(result).toContain('- tags：["portrait","studio"]');
     });

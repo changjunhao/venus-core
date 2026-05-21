@@ -107,13 +107,13 @@ describe('Proposer Prompts', () => {
       expect(prompt).toContain(`${config.dimensions.length}个维度`);
     });
 
-    it('should include genre detection thinking when present in context', () => {
+    it('should include genre detection reasoning when present in context', () => {
       const context: EvaluationContext = {
-        genreDetectionThinking: 'Detected as portrait because of subject focus.',
+        genreDetectionReasoning: 'Detected as portrait because of subject focus.',
       };
       const prompt = getProposerUserPrompt('portrait', context);
       expect(prompt).toContain('门类检测依据');
-      expect(prompt).toContain('genre_detection_thinking');
+      expect(prompt).toContain('genre_detection_reasoning');
       expect(prompt).toContain('Detected as portrait because of subject focus.');
     });
   });
@@ -165,14 +165,14 @@ describe('Proposer Prompts', () => {
       expect(prompt).toContain('"severity": "HIGH"');
     });
 
-    it('should include critic thinking when provided', () => {
+    it('should include critic reasoning when provided', () => {
       const prompt = getRevisionUserPrompt(
         'portrait',
         originalProposal,
         critiqueResult,
         'Critic reasoning about lighting issues...',
       );
-      expect(prompt).toContain('critic_thinking');
+      expect(prompt).toContain('critic_reasoning');
       expect(prompt).toContain('Critic reasoning about lighting issues...');
     });
 

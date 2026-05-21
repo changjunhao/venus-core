@@ -57,16 +57,16 @@ describe('ArbiterAgent', () => {
   describe('decide() — arbitration logic', () => {
     it('should return a valid ArbiterResult', async () => {
       const provider = createMockProvider([
-        { content: makeArbiterJSON(7.2), thinking: 'Weighing both perspectives...' },
+        { content: makeArbiterJSON(7.2), reasoning: 'Weighing both perspectives...' },
       ]);
       const agent = new ArbiterAgent(provider, { model: 'test-model' });
 
-      const { result, thinking } = await agent.decide(
+      const { result, reasoning } = await agent.decide(
         IMAGE_URL,
         MOCK_PROPOSAL,
         MOCK_CRITIQUE,
         null, // no revision
-        'Critic thinking...',
+        'Critic reasoning...',
         null,
         'portrait',
       );
@@ -77,7 +77,7 @@ describe('ArbiterAgent', () => {
       expect(result.critique).toBeTruthy();
       expect(result.suggestions).toBeTruthy();
       expect(result.arbitration_notes).toBeTruthy();
-      expect(thinking).toBe('Weighing both perspectives...');
+      expect(reasoning).toBe('Weighing both perspectives...');
     });
 
     it('should handle revision result when provided (4-round flow)', async () => {
@@ -89,8 +89,8 @@ describe('ArbiterAgent', () => {
         MOCK_PROPOSAL,
         MOCK_CRITIQUE,
         MOCK_REVISION,
-        'Critic thinking...',
-        'Revision thinking...',
+        'Critic reasoning...',
+        'Revision reasoning...',
         'portrait',
       );
 
@@ -98,7 +98,7 @@ describe('ArbiterAgent', () => {
       expect(result.arbitration_notes).toBeTruthy();
     });
 
-    it('should handle null thinking from both critic and revision', async () => {
+    it('should handle null reasoning from both critic and revision', async () => {
       const provider = createMockProvider([{ content: makeArbiterJSON() }]);
       const agent = new ArbiterAgent(provider, { model: 'test-model' });
 

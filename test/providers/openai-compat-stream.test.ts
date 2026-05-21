@@ -102,8 +102,8 @@ describe('OpenAI-Compat chatStream()', () => {
     return chunks;
   }
 
-  // ─── Test 1: reasoning_content field yields { thinking } ───
-  it('should yield { thinking } for reasoning_content field in delta', async () => {
+  // ─── Test 1: reasoning_content field yields { reasoning } ───
+  it('should yield { reasoning } for reasoning_content field in delta', async () => {
     const streamChunks = [
       makeStreamChunk({ reasoning_content: 'step 1: analyze' }),
       makeStreamChunk({ reasoning_content: 'step 2: conclude' }),
@@ -114,12 +114,12 @@ describe('OpenAI-Compat chatStream()', () => {
     const result = await collectStream(provider);
 
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ thinking: 'step 1: analyze' });
-    expect(result[1]).toEqual({ thinking: 'step 2: conclude' });
+    expect(result[0]).toEqual({ reasoning: 'step 1: analyze' });
+    expect(result[1]).toEqual({ reasoning: 'step 2: conclude' });
   });
 
-  // ─── Test 2: thinking field yields { thinking } ───
-  it('should yield { thinking } for thinking field in delta', async () => {
+  // ─── Test 2: thinking field (wire) yields { reasoning } ───
+  it('should yield { reasoning } for thinking field in delta', async () => {
     const streamChunks = [
       makeStreamChunk({ thinking: 'Let me think about this...' }),
       makeStreamChunk({ thinking: 'I see the pattern now.' }),
@@ -130,8 +130,8 @@ describe('OpenAI-Compat chatStream()', () => {
     const result = await collectStream(provider);
 
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ thinking: 'Let me think about this...' });
-    expect(result[1]).toEqual({ thinking: 'I see the pattern now.' });
+    expect(result[0]).toEqual({ reasoning: 'Let me think about this...' });
+    expect(result[1]).toEqual({ reasoning: 'I see the pattern now.' });
   });
 
   // ─── Test 3: content with parser returning partial ───
@@ -139,10 +139,7 @@ describe('OpenAI-Compat chatStream()', () => {
     const partialObj = { score: 8, dimensions: { composition: 9 } };
     mockParserInstance.getValue.mockReturnValue(partialObj);
 
-    const streamChunks = [
-      makeStreamChunk({ content: '{"score":' }),
-      makeStreamChunk({ content: '8}' }),
-    ];
+    const streamChunks = [makeStreamChunk({ content: '{"score":' }), makeStreamChunk({ content: '8}' })];
     mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
 
     const provider = makeProvider();
@@ -263,9 +260,7 @@ describe('OpenAI-Compat chatStream()', () => {
 
   // ─── Test 10: parser.destroy() is called after successful stream ───
   it('should call parser.destroy() after stream completes successfully', async () => {
-    const streamChunks = [
-      makeStreamChunk({ content: 'done' }),
-    ];
+    const streamChunks = [makeStreamChunk({ content: 'done' })];
     mockParserInstance.getValue.mockReturnValue(undefined);
     mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
 

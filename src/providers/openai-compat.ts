@@ -15,6 +15,14 @@ import { ProviderError } from '../utils/errors.js';
 import type { ProviderErrorCode } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
+import {
+  adaptReasoningParams,
+  detectProviderStyle,
+  extractReasoningContent,
+  extractStreamReasoning,
+  extractTokenUsage,
+  type ProviderStyle,
+} from './reasoning-adapter.js';
 
 export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMProvider {
   const client = new OpenAI({
@@ -24,6 +32,8 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
     defaultHeaders: options.headers,
   });
 
+  const style: ProviderStyle = options.style ?? detectProviderStyle(options.baseURL);
+
   /** Build common request body for chat / chatStream */
   function buildRequestBody(params: ChatParams, stream?: boolean): Record<string, unknown> {
     const body: Record<string, unknown> = {
@@ -32,15 +42,25 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
     };
 
     if (stream) body.stream = true;
-    if (params.temperature !== undefined) body.temperature = params.temperature;
+
+    // Kimi k2.6/k2.5 fix temperature internally (1.0 for thinking, 0.6 for non-thinking)
+    // and will reject any other value. OpenAI/DeepSeek reasoning models also ignore temperature.
+    const skipTemperature =
+      style === 'kimi' || (params.reasoning !== undefined && (style === 'openai' || style === 'deepseek'));
+    if (params.temperature !== undefined && !skipTemperature) {
+      body.temperature = params.temperature;
+    }
+
     if (params.response_format) body.response_format = params.response_format;
 
-    // Handle thinking/chain-of-thought — 显式传递 enabled 状态
-    if (params.thinking) {
-      body.enable_thinking = params.thinking.enabled;
-      if (params.thinking.enabled && params.thinking.budget_tokens) {
-        body.thinking_budget = params.thinking.budget_tokens;
-      }
+    // Adapt reasoning params into vendor-specific request fields
+    const reasoningFields = adaptReasoningParams(params.reasoning, style);
+    Object.assign(body, reasoningFields);
+
+    // Kimi's thinking models default to enabled. When the caller does NOT configure
+    // reasoning, we must explicitly disable thinking to get standard (non-reasoning) behavior.
+    if (style === 'kimi' && params.reasoning === undefined) {
+      body.thinking = { type: 'disabled' };
     }
 
     // Merge defaultExtra and per-call extra (per-call takes priority)
@@ -54,8 +74,12 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
 
   const provider = defineProvider({
     name: `openai-compat(${options.baseURL})`,
-    supportsVision: true,
-    supportsThinking: true,
+    capabilities: {
+      vision: true,
+      reasoning: true,
+      reasoningBudget: style === 'anthropic' || style === 'qwen',
+      streaming: true,
+    },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
       try {
@@ -70,21 +94,17 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
           throw new ProviderError('Empty response from provider', provider.name, 'api_error');
         }
 
-        // Extract thinking from various possible locations
         const message = choice.message as unknown as Record<string, unknown>;
-        let thinking: string | null = null;
+        const reasoning = extractReasoningContent(message);
+        const usage = extractTokenUsage(response);
 
-        if (typeof message.reasoning_content === 'string') {
-          thinking = message.reasoning_content;
-        } else if (typeof message.thinking === 'string') {
-          thinking = message.thinking;
-        }
-
-        return {
+        const result: ChatResponse = {
           content: (message.content as string) ?? '',
-          thinking,
+          reasoning,
           raw: response,
         };
+        if (usage) result.usage = usage;
+        return result;
       } catch (error) {
         if (error instanceof ProviderError) throw error;
 
@@ -144,11 +164,10 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
 
           const message = delta as unknown as Record<string, unknown>;
 
-          // Yield thinking/reasoning chunks
-          if (typeof message.reasoning_content === 'string') {
-            yield { thinking: message.reasoning_content };
-          } else if (typeof message.thinking === 'string') {
-            yield { thinking: message.thinking };
+          // Yield reasoning chunks
+          const reasoningDelta = extractStreamReasoning(message);
+          if (reasoningDelta !== null) {
+            yield { reasoning: reasoningDelta };
           }
 
           // Yield content and incremental JSON partials

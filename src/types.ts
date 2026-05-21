@@ -39,6 +39,52 @@ export type {
 /** Agent role identifiers used across engine config */
 export type AgentRole = 'genreDetector' | 'proposer' | 'critic' | 'arbiter' | 'revision';
 
+// ─── Reasoning Types ─────────────────────────────────────
+
+/** Reasoning effort level (aligned with OpenAI Reasoning API) */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
+/** Per-agent reasoning configuration */
+export interface AgentReasoningConfig {
+  effort: ReasoningEffort;
+  budgetTokens?: number;
+}
+
+/** Engine-level reasoning configuration with optional per-agent overrides */
+export interface ReasoningConfig {
+  /** Default reasoning effort applied to all agents (when set) */
+  effort?: ReasoningEffort;
+  /** Default token budget for reasoning */
+  budgetTokens?: number;
+  /** Per-agent overrides; set to `false` to disable reasoning for a specific agent */
+  agents?: Partial<Record<AgentRole, AgentReasoningConfig | false>>;
+}
+
+/** Per-call reasoning parameters passed to a provider */
+export interface ChatReasoningParams {
+  effort: ReasoningEffort;
+  budgetTokens?: number;
+}
+
+/** Provider feature capabilities */
+export interface ProviderCapabilities {
+  /** Whether the provider supports reasoning/chain-of-thought */
+  reasoning: boolean;
+  /** Whether the provider supports a tunable reasoning token budget */
+  reasoningBudget: boolean;
+  /** Whether the provider supports vision/image inputs */
+  vision: boolean;
+  /** Whether the provider supports streaming */
+  streaming: boolean;
+}
+
+/** Token usage statistics from an LLM call */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+}
+
 // ─── LLM Provider Types ──────────────────────────────────
 
 /** Content types for multi-modal messages */
@@ -56,10 +102,8 @@ export interface ChatParams {
   messages: ChatMessage[];
   temperature?: number;
   response_format?: { type: 'json_object' };
-  thinking?: {
-    enabled: boolean;
-    budget_tokens?: number;
-  };
+  /** Reasoning configuration for this call */
+  reasoning?: ChatReasoningParams;
   /** Provider-specific extra parameters */
   extra?: Record<string, unknown>;
 }
@@ -67,7 +111,10 @@ export interface ChatParams {
 /** Response from an LLM chat call */
 export interface ChatResponse {
   content: string;
-  thinking: string | null;
+  /** Reasoning/chain-of-thought content emitted by the model */
+  reasoning: string | null;
+  /** Token usage statistics, when reported by the provider */
+  usage?: TokenUsage;
   raw?: unknown;
 }
 
@@ -79,11 +126,8 @@ export interface LLMProvider {
   /** Execute a streaming chat completion, yielding chunks in real-time */
   chatStream?(params: ChatParams): AsyncIterable<StreamChunk>;
 
-  /** Whether this provider supports vision/image inputs */
-  readonly supportsVision: boolean;
-
-  /** Whether this provider supports thinking/chain-of-thought */
-  readonly supportsThinking: boolean;
+  /** Provider feature capabilities */
+  readonly capabilities: ProviderCapabilities;
 
   /** Provider name for logging/debugging */
   readonly name: string;
@@ -96,8 +140,8 @@ export type StreamMode = 'values' | 'updates';
 
 /** Single chunk yielded by a provider's chatStream */
 export interface StreamChunk {
-  /** Thinking/reasoning content delta */
-  thinking?: string;
+  /** Reasoning content delta */
+  reasoning?: string;
   /** Content text delta */
   content?: string;
   /** Incrementally parsed JSON partial (available when content is JSON) */
@@ -120,10 +164,8 @@ export interface EvaluateStreamOptions {
 export interface AgentConfig {
   /** Model identifier to use */
   model: string;
-  /** Enable chain-of-thought reasoning */
-  enableThinking?: boolean;
-  /** Token budget for thinking */
-  thinkingBudget?: number;
+  /** Reasoning configuration for this agent */
+  reasoning?: ChatReasoningParams;
   /** Temperature for generation */
   temperature?: number;
   /** Maximum retry attempts */
@@ -133,14 +175,14 @@ export interface AgentConfig {
 /** Result from an agent call */
 export interface AgentCallResult<T = unknown> {
   result: T;
-  thinking: string | null;
+  /** Reasoning/chain-of-thought content emitted by the model */
+  reasoning: string | null;
 }
 
 /** Agent call configuration override */
 export interface CallConfig {
   model?: string;
-  enableThinking?: boolean;
-  thinkingBudget?: number;
+  reasoning?: ChatReasoningParams;
   temperature?: number;
 }
 
@@ -198,22 +240,6 @@ export type ModelConfig = Partial<Record<AgentRole, string>>;
 /** Agent-specific provider overrides */
 export type ProviderConfig = Partial<Record<AgentRole, LLMProvider>>;
 
-/** Per-agent thinking configuration */
-export interface AgentThinkingConfig {
-  /** 是否启用思考（覆盖全局 enabled） */
-  enabled?: boolean;
-  /** 思考 token 预算 */
-  budget?: number;
-}
-
-/** Thinking configuration — 支持全局默认 + 按角色覆盖 */
-export interface ThinkingConfig {
-  /** 全局默认（不配默认 false），可被 agents 按角色覆盖 */
-  enabled?: boolean;
-  /** 按 Agent 角色单独配置 */
-  agents?: Partial<Record<AgentRole, AgentThinkingConfig>>;
-}
-
 /** Event emitted during evaluation */
 export interface EvaluationEvent {
   type: 'round_start' | 'round_complete' | 'agent_call' | 'agent_complete' | 'error';
@@ -235,8 +261,8 @@ export interface VenusEngineConfig {
   models?: ModelConfig;
   /** Custom provider instances for advanced routing */
   providers?: ProviderConfig;
-  /** Chain-of-thought configuration */
-  thinking?: ThinkingConfig;
+  /** Reasoning configuration (replaces legacy `thinking`) */
+  reasoning?: ReasoningConfig;
   /** Maximum retry attempts for agent LLM calls (default: 3 per agent) */
   maxRetries?: number;
   /** Request timeout in milliseconds (passed to LLM provider) */
@@ -270,15 +296,15 @@ export interface MetadataResponse {
 /** 流式评估事件 */
 export type EvaluationStreamEvent =
   | { type: 'evaluation_start'; data: { imageUrl: string; genre: Genre }; timestamp: number }
-  | { type: 'genre_detected'; data: { genre: Genre; thinking: string | null }; timestamp: number }
+  | { type: 'genre_detected'; data: { genre: Genre; reasoning: string | null }; timestamp: number }
   | { type: 'agent_call'; round: number; agent: string; timestamp: number }
-  | { type: 'thinking_chunk'; agent: string; content: string; timestamp: number }
+  | { type: 'reasoning_chunk'; agent: string; content: string; timestamp: number }
   | { type: 'result_chunk'; agent: string; partial: Record<string, unknown>; timestamp: number }
   | {
       type: 'agent_complete';
       round: number;
       agent: string;
-      data: { result: unknown; thinking: string | null };
+      data: { result: unknown; reasoning: string | null };
       timestamp: number;
     }
   | { type: 'evaluation_complete'; data: EvaluationResult; timestamp: number }

@@ -27,8 +27,8 @@ export class ArbiterAgent extends BaseAgent {
     proposalResult: ProposerResult,
     critiqueResult: CritiqueResult,
     revisionResult: ProposerResult | null,
-    critiqueThinking: string | null,
-    revisionThinking: string | null,
+    critiqueReasoning: string | null,
+    revisionReasoning: string | null,
     context?: EvaluationContext,
   ) {
     const { arbiterSchema } = getSchemas(genre);
@@ -40,8 +40,8 @@ export class ArbiterAgent extends BaseAgent {
         proposalResult,
         critiqueResult,
         revisionResult,
-        critiqueThinking,
-        revisionThinking,
+        critiqueReasoning,
+        revisionReasoning,
         context,
       ),
     };
@@ -53,9 +53,9 @@ export class ArbiterAgent extends BaseAgent {
     proposalResult: ProposerResult,
     critiqueResult: CritiqueResult,
     revisionResult: ProposerResult | null,
-    proposerThinking: string | null,
-    critiqueThinking: string | null,
-    revisionThinking: string | null,
+    proposerReasoning: string | null,
+    critiqueReasoning: string | null,
+    revisionReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
   ): Promise<AgentCallResult<ArbitrationResult>> {
@@ -64,8 +64,8 @@ export class ArbiterAgent extends BaseAgent {
       proposalResult,
       critiqueResult,
       revisionResult,
-      critiqueThinking,
-      revisionThinking,
+      critiqueReasoning,
+      revisionReasoning,
       context,
     );
     return await this.call(systemPrompt, userPrompt, imageUrl, schema);
@@ -77,9 +77,9 @@ export class ArbiterAgent extends BaseAgent {
     proposalResult: ProposerResult,
     critiqueResult: CritiqueResult,
     revisionResult: ProposerResult | null,
-    proposerThinking: string | null,
-    critiqueThinking: string | null,
-    revisionThinking: string | null,
+    proposerReasoning: string | null,
+    critiqueReasoning: string | null,
+    revisionReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
   ): AsyncGenerator<StreamChunk, AgentCallResult<ArbitrationResult>, unknown> {
@@ -88,8 +88,8 @@ export class ArbiterAgent extends BaseAgent {
       proposalResult,
       critiqueResult,
       revisionResult,
-      critiqueThinking,
-      revisionThinking,
+      critiqueReasoning,
+      revisionReasoning,
       context,
     );
     return this.callStream<ArbitrationResult>(systemPrompt, userPrompt, imageUrl, schema);

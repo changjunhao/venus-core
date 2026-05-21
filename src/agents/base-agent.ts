@@ -54,16 +54,14 @@ export class BaseAgent {
     ];
   }
 
-  /** Resolve effective thinking config for a call */
-  #resolveThinking(callConfig?: CallConfig): { enableThinking: boolean; thinkingBudget: number | null } {
-    return {
-      enableThinking: callConfig?.enableThinking ?? this.config.enableThinking ?? false,
-      thinkingBudget: callConfig?.thinkingBudget ?? this.config.thinkingBudget ?? null,
-    };
+  /** Format reasoning settings for log output */
+  #formatReasoningLog(reasoning: AgentConfig['reasoning']): string {
+    if (!reasoning) return 'standard';
+    return `effort=${reasoning.effort}${reasoning.budgetTokens ? `, budget=${reasoning.budgetTokens}` : ''}`;
   }
 
   /** Parse JSON content and validate with Zod schema */
-  #parseResponse<T>(rawContent: string, schema: ZodType, thinking: string | null, label?: string): AgentCallResult<T> {
+  #parseResponse<T>(rawContent: string, schema: ZodType, reasoning: string | null, label?: string): AgentCallResult<T> {
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawContent);
@@ -73,7 +71,7 @@ export class BaseAgent {
     // Runtime validation by Zod; as T is safe because schema.parse() validates the shape
     const result = schema.parse(parsed) as T;
     this.logger.info(label ? `${label}验证通过` : '验证通过');
-    return { result, thinking };
+    return { result, reasoning };
   }
 
   /**
@@ -93,9 +91,9 @@ export class BaseAgent {
     callConfig?: CallConfig,
   ): Promise<AgentCallResult<T>> {
     let lastError: Error | null = null;
-    let thinking: string | null = null;
+    let reasoning: string | null = null;
     const history: ChatMessage[] = [];
-    const { enableThinking, thinkingBudget } = this.#resolveThinking(callConfig);
+    const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
 
     for (let attempt = 0; attempt < this.#maxRetries; attempt++) {
       try {
@@ -103,22 +101,22 @@ export class BaseAgent {
 
         this.logger.info(`第 ${attempt + 1} 次调用...`);
         this.logger.debug(
-          `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, thinking=${enableThinking ? `enabled(budget=${thinkingBudget ?? 'default'})` : 'disabled'}, attempt=${attempt + 1}/${this.#maxRetries}`,
+          `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, attempt=${attempt + 1}/${this.#maxRetries}`,
         );
 
         const response = await this.provider.chat({
           model: callConfig?.model ?? this.config.model,
           messages: requestMessages,
-          temperature: 0.3,
+          temperature: this.config.temperature ?? 0.3,
           response_format: { type: 'json_object' },
-          thinking: { enabled: enableThinking, budget_tokens: enableThinking ? (thinkingBudget ?? undefined) : undefined },
+          reasoning: reasoningParams,
         });
 
-        thinking = response.thinking ?? null;
-        return this.#parseResponse<T>(response.content, schema, thinking);
+        reasoning = response.reasoning ?? null;
+        return this.#parseResponse<T>(response.content, schema, reasoning);
       } catch (error) {
         lastError = error as Error;
-        this.logger.warn(`第 ${attempt + 1} 次尝试失败: ${lastError.message}${thinking ? ' (有思维链)' : ''}`);
+        this.logger.warn(`第 ${attempt + 1} 次尝试失败: ${lastError.message}${reasoning ? ' (有推理链)' : ''}`);
 
         // 如果不是最后一次尝试，将错误信息加入对话历史让模型自我修正
         if (attempt < this.#maxRetries - 1) {
@@ -159,7 +157,7 @@ export class BaseAgent {
       return (await this.call<T>(systemPrompt, userPrompt, imageUrl, schema, callConfig)) as AgentCallResult<T>;
     }
 
-    const { enableThinking, thinkingBudget } = this.#resolveThinking(callConfig);
+    const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
     let lastError: Error | null = null;
     const history: ChatMessage[] = [];
 
@@ -173,26 +171,26 @@ export class BaseAgent {
 
       this.logger.info(`流式第 ${attempt + 1} 次调用...`);
       this.logger.debug(
-        `Calling provider (stream): role=${this.name}, model=${callConfig?.model ?? this.config.model}, thinking=${enableThinking ? `enabled(budget=${thinkingBudget ?? 'default'})` : 'disabled'}, attempt=${attempt + 1}/${this.#maxRetries}`,
+        `Calling provider (stream): role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, attempt=${attempt + 1}/${this.#maxRetries}`,
       );
 
-      let thinking = '';
+      let reasoning = '';
       let finalContent = '';
 
       for await (const chunk of this.provider.chatStream({
         model: callConfig?.model ?? this.config.model,
         messages: requestMessages,
-        temperature: 0.3,
+        temperature: this.config.temperature ?? 0.3,
         response_format: { type: 'json_object' },
-        thinking: { enabled: enableThinking, budget_tokens: enableThinking ? (thinkingBudget ?? undefined) : undefined },
+        reasoning: reasoningParams,
       })) {
-        if (chunk.thinking) thinking += chunk.thinking;
+        if (chunk.reasoning) reasoning += chunk.reasoning;
         if (chunk.content) finalContent += chunk.content;
         yield chunk;
       }
 
       try {
-        return this.#parseResponse<T>(finalContent, schema, thinking || null, '流式');
+        return this.#parseResponse<T>(finalContent, schema, reasoning || null, '流式');
       } catch (err: unknown) {
         lastError = err as Error;
         this.logger.warn(

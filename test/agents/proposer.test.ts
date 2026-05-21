@@ -20,17 +20,17 @@ describe('ProposerAgent', () => {
   // ── evaluate() 初评流程 ──
   describe('evaluate() — initial evaluation', () => {
     it('should return a valid ProposalResult for portrait genre', async () => {
-      const provider = createMockProvider([{ content: makeProposalJSON(8.0), thinking: 'Analyzing portrait...' }]);
+      const provider = createMockProvider([{ content: makeProposalJSON(8.0), reasoning: 'Analyzing portrait...' }]);
       const agent = new ProposerAgent(provider, { model: 'test-model' });
 
-      const { result, thinking } = await agent.evaluate(IMAGE_URL, 'portrait');
+      const { result, reasoning } = await agent.evaluate(IMAGE_URL, 'portrait');
 
       expect(result.scene_type).toBe('studio');
       expect(result.total_score).toBe(8.0);
       expect(Object.keys(result.dimensions)).toHaveLength(5);
       expect(result.critique).toBeTruthy();
       expect(result.suggestions).toBeTruthy();
-      expect(thinking).toBe('Analyzing portrait...');
+      expect(reasoning).toBe('Analyzing portrait...');
     });
 
     it('should default to portrait genre when none specified', async () => {
@@ -49,7 +49,7 @@ describe('ProposerAgent', () => {
     it('should return revised ProposalResult incorporating critique feedback', async () => {
       const revisedJSON = makeProposalJSON(7.0);
       const provider = createMockProvider([
-        { content: revisedJSON, thinking: 'Revised after considering critique...' },
+        { content: revisedJSON, reasoning: 'Revised after considering critique...' },
       ]);
       const agent = new ProposerAgent(provider, { model: 'test-model' });
 
@@ -81,35 +81,34 @@ describe('ProposerAgent', () => {
         suggested_total_score: 7.0,
       };
 
-      const { result, thinking } = await agent.revise(
+      const { result, reasoning } = await agent.revise(
         IMAGE_URL,
         originalProposal,
         critiqueResult,
-        'Critic thinking about issues...',
+        'Critic reasoning about issues...',
         'portrait',
       );
 
       expect(result.total_score).toBe(7.0);
       expect(result.scene_type).toBe('studio');
-      expect(thinking).toBe('Revised after considering critique...');
+      expect(reasoning).toBe('Revised after considering critique...');
     });
 
     it('should use revisionConfig when provided', async () => {
       let capturedModel: string | undefined;
       const provider = defineProvider({
         name: 'capture-provider',
-        supportsVision: true,
-        supportsThinking: true,
+        capabilities: { vision: true, reasoning: true, reasoningBudget: true },
         chat: async (params) => {
           capturedModel = params.model;
-          return { content: makeProposalJSON(7.0), thinking: null };
+          return { content: makeProposalJSON(7.0), reasoning: null };
         },
       });
 
       const agent = new ProposerAgent(
         provider,
         { model: 'base-model' },
-        { model: 'revision-model', enableThinking: true, thinkingBudget: 2000 },
+        { model: 'revision-model', reasoning: { effort: 'medium', budgetTokens: 2000 } },
       );
 
       await agent.revise(

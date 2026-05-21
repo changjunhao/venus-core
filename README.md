@@ -39,12 +39,13 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **Multi-Agent Adversarial Pipeline** — Proposer → Critic → Revision → Arbiter ensures robust, bias-mitigated scoring
 - **8 Photography Genres** — Portrait, Landscape, Documentary, Fine Art, Commercial, Architecture, Nature, Sports
 - **Multi-Model Routing** — Per-agent model selection and per-agent custom LLM providers
+- **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope) and Kimi (Moonshot)
 - **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming
-- **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time thinking + JSON partials)
+- **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth
 - **Event System** — `onEvent` callback for real-time observability into each pipeline stage
 - **Web Framework Adapters** — First-class Hono and Express integration with shared Zod validation
-- **Chain-of-Thought** — Per-agent thinking/reasoning budget with cross-model CoT extraction
+- **Chain-of-Thought** — Per-agent reasoning effort and token budget with cross-provider auto-adaptation
 - **Dynamic Zod Schemas** — Per-genre schema generation with caching for input and output validation
 - **Structured Errors** — Fine-grained error hierarchy with provider-level error codes
 - **Full TypeScript** — Complete type definitions for all public APIs
@@ -130,11 +131,11 @@ Streaming evaluation that yields events at each stage:
 | Event Type | Description |
 |------------|-------------|
 | `evaluation_start` | Evaluation has begun |
-| `genre_detected` | Genre auto-detection result (includes thinking) |
+| `genre_detected` | Genre auto-detection result (includes reasoning) |
 | `agent_call` | An agent round is starting |
-| `thinking_chunk` | Real-time thinking/reasoning text (only in `updates` mode) |
+| `reasoning_chunk` | Real-time reasoning text (only in `updates` mode) |
 | `result_chunk` | Incremental JSON partial (only in `updates` mode) |
-| `agent_complete` | An agent round has finished (includes result + thinking) |
+| `agent_complete` | An agent round has finished (includes result + reasoning) |
 | `evaluation_complete` | Final result available |
 | `error` | An error occurred |
 
@@ -151,7 +152,7 @@ Streaming evaluation that yields events at each stage:
 | Mode | Behavior |
 |------|----------|
 | `values` | Emits milestone events only: `agent_call`, `agent_complete`, `evaluation_start`, `genre_detected`, `evaluation_complete`, `error` |
-| `updates` | All of `values` plus real-time `thinking_chunk` and `result_chunk` events for incremental UI updates |
+| `updates` | All of `values` plus real-time `reasoning_chunk` and `result_chunk` events for incremental UI updates |
 
 ### Schema & Genre Utilities
 
@@ -243,26 +244,46 @@ Create a fully custom provider by implementing the `chat()` method directly.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `name` | `string` | *required* | Provider name for logging |
-| `supportsVision` | `boolean` | `false` | Whether provider handles image inputs |
-| `supportsThinking` | `boolean` | `false` | Whether provider supports chain-of-thought |
+| `capabilities` | `ProviderCapabilities` | — | Provider capability flags |
 | `chat` | `(params: ChatParams) => Promise<ChatResponse>` | *required* | Chat completion implementation |
 | `chatStream` | `(params: ChatParams) => AsyncIterable<StreamChunk>` | — | Optional streaming implementation |
+
+`ProviderCapabilities`:
+
+```ts
+interface ProviderCapabilities {
+  reasoning: boolean;       // Supports reasoning/thinking mode
+  reasoningBudget: boolean; // Supports explicit token budget
+  vision: boolean;          // Supports image inputs
+  streaming: boolean;       // Supports streaming
+}
+```
 
 ```ts
 import { createVenusEngine, defineProvider } from '@theogony/venus-core';
 
 const myProvider = defineProvider({
   name: 'my-llm',
-  supportsVision: true,
-  supportsThinking: false,
+  capabilities: {
+    vision: true,
+    reasoning: true,
+    reasoningBudget: true,
+  },
   async chat(params) {
     const res = await fetch('https://my-llm-api.com/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: params.model, messages: params.messages }),
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        reasoning: params.reasoning,  // Access reasoning params
+      }),
     });
     const data = await res.json();
-    return { content: data.text, thinking: null };
+    return {
+      content: data.text,
+      reasoning: data.reasoning_content ?? null,
+    };
   },
 });
 
@@ -314,6 +335,7 @@ All public types are re-exported for consumer use:
 
 ```ts
 import type {
+  // Core types
   Genre,
   GenreConfig,
   GenreMetadata,
@@ -325,21 +347,43 @@ import type {
   EvaluationStreamEvent,
   EvaluateStreamOptions,
   StreamMode,
+  
+  // Provider types
   LLMProvider,
+  ProviderCapabilities,
   ChatParams,
   ChatResponse,
   ChatMessage,
+  ChatContentPart,
   StreamChunk,
+  TokenUsage,
+  ReasoningEffort,
+  ReasoningConfig,
+  AgentReasoningConfig,
+  ChatReasoningParams,
+  OpenAICompatOptions,
+  DefineProviderOptions,
+  ProviderStyle,
+  
+  // Engine & Agent types
   VenusEngineConfig,
-  ProviderErrorCode,
   AgentRole,
   AgentConfig,
   AgentCallResult,
-  ProposerResult,
-  ArbitrationResult,
   ModelConfig,
   ProviderConfig,
-  ThinkingConfig,
+  
+  // Result types
+  ProposerResult,
+  ArbitrationResult,
+  CritiqueResult,
+  CritiqueChallenge,
+  SceneTypeReview,
+  
+  // Error types
+  ProviderErrorCode,
+  
+  // Adapter types
   AdapterOptions,
   MetadataResponse,
 } from '@theogony/venus-core';
@@ -386,14 +430,14 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 
 #### Streaming with `updates` Mode
 
-For real-time thinking and incremental JSON partials, use `mode: 'updates'`:
+For real-time reasoning and incremental JSON partials, use `mode: 'updates'`:
 
 ```ts
 for await (const event of engine.evaluateStream('https://example.com/photo.jpg', {
   mode: 'updates',
 })) {
   switch (event.type) {
-    case 'thinking_chunk':
+    case 'reasoning_chunk':
       // Stream agent reasoning in real-time
       process.stdout.write(event.content);
       break;
@@ -451,7 +495,8 @@ Both adapters expose the same endpoints:
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/evaluate` | Synchronous evaluation |
-| `POST` | `/evaluate/stream` | Streaming evaluation (SSE) |
+| `POST` | `/evaluate/stream` | Streaming evaluation (SSE / `text/event-stream`) |
+| `POST` | `/evaluate/stream/jsonl` | Streaming evaluation (JSON Lines / `application/x-ndjson`) |
 | `GET` | `/metadata` | Genre metadata and dimensions |
 
 ### Context Extension
@@ -561,7 +606,7 @@ const engine = createVenusEngine({
 | `round_start` | `{ round, agent, data }` |
 | `round_complete` | `{ round }` |
 | `agent_call` | `{ round, agent }` |
-| `agent_complete` | `{ round, agent, data: { result, thinking } }` |
+| `agent_complete` | `{ round, agent, data: { result, reasoning } }` |
 | `error` | `{ agent, data: { error } }` |
 
 ---
@@ -592,22 +637,24 @@ const engine = createVenusEngine({
 | `defaultModel` | `string` | `'qwen3-vl-flash'` | Default model for all agents |
 | `models` | `ModelConfig` | — | Per-agent model overrides (`genreDetector`, `proposer`, `critic`, `arbiter`, `revision`) |
 | `providers` | `ProviderConfig` | — | Per-agent custom provider instances |
-| `thinking` | `ThinkingConfig` | — | Chain-of-thought config with global `enabled` and per-agent `agents` overrides |
+| `reasoning` | `ReasoningConfig` | — | Reasoning config with global `effort`/`budgetTokens` and per-agent `agents` overrides |
 | `maxRetries` | `number` | — | Max retry attempts per agent LLM call |
 | `timeout` | `number` | — | Request timeout in milliseconds |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | Event callback for observability |
 
-### Thinking Configuration
+### Reasoning Configuration
 
 ```ts
-interface ThinkingConfig {
-  /** Global default (defaults to false). Can be overridden per agent. */
-  enabled?: boolean;
-  /** Per-agent overrides */
+interface ReasoningConfig {
+  /** Default reasoning effort applied to all agents (when set) */
+  effort?: 'low' | 'medium' | 'high';
+  /** Default token budget for reasoning */
+  budgetTokens?: number;
+  /** Per-agent overrides; set to `false` to disable reasoning for a specific agent */
   agents?: Partial<Record<AgentRole, {
-    enabled?: boolean;   // Override global enabled
-    budget?: number;     // Token budget for thinking
-  }>>;
+    effort: 'low' | 'medium' | 'high';  // Required
+    budgetTokens?: number;
+  } | false>>;
 }
 ```
 
@@ -623,13 +670,14 @@ const engine = createVenusEngine({
     critic: 'qwen3-vl-flash',
     arbiter: 'qwen3-vl-flash',
   },
-  thinking: {
-    enabled: true,
+  reasoning: {
+    effort: 'medium',
+    budgetTokens: 4096,
     agents: {
-      proposer: { budget: 4096 },
-      critic: { budget: 4096 },
-      arbiter: { budget: 8192 },
-      genreDetector: { enabled: false },
+      proposer: { effort: 'medium', budgetTokens: 4096 },
+      critic: { effort: 'medium', budgetTokens: 4096 },
+      arbiter: { effort: 'high', budgetTokens: 8192 },
+      genreDetector: false,  // Disable reasoning for genre detector
     },
   },
   onEvent(event) {
@@ -637,6 +685,12 @@ const engine = createVenusEngine({
   },
 });
 ```
+
+The engine automatically adapts reasoning parameters to different provider APIs:
+- **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
+- **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
+
+> **Note**: The reasoning adapter also includes scaffolding for OpenAI, Anthropic, DeepSeek, and Gemini APIs, but these have not been tested with vision-enabled models in the Venus evaluation pipeline. DeepSeek does not support vision inputs.
 
 ---
 

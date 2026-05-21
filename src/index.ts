@@ -16,7 +16,7 @@ export type * from './types.js';
 
 // ─── Providers ────────────────────────────────────────────
 export { createOpenAICompatProvider, defineProvider } from './providers/index.js';
-export type { OpenAICompatOptions, DefineProviderOptions } from './providers/index.js';
+export type { OpenAICompatOptions, DefineProviderOptions, ProviderStyle } from './providers/index.js';
 
 // ─── Schema ───────────────────────────────────────────────
 export {

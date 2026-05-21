@@ -53,9 +53,9 @@ export const MOCK_EVALUATION_RESULT: EvaluationResult = {
   suggestions: 'Try different lighting.',
   arbitrationNotes: 'Balanced evaluation.',
   process: {
-    proposal: { result: {} as any, thinking: null },
-    critique: { result: {} as any, thinking: null },
-    arbitration: { result: {} as any, thinking: null },
+    proposal: { result: {} as any, reasoning: null },
+    critique: { result: {} as any, reasoning: null },
+    arbitration: { result: {} as any, reasoning: null },
   },
   metadata: {
     evaluatedAt: new Date().toISOString(),
@@ -72,6 +72,6 @@ export const MOCK_STREAM_EVENTS: EvaluationStreamEvent[] = [
     timestamp: Date.now(),
   },
   { type: 'agent_call', round: 1, agent: 'proposer', timestamp: Date.now() },
-  { type: 'agent_complete', round: 1, agent: 'proposer', data: { result: {}, thinking: null }, timestamp: Date.now() },
+  { type: 'agent_complete', round: 1, agent: 'proposer', data: { result: {}, reasoning: null }, timestamp: Date.now() },
   { type: 'evaluation_complete', data: MOCK_EVALUATION_RESULT, timestamp: Date.now() },
 ];

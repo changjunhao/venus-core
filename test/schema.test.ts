@@ -77,7 +77,7 @@ describe('Schema Layer', () => {
               critique: 'Nice.',
               suggestions: 'Improve.',
             },
-            thinking: null,
+            reasoning: null,
           },
           critique: {
             result: {
@@ -92,7 +92,7 @@ describe('Schema Layer', () => {
               overall_assessment: 'Looks good.',
               suggested_total_score: 7.5,
             },
-            thinking: null,
+            reasoning: null,
           },
           arbitration: {
             result: {
@@ -103,7 +103,7 @@ describe('Schema Layer', () => {
               suggestions: 'Final suggestions.',
               arbitration_notes: 'Resolved.',
             },
-            thinking: null,
+            reasoning: null,
           },
         },
         metadata: {

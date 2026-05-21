@@ -12,9 +12,9 @@ import { createMockProvider } from './mock-provider.js';
  * @param opts.onEvent - Optional callback for engine lifecycle events
  */
 export function createMockEngine(opts: {
-  proposerResponses: Array<{ content: string; thinking?: string }>;
-  criticResponses: Array<{ content: string; thinking?: string }>;
-  arbiterResponses: Array<{ content: string; thinking?: string }>;
+  proposerResponses: Array<{ content: string; reasoning?: string }>;
+  criticResponses: Array<{ content: string; reasoning?: string }>;
+  arbiterResponses: Array<{ content: string; reasoning?: string }>;
   onEvent?: (event: EvaluationEvent) => void;
 }) {
   return createVenusEngine({

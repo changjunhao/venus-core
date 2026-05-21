@@ -26,25 +26,26 @@ describe('Provider Layer', () => {
     it('should create a provider conforming to LLMProvider interface', () => {
       const provider = defineProvider({
         name: 'test-provider',
-        supportsVision: true,
-        supportsThinking: false,
-        chat: async () => ({ content: 'hello', thinking: null }),
+        capabilities: { vision: true, reasoning: false },
+        chat: async () => ({ content: 'hello', reasoning: null }),
       });
 
       expect(provider.name).toBe('test-provider');
-      expect(provider.supportsVision).toBe(true);
-      expect(provider.supportsThinking).toBe(false);
+      expect(provider.capabilities.vision).toBe(true);
+      expect(provider.capabilities.reasoning).toBe(false);
       expect(typeof provider.chat).toBe('function');
     });
 
-    it('should default supportsVision and supportsThinking to false', () => {
+    it('should default capabilities to false', () => {
       const provider = defineProvider({
         name: 'minimal',
-        chat: async () => ({ content: '', thinking: null }),
+        chat: async () => ({ content: '', reasoning: null }),
       });
 
-      expect(provider.supportsVision).toBe(false);
-      expect(provider.supportsThinking).toBe(false);
+      expect(provider.capabilities.vision).toBe(false);
+      expect(provider.capabilities.reasoning).toBe(false);
+      expect(provider.capabilities.reasoningBudget).toBe(false);
+      expect(provider.capabilities.streaming).toBe(false);
     });
 
     it('should call the chat function and return response', async () => {
@@ -52,7 +53,7 @@ describe('Provider Layer', () => {
         name: 'echo',
         chat: async (params) => ({
           content: `model:${params.model}`,
-          thinking: 'thought about it',
+          reasoning: 'thought about it',
         }),
       });
 
@@ -62,7 +63,7 @@ describe('Provider Layer', () => {
       });
 
       expect(resp.content).toBe('model:test-model');
-      expect(resp.thinking).toBe('thought about it');
+      expect(resp.reasoning).toBe('thought about it');
     });
   });
 
@@ -76,8 +77,9 @@ describe('Provider Layer', () => {
 
       expect(provider.name).toContain('openai-compat');
       expect(provider.name).toContain('api.example.com');
-      expect(provider.supportsVision).toBe(true);
-      expect(provider.supportsThinking).toBe(true);
+      expect(provider.capabilities.vision).toBe(true);
+      expect(provider.capabilities.reasoning).toBe(true);
+      expect(provider.capabilities.streaming).toBe(true);
       expect(typeof provider.chat).toBe('function');
     });
   });
@@ -119,10 +121,10 @@ describe('Provider Layer', () => {
   });
 
   // ── CoT (Chain-of-Thought) extraction from different vendors ──
-  describe('CoT extraction — reasoning_content vs thinking', () => {
+  describe('Reasoning extraction — reasoning_content vs reasoning vs thinking', () => {
     afterEach(() => restoreFetch());
 
-    it('should extract reasoning_content (DashScope format)', async () => {
+    it('should extract reasoning_content (DashScope/Qwen format)', async () => {
       mockFetch(async () =>
         makeChatCompletion({
           content: '{"score": 8}',
@@ -139,15 +141,15 @@ describe('Provider Layer', () => {
         messages: [{ role: 'user', content: 'rate this' }],
       });
 
-      expect(resp.thinking).toBe('I think this photo has excellent composition...');
+      expect(resp.reasoning).toBe('I think this photo has excellent composition...');
       expect(resp.content).toBe('{"score": 8}');
     });
 
-    it('should extract thinking (OpenAI format)', async () => {
+    it('should extract reasoning (OpenAI Responses API format)', async () => {
       mockFetch(async () =>
         makeChatCompletion({
           content: '{"score": 7}',
-          thinking: 'Let me analyze the lighting in detail...',
+          reasoning: 'Let me analyze the lighting in detail...',
         }),
       );
       const provider = createOpenAICompatProvider({
@@ -160,16 +162,37 @@ describe('Provider Layer', () => {
         messages: [{ role: 'user', content: 'rate this' }],
       });
 
-      expect(resp.thinking).toBe('Let me analyze the lighting in detail...');
+      expect(resp.reasoning).toBe('Let me analyze the lighting in detail...');
       expect(resp.content).toBe('{"score": 7}');
     });
 
-    it('should prefer reasoning_content over thinking when both present', async () => {
+    it('should extract thinking (Anthropic/legacy format)', async () => {
+      mockFetch(async () =>
+        makeChatCompletion({
+          content: '{"score": 6}',
+          thinking: 'Anthropic-style thinking trace...',
+        }),
+      );
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://mock-cot.test/v1',
+        apiKey: 'test-key',
+      });
+
+      const resp = await provider.chat({
+        model: 'claude-test',
+        messages: [{ role: 'user', content: 'rate this' }],
+      });
+
+      expect(resp.reasoning).toBe('Anthropic-style thinking trace...');
+    });
+
+    it('should prefer reasoning_content over reasoning and thinking when all present', async () => {
       mockFetch(async () =>
         makeChatCompletion({
           content: 'result',
           reasoning_content: 'DashScope reasoning',
-          thinking: 'OpenAI thinking',
+          reasoning: 'OpenAI reasoning',
+          thinking: 'Anthropic thinking',
         }),
       );
       const provider = createOpenAICompatProvider({
@@ -183,10 +206,10 @@ describe('Provider Layer', () => {
       });
 
       // reasoning_content is checked first in the code
-      expect(resp.thinking).toBe('DashScope reasoning');
+      expect(resp.reasoning).toBe('DashScope reasoning');
     });
 
-    it('should return null thinking when no thinking content present', async () => {
+    it('should return null reasoning when no reasoning content present', async () => {
       mockFetch(async () =>
         makeChatCompletion({
           content: 'Just a plain response',
@@ -202,7 +225,7 @@ describe('Provider Layer', () => {
         messages: [{ role: 'user', content: 'hi' }],
       });
 
-      expect(resp.thinking).toBeNull();
+      expect(resp.reasoning).toBeNull();
       expect(resp.content).toBe('Just a plain response');
     });
   });
@@ -283,102 +306,136 @@ describe('Provider Layer', () => {
     });
   });
 
-  // ── thinking parameters ──
-  describe('Thinking parameter construction', () => {
-    it('should include enable_thinking and thinking_budget when thinking is enabled', async () => {
-      // Verify the parameter construction pattern used by openai-compat
-      const params = {
-        thinking: { enabled: true, budget_tokens: 4096 },
-      };
+  // ── reasoning parameter construction (per-style adapter) ──
+  describe('Reasoning parameter construction (style-aware)', () => {
+    afterEach(() => restoreFetch());
 
-      const requestBody: Record<string, unknown> = {};
-      if (params.thinking) {
-        requestBody.enable_thinking = params.thinking.enabled;
-        if (params.thinking.enabled && params.thinking.budget_tokens) {
-          requestBody.thinking_budget = params.thinking.budget_tokens;
-        }
-      }
+    it('should send reasoning_effort when reasoning is enabled (openai style)', async () => {
+      let capturedBody: any = null;
 
-      expect(requestBody.enable_thinking).toBe(true);
-      expect(requestBody.thinking_budget).toBe(4096);
-    });
-
-    it('should include enable_thinking: false when thinking is explicitly disabled', () => {
-      // 显式关闭思考模式时，仍需发送 enable_thinking: false 告知 API
-      const params: { thinking?: { enabled: boolean; budget_tokens?: number } } = {
-        thinking: { enabled: false },
-      };
-
-      const requestBody: Record<string, unknown> = {};
-      if (params.thinking) {
-        requestBody.enable_thinking = params.thinking.enabled;
-        if (params.thinking.enabled && params.thinking.budget_tokens) {
-          requestBody.thinking_budget = params.thinking.budget_tokens;
-        }
-      }
-
-      expect(requestBody.enable_thinking).toBe(false);
-      expect(requestBody.thinking_budget).toBeUndefined();
-    });
-
-    it('should not include thinking fields when thinking is not configured', () => {
-      const params: { thinking?: { enabled: boolean; budget_tokens?: number } } = { thinking: undefined };
-      const requestBody: Record<string, unknown> = {};
-      if (params.thinking) {
-        requestBody.enable_thinking = params.thinking.enabled;
-      }
-
-      expect(requestBody.enable_thinking).toBeUndefined();
-      expect(requestBody.thinking_budget).toBeUndefined();
-    });
-
-    // ── 集成测试：验证真实 provider 发送的请求体 ──
-    describe('integration: real provider request body', () => {
-      afterEach(() => restoreFetch());
-
-      it('should send enable_thinking: false when thinking is explicitly disabled', async () => {
-        let capturedBody: any = null;
-
-        mockFetch(async (_input, init) => {
-          capturedBody = JSON.parse(init?.body as string);
-          return makeChatCompletion({ content: 'ok' });
-        });
-        const provider = createOpenAICompatProvider({
-          baseURL: 'https://mock-thinking.test/v1',
-          apiKey: 'test-key',
-        });
-
-        await provider.chat({
-          model: 'test',
-          messages: [{ role: 'user', content: 'hi' }],
-          thinking: { enabled: false },
-        });
-
-        expect(capturedBody.enable_thinking).toBe(false);
-        expect(capturedBody.thinking_budget).toBeUndefined();
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://mock-reasoning.test/v1',
+        apiKey: 'test-key',
+        style: 'openai',
       });
 
-      it('should send enable_thinking: true and thinking_budget when thinking is enabled', async () => {
-        let capturedBody: any = null;
-
-        mockFetch(async (_input, init) => {
-          capturedBody = JSON.parse(init?.body as string);
-          return makeChatCompletion({ content: 'ok' });
-        });
-        const provider = createOpenAICompatProvider({
-          baseURL: 'https://mock-thinking.test/v1',
-          apiKey: 'test-key',
-        });
-
-        await provider.chat({
-          model: 'test',
-          messages: [{ role: 'user', content: 'hi' }],
-          thinking: { enabled: true, budget_tokens: 4096 },
-        });
-
-        expect(capturedBody.enable_thinking).toBe(true);
-        expect(capturedBody.thinking_budget).toBe(4096);
+      await provider.chat({
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'medium' },
       });
+
+      expect(capturedBody.reasoning_effort).toBe('medium');
+    });
+
+    it('should send enable_thinking and thinking_budget when reasoning is enabled (qwen style)', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'qwen3-vl-flash',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'medium', budgetTokens: 4096 },
+      });
+
+      expect(capturedBody.enable_thinking).toBe(true);
+      expect(capturedBody.thinking_budget).toBe(4096);
+    });
+
+    it('should send thinking.enabled and omit temperature when reasoning is enabled (kimi style)', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://api.moonshot.cn/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'kimi-k2',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.5,
+        reasoning: { effort: 'medium', budgetTokens: 4096 },
+      });
+
+      expect(capturedBody.thinking).toEqual({ type: 'enabled' });
+      // Kimi fixes temperature to 1.0 in thinking mode → must NOT be sent
+      expect(capturedBody.temperature).toBeUndefined();
+      // Kimi does not support budget_tokens; budgetTokens is silently ignored
+      expect(capturedBody.thinking.budget_tokens).toBeUndefined();
+      expect(capturedBody.thinking_budget).toBeUndefined();
+    });
+
+    it('should send thinking.disabled when reasoning is NOT configured (kimi style)', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://api.moonshot.cn/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'kimi-k2',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.3,
+      });
+
+      // Kimi defaults to thinking enabled; we must explicitly disable for standard mode
+      expect(capturedBody.thinking).toEqual({ type: 'disabled' });
+      // Kimi internally fixes temperature (0.6 for non-thinking mode), so custom temperature should NOT be sent
+      expect(capturedBody.temperature).toBeUndefined();
+    });
+
+    it('should detect kimi style via moonshot.cn baseURL and expose proper capabilities', () => {
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://api.moonshot.cn/v1',
+        apiKey: 'test-key',
+      });
+
+      expect(provider.capabilities.reasoning).toBe(true);
+      // Kimi does NOT support reasoningBudget
+      expect(provider.capabilities.reasoningBudget).toBe(false);
+    });
+
+    it('should not include reasoning fields when reasoning is not configured', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAICompatProvider({
+        baseURL: 'https://mock-reasoning.test/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+
+      expect(capturedBody.reasoning_effort).toBeUndefined();
+      expect(capturedBody.enable_thinking).toBeUndefined();
+      expect(capturedBody.thinking_budget).toBeUndefined();
     });
   });
 });

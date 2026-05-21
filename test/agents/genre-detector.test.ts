@@ -19,15 +19,15 @@ describe('GenreDetectorAgent', () => {
   describe('detect()', () => {
     it('should return a valid GenreDetectionResult for portrait', async () => {
       const provider = createMockProvider([
-        { content: makeGenreDetectionJSON('portrait', 0.95), thinking: 'Analyzing subject focus...' },
+        { content: makeGenreDetectionJSON('portrait', 0.95), reasoning: 'Analyzing subject focus...' },
       ]);
       const agent = new GenreDetectorAgent(provider, { model: 'test-model' });
 
-      const { result, thinking } = await agent.detect(IMAGE_URL);
+      const { result, reasoning } = await agent.detect(IMAGE_URL);
 
       expect(result.genre).toBe('portrait');
       expect(result.confidence).toBe(0.95);
-      expect(thinking).toBe('Analyzing subject focus...');
+      expect(reasoning).toBe('Analyzing subject focus...');
     });
 
     it('should detect landscape genre', async () => {
@@ -92,14 +92,14 @@ describe('GenreDetectorAgent', () => {
       await expect(agent.detect(IMAGE_URL)).rejects.toThrow();
     });
 
-    it('should handle null thinking in response', async () => {
+    it('should handle null reasoning in response', async () => {
       const provider = createMockProvider([{ content: makeGenreDetectionJSON('nature', 0.85) }]);
       const agent = new GenreDetectorAgent(provider, { model: 'test-model' });
 
-      const { result, thinking } = await agent.detect(IMAGE_URL);
+      const { result, reasoning } = await agent.detect(IMAGE_URL);
 
       expect(result.genre).toBe('nature');
-      expect(thinking).toBeNull();
+      expect(reasoning).toBeNull();
     });
 
     it('should retry on JSON parse failure', async () => {
@@ -119,11 +119,10 @@ describe('GenreDetectorAgent', () => {
       let capturedModel: string | undefined;
       const provider = defineProvider({
         name: 'capture-provider',
-        supportsVision: true,
-        supportsThinking: true,
+        capabilities: { vision: true, reasoning: true, reasoningBudget: true },
         chat: async (params) => {
           capturedModel = params.model;
-          return { content: makeGenreDetectionJSON(), thinking: null };
+          return { content: makeGenreDetectionJSON(), reasoning: null };
         },
       });
       const agent = new GenreDetectorAgent(provider, { model: 'genre-detector-model' });
@@ -138,13 +137,12 @@ describe('GenreDetectorAgent', () => {
     function createStreamingProvider(chunks: StreamChunk[], opts?: { name?: string }) {
       return defineProvider({
         name: opts?.name ?? 'streaming-mock-provider',
-        supportsVision: true,
-        supportsThinking: true,
+        capabilities: { vision: true, reasoning: true, reasoningBudget: true },
         chat: async () => {
           // Fallback: assemble content from chunks
           const content = chunks.map((c) => c.content ?? '').join('');
-          const thinking = chunks.map((c) => c.thinking ?? '').join('') || null;
-          return { content, thinking };
+          const reasoning = chunks.map((c) => c.reasoning ?? '').join('') || null;
+          return { content, reasoning };
         },
         chatStream: async function* (_params) {
           for (const chunk of chunks) {
@@ -181,11 +179,11 @@ describe('GenreDetectorAgent', () => {
       expect(result.value.result.confidence).toBe(0.95);
     });
 
-    it('should yield thinking chunks during streaming', async () => {
+    it('should yield reasoning chunks during streaming', async () => {
       const json = makeGenreDetectionJSON('landscape', 0.88);
       const provider = createStreamingProvider([
-        { thinking: 'Analyzing composition...' },
-        { thinking: ' Checking horizon line...' },
+        { reasoning: 'Analyzing composition...' },
+        { reasoning: ' Checking horizon line...' },
         { content: json },
       ]);
       const agent = new GenreDetectorAgent(provider, { model: 'test-model' });
@@ -200,20 +198,20 @@ describe('GenreDetectorAgent', () => {
       }
       const finalResult = iterResult.value;
 
-      // Verify thinking chunks were yielded
-      const thinkingChunks = chunks.filter((c) => c.thinking);
-      expect(thinkingChunks.length).toBe(2);
-      expect(thinkingChunks[0]!.thinking).toBe('Analyzing composition...');
-      expect(thinkingChunks[1]!.thinking).toBe(' Checking horizon line...');
+      // Verify reasoning chunks were yielded
+      const reasoningChunks = chunks.filter((c) => c.reasoning);
+      expect(reasoningChunks.length).toBe(2);
+      expect(reasoningChunks[0]!.reasoning).toBe('Analyzing composition...');
+      expect(reasoningChunks[1]!.reasoning).toBe(' Checking horizon line...');
 
-      // Final result should contain combined thinking
-      expect(finalResult.thinking).toBe('Analyzing composition... Checking horizon line...');
+      // Final result should contain combined reasoning
+      expect(finalResult.reasoning).toBe('Analyzing composition... Checking horizon line...');
     });
 
     it('should produce correct genre and confidence in final stream result', async () => {
       makeGenreDetectionJSON('fine_art', 0.91);
       const provider = createStreamingProvider([
-        { thinking: 'Evaluating artistic style...' },
+        { reasoning: 'Evaluating artistic style...' },
         { content: '{"genre"' },
         { content: ':"fine_art","confidence":0.91}' },
       ]);
@@ -231,7 +229,7 @@ describe('GenreDetectorAgent', () => {
       const finalResult = iterResult.value;
       expect(finalResult.result.genre).toBe('fine_art');
       expect(finalResult.result.confidence).toBe(0.91);
-      expect(finalResult.thinking).toBe('Evaluating artistic style...');
+      expect(finalResult.reasoning).toBe('Evaluating artistic style...');
 
       // Verify content chunks were also yielded
       const contentChunks = chunks.filter((c) => c.content);

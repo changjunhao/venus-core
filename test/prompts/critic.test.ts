@@ -95,15 +95,15 @@ describe('Critic Prompts', () => {
       expect(prompt).toContain('风光');
     });
 
-    it('should include proposer thinking when provided', () => {
+    it('should include proposer reasoning when provided', () => {
       const prompt = getCriticUserPrompt('portrait', SAMPLE_PROPOSAL, 'Proposer analyzed the lighting patterns...');
-      expect(prompt).toContain('proposer_thinking');
+      expect(prompt).toContain('proposer_reasoning');
       expect(prompt).toContain('Proposer analyzed the lighting patterns...');
     });
 
-    it('should not include proposer thinking section when null', () => {
+    it('should not include proposer reasoning section when null', () => {
       const prompt = getCriticUserPrompt('portrait', SAMPLE_PROPOSAL, null);
-      expect(prompt).not.toContain('proposer_thinking');
+      expect(prompt).not.toContain('proposer_reasoning');
     });
 
     it('should include EXIF data when context is provided', () => {
