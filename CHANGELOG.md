@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-23
+
+### Added
+
+- **Adapter lifecycle hooks**: `AdapterHooks` with a `beforeEvaluate` hook that
+  allows transforming validated request params before the engine call on all
+  endpoints (`/evaluate`, `/evaluate/stream`, `/evaluate/stream/jsonl`).
+  - New types: `AdapterHooks`, `EvaluateParams` exported from the main entry.
+  - `createHonoAdapter()` and `createExpressAdapter()` now accept an optional
+    `AdapterOptions` second parameter with `prefix` and `hooks` fields.
+  - Use cases: upload image to provider file API, inject EXIF context, override
+    genre, switch streaming granularity, etc.
+  - Hook supports both sync and async implementations.
+- Comprehensive test suite for adapter hooks (`test/adapters/hono.test.ts`,
+  `test/adapters/express.test.ts`) covering sync/async/stream scenarios.
+- README (EN/ZH) updated with hook documentation, type references, and usage
+  examples (image pre-upload, EXIF injection).
+
 ## [0.4.0] - 2026-05-21
 
 ### Changed
