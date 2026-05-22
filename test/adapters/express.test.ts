@@ -303,7 +303,7 @@ describe('Express Adapter', () => {
   describe('next(error) error middleware path', () => {
     /**
      * Start a server with a middleware that overrides req.body to throw on access,
-     * which causes resolveStreamParams() to throw inside the outer try block,
+     * which causes resolveStreamParamsWithHook() to throw inside the outer try block,
      * triggering next(error) and the error middleware.
      */
     function startServerWithBrokenBody(engine: VenusEngine): Promise<{ baseUrl: string; server: Server }> {

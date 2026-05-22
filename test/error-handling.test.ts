@@ -370,4 +370,21 @@ describe('Error Handling — Engine Error Event Propagation', () => {
     // BaseAgent wraps to SchemaError after retries
     expect(errorEvent!.error!.code).toBe('SCHEMA_ERROR');
   });
+
+  it('should throw when mock provider is exhausted (all responses consumed)', async () => {
+    const { createMockProvider } = await import('./helpers/mock-provider.js');
+    // Create a provider with only 1 response
+    const exhaustedProvider = createMockProvider([{ content: '{}' }]);
+
+    // First call consumes the only response
+    await exhaustedProvider.chat({ model: 'test', messages: [{ role: 'user' as const, content: 'hi' }] });
+
+    // Second call should throw (exhausted)
+    try {
+      await exhaustedProvider.chat({ model: 'test', messages: [{ role: 'user' as const, content: 'hi' }] });
+      expect(true).toBe(false);
+    } catch (e) {
+      expect((e as Error).message).toContain('Mock provider exhausted');
+    }
+  });
 });

@@ -320,6 +320,52 @@ describe('Engine Layer', () => {
         });
       }
     });
+    it('should yield multiple reasoning_chunk and result_chunk events in updates mode', async () => {
+      // Use raw VenusEngine + spyProvider to simulate multi-chunk stream with reasoning
+      const multiChunkProvider = defineProvider({
+        name: 'multi-chunk-provider',
+        capabilities: { vision: true, streaming: true },
+        chatStream: async function* () {
+          yield { reasoning: 'Step 1: Analyze composition...' };
+          yield { partial: { scene_type: 'studio' } };
+          yield { partial: { total_score: 7.5 } };
+          yield { partial: { dimensions: makeDimensions(PORTRAIT_DIMS, 7.5) } };
+          yield { content: JSON.stringify({
+            scene_type: 'studio',
+            total_score: 7.5,
+            dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
+            critique: 'Good.',
+            suggestions: 'Improve.',
+          }) };
+        },
+        chat: async () => ({ content: makeProposalJSON(), reasoning: null }),
+      });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          proposer: multiChunkProvider,
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+        reasoning: { effort: 'medium' },
+      });
+
+      const events: EvaluationStreamEvent[] = [];
+      for await (const event of engine.evaluateStream(TEST_IMAGE, { genre: 'portrait', mode: 'updates' })) {
+        events.push(event);
+      }
+
+      // Should have reasoning_chunk events
+      const reasoningChunks = events.filter((e) => e.type === 'reasoning_chunk');
+      expect(reasoningChunks.length).toBeGreaterThan(0);
+      expect(reasoningChunks[0]!.type === 'reasoning_chunk' && (reasoningChunks[0] as any).content).toContain('Step 1');
+
+      // Should have result_chunk events
+      const resultChunks = events.filter((e) => e.type === 'result_chunk');
+      expect(resultChunks.length).toBeGreaterThan(0);
+    });
   });
 
   // ── 异常处理 ──
@@ -477,6 +523,207 @@ describe('Engine Layer', () => {
         result: { genre: 'portrait', confidence: 0.87 },
         reasoning: 'Natural elements detected',
       });
+    });
+  });
+
+  // ── #getReasoningConfig() — 边界测试 ──
+  describe('Reasoning config resolution (#getReasoningConfig)', () => {
+    it('should pass global reasoning effort to all agents when configured', async () => {
+      let proposerParams: any = null;
+      let criticParams: any = null;
+      let arbiterParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+      const spyCritic = defineProvider({
+        name: 'spy-critic',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          criticParams = params;
+          return { content: makeCritiqueJSON('LOW'), reasoning: null };
+        },
+      });
+      const spyArbiter = defineProvider({
+        name: 'spy-arbiter',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          arbiterParams = params;
+          return { content: makeArbiterJSON(), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: { proposer: spyProposer, critic: spyCritic, arbiter: spyArbiter },
+        reasoning: { effort: 'medium', budgetTokens: 4096 },
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      expect(proposerParams.reasoning).toEqual({ effort: 'medium', budgetTokens: 4096 });
+      expect(criticParams.reasoning).toEqual({ effort: 'medium', budgetTokens: 4096 });
+      expect(arbiterParams.reasoning).toEqual({ effort: 'medium', budgetTokens: 4096 });
+    });
+
+    it('should disable reasoning for a specific agent when agentOverride is false', async () => {
+      let proposerParams: any = null;
+      let criticParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer-disabled',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+      const spyCritic = defineProvider({
+        name: 'spy-critic-active',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          criticParams = params;
+          return { content: makeCritiqueJSON('LOW'), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          proposer: spyProposer,
+          critic: spyCritic,
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+        reasoning: {
+          effort: 'high',
+          agents: { proposer: false },
+        },
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      // Proposer should have NO reasoning (explicitly disabled)
+      expect(proposerParams.reasoning).toBeUndefined();
+      // Critic should still have the global reasoning config
+      expect(criticParams.reasoning).toEqual({ effort: 'high' });
+    });
+
+    it('should use per-agent reasoning override over global config', async () => {
+      let proposerParams: any = null;
+      let criticParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer-override',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+      const spyCritic = defineProvider({
+        name: 'spy-critic-global',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          criticParams = params;
+          return { content: makeCritiqueJSON('LOW'), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          proposer: spyProposer,
+          critic: spyCritic,
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+        reasoning: {
+          effort: 'low',
+          agents: { proposer: { effort: 'high', budgetTokens: 8192 } },
+        },
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      // Proposer should use per-agent override
+      expect(proposerParams.reasoning).toEqual({ effort: 'high', budgetTokens: 8192 });
+      // Critic should use global default
+      expect(criticParams.reasoning).toEqual({ effort: 'low' });
+    });
+
+    it('should not pass reasoning to any agent when reasoning is not configured', async () => {
+      let proposerParams: any = null;
+      let arbiterParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer-no-reasoning',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+      const spyArbiter = defineProvider({
+        name: 'spy-arbiter-no-reasoning',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          arbiterParams = params;
+          return { content: makeArbiterJSON(), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          proposer: spyProposer,
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: spyArbiter,
+        },
+        // No reasoning config at all
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      expect(proposerParams.reasoning).toBeUndefined();
+      expect(arbiterParams.reasoning).toBeUndefined();
+    });
+
+    it('should pass reasoning to genreDetector when auto-detection is triggered', async () => {
+      let genreDetectorParams: any = null;
+
+      const spyGenreDetector = defineProvider({
+        name: 'spy-genre-detector',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          genreDetectorParams = params;
+          return { content: JSON.stringify({ genre: 'portrait', confidence: 0.9 }), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        baseURL: 'https://mock.test/v1',
+        apiKey: 'mock-key',
+        providers: {
+          genreDetector: spyGenreDetector,
+          proposer: createMockProvider([{ content: makeProposalJSON() }]),
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+        reasoning: { effort: 'low' },
+      });
+
+      // No genre specified → auto-detection triggers
+      await engine.evaluate(TEST_IMAGE);
+
+      expect(genreDetectorParams.reasoning).toEqual({ effort: 'low' });
     });
   });
 });

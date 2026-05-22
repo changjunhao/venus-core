@@ -26,7 +26,7 @@ import {
   mapErrorToResponse,
   handleEvaluate,
   handleMetadata,
-  resolveStreamParams,
+  resolveStreamParamsWithHook,
   formatSSEError,
   formatJSONLError,
 } from './common.js';
@@ -34,12 +34,13 @@ import {
 export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions): Hono {
   const app = new Hono();
   const prefix = options?.prefix ?? '';
+  const hooks = options?.hooks;
 
   // POST /evaluate
   app.post(`${prefix}/evaluate`, async (c) => {
     try {
       const body = await c.req.json();
-      const result = await handleEvaluate(engine, body);
+      const result = await handleEvaluate(engine, body, hooks);
       if (!result.ok) {
         return c.json(result.body, result.status);
       }
@@ -59,7 +60,7 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
   app.post(`${prefix}/evaluate/stream`, async (c) => {
     try {
       const body = await c.req.json();
-      const parsed = resolveStreamParams(body);
+      const parsed = await resolveStreamParamsWithHook(body, hooks);
       if (!parsed.ok) {
         return c.json(parsed.body, parsed.status);
       }
@@ -70,7 +71,7 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
           async start(controller) {
             const encoder = new TextEncoder();
             try {
-              for await (const event of engine.evaluateStream(imageUrl, { genre: genre ?? null, context, mode })) {
+              for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
               }
             } catch (err) {
@@ -98,7 +99,7 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
   app.post(`${prefix}/evaluate/stream/jsonl`, async (c) => {
     try {
       const body = await c.req.json();
-      const parsed = resolveStreamParams(body);
+      const parsed = await resolveStreamParamsWithHook(body, hooks);
       if (!parsed.ok) {
         return c.json(parsed.body, parsed.status);
       }
@@ -109,7 +110,7 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
           async start(controller) {
             const encoder = new TextEncoder();
             try {
-              for await (const event of engine.evaluateStream(imageUrl, { genre: genre ?? null, context, mode })) {
+              for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
                 controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
               }
             } catch (err) {

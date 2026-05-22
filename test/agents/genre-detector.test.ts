@@ -209,7 +209,6 @@ describe('GenreDetectorAgent', () => {
     });
 
     it('should produce correct genre and confidence in final stream result', async () => {
-      makeGenreDetectionJSON('fine_art', 0.91);
       const provider = createStreamingProvider([
         { reasoning: 'Evaluating artistic style...' },
         { content: '{"genre"' },

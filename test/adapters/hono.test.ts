@@ -4,13 +4,14 @@ import { createHonoAdapter } from '../../src/adapters/hono.js';
 import { VenusError, ValidationError } from '../../src/utils/errors.js';
 import { getMetadata } from '../../src/schema/index.js';
 import type { VenusEngine } from '../../src/engine.js';
+import type { AdapterHooks } from '../../src/types.js';
 import { createMockEngine, MOCK_STREAM_EVENTS } from '../helpers/mock-adapter-engine.js';
 
 // ── Helper ─────────────────────────────────────────────
 
-function createApp(engine: VenusEngine) {
+function createApp(engine: VenusEngine, hooks?: AdapterHooks) {
   const app = new Hono();
-  app.route('/', createHonoAdapter(engine));
+  app.route('/', createHonoAdapter(engine, hooks ? { hooks } : undefined));
   return app;
 }
 
@@ -366,6 +367,158 @@ describe('Hono Adapter', () => {
       expect(res.status).toBe(500);
       const body = (await res.json()) as any;
       expect(body.error.code).toBe('INTERNAL_ERROR');
+    });
+  });
+
+  // ── beforeEvaluate Hook ──
+  describe('beforeEvaluate hook', () => {
+    it('should transform imageUrl via hook on POST /evaluate', async () => {
+      const engine = createMockEngine({
+        evaluate: async (imageUrl) => {
+          // Return the imageUrl so test can verify hook transformed it
+          return { ...MOCK_STREAM_EVENTS[0], imageUrl } as any;
+        },
+      });
+      const hooks: AdapterHooks = {
+        beforeEvaluate: (params) => ({
+          ...params,
+          imageUrl: 'https://transformed.example.com/photo.jpg',
+        }),
+      };
+      const app = createApp(engine, hooks);
+
+      const res = await app.request('/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.imageUrl).toBe('https://transformed.example.com/photo.jpg');
+    });
+
+    it('should transform genre via hook on POST /evaluate', async () => {
+      const engine = createMockEngine({
+        evaluate: async (_url, genre) => {
+          return { genre } as any;
+        },
+      });
+      const hooks: AdapterHooks = {
+        beforeEvaluate: (params) => ({
+          ...params,
+          genre: 'landscape',
+        }),
+      };
+      const app = createApp(engine, hooks);
+
+      const res = await app.request('/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg', genre: 'portrait' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.genre).toBe('landscape');
+    });
+
+    it('should support async hook', async () => {
+      const engine = createMockEngine({
+        evaluate: async (imageUrl) => {
+          return { imageUrl } as any;
+        },
+      });
+      const hooks: AdapterHooks = {
+        beforeEvaluate: async (params) => {
+          await new Promise((r) => setTimeout(r, 5));
+          return { ...params, imageUrl: 'https://async.example.com/photo.jpg' };
+        },
+      };
+      const app = createApp(engine, hooks);
+
+      const res = await app.request('/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.imageUrl).toBe('https://async.example.com/photo.jpg');
+    });
+
+    it('should pass without hook (default passthrough)', async () => {
+      const engine = createMockEngine({
+        evaluate: async (imageUrl) => {
+          return { imageUrl } as any;
+        },
+      });
+      const app = createApp(engine); // no hooks
+
+      const res = await app.request('/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.imageUrl).toBe('https://example.com/photo.jpg');
+    });
+
+    it('should apply hook on POST /evaluate/stream (SSE)', async () => {
+      let receivedImageUrl = '';
+      const engine = createMockEngine({
+        evaluateStream: async function* (imageUrl) {
+          receivedImageUrl = imageUrl;
+          yield { type: 'evaluation_start', data: { imageUrl, genre: 'portrait' as const }, timestamp: Date.now() };
+        },
+      });
+      const hooks: AdapterHooks = {
+        beforeEvaluate: (params) => ({
+          ...params,
+          imageUrl: 'https://hooked-sse.example.com/photo.jpg',
+        }),
+      };
+      const app = createApp(engine, hooks);
+
+      const res = await app.request('/evaluate/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg', genre: 'portrait' }),
+      });
+
+      expect(res.status).toBe(200);
+      await res.text(); // consume body
+      expect(receivedImageUrl).toBe('https://hooked-sse.example.com/photo.jpg');
+    });
+
+    it('should apply hook on POST /evaluate/stream/jsonl', async () => {
+      let receivedImageUrl = '';
+      const engine = createMockEngine({
+        evaluateStream: async function* (imageUrl) {
+          receivedImageUrl = imageUrl;
+          yield { type: 'evaluation_start', data: { imageUrl, genre: 'portrait' as const }, timestamp: Date.now() };
+        },
+      });
+      const hooks: AdapterHooks = {
+        beforeEvaluate: (params) => ({
+          ...params,
+          imageUrl: 'https://hooked-jsonl.example.com/photo.jpg',
+        }),
+      };
+      const app = createApp(engine, hooks);
+
+      const res = await app.request('/evaluate/stream/jsonl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg', genre: 'portrait' }),
+      });
+
+      expect(res.status).toBe(200);
+      await res.text(); // consume body
+      expect(receivedImageUrl).toBe('https://hooked-jsonl.example.com/photo.jpg');
     });
   });
 

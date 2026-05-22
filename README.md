@@ -44,7 +44,7 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth
 - **Event System** — `onEvent` callback for real-time observability into each pipeline stage
-- **Web Framework Adapters** — First-class Hono and Express integration with shared Zod validation
+- **Web Framework Adapters** — First-class Hono and Express integration with shared Zod validation and lifecycle hooks
 - **Chain-of-Thought** — Per-agent reasoning effort and token budget with cross-provider auto-adaptation
 - **Dynamic Zod Schemas** — Per-genre schema generation with caching for input and output validation
 - **Structured Errors** — Fine-grained error hierarchy with provider-level error codes
@@ -385,6 +385,8 @@ import type {
   
   // Adapter types
   AdapterOptions,
+  AdapterHooks,
+  EvaluateParams,
   MetadataResponse,
 } from '@theogony/venus-core';
 ```
@@ -467,7 +469,14 @@ const engine = createVenusEngine({
 });
 
 const app = new Hono();
-app.route('/api', createHonoAdapter(engine));
+app.route('/api', createHonoAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // e.g., upload image to a file API, inject EXIF context
+      return params;
+    },
+  },
+}));
 
 export default app; // Works with Bun, Deno, Node, Cloudflare Workers, etc.
 ```
@@ -486,7 +495,14 @@ const engine = createVenusEngine({
 
 const app = express();
 app.use(express.json());
-app.use('/api', createExpressAdapter(engine));
+app.use('/api', createExpressAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // Transform validated params before evaluation
+      return params;
+    },
+  },
+}));
 app.listen(3000);
 ```
 
@@ -498,6 +514,74 @@ Both adapters expose the same endpoints:
 | `POST` | `/evaluate/stream` | Streaming evaluation (SSE / `text/event-stream`) |
 | `POST` | `/evaluate/stream/jsonl` | Streaming evaluation (JSON Lines / `application/x-ndjson`) |
 | `GET` | `/metadata` | Genre metadata and dimensions |
+
+### Adapter Hooks
+
+Adapters expose a `beforeEvaluate` lifecycle hook for request transformation. The hook receives validated `EvaluateParams` and can transform them before the engine call — ideal for pre-processing workflows.
+
+#### `AdapterHooks`
+
+```ts
+interface AdapterHooks {
+  /**
+   * Called before evaluation starts (both sync and stream endpoints).
+   * Receives the validated request params, can transform and return modified params.
+   *
+   * Use cases: upload image to provider file API, inject EXIF context,
+   * override genre, switch streaming granularity, etc.
+   */
+  beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+}
+```
+
+#### `EvaluateParams`
+
+```ts
+interface EvaluateParams {
+  imageUrl: string;
+  genre: Genre | null;
+  context?: EvaluationContext;
+  mode?: StreamMode;
+}
+```
+
+#### Hook Example: Image Pre-Upload
+
+Upload images to a provider's file API (e.g., Kimi) and replace the URL before evaluation:
+
+```ts
+import { createHonoAdapter } from '@theogony/venus-core/hono';
+
+const adapter = createHonoAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // Upload image to provider file API
+      const fileId = await uploadToFileAPI(params.imageUrl);
+      return { ...params, imageUrl: fileId };
+    },
+  },
+});
+```
+
+#### Hook Example: EXIF Injection
+
+Automatically inject EXIF context based on the image URL:
+
+```ts
+const adapter = createExpressAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      const exif = await fetchExifData(params.imageUrl);
+      return {
+        ...params,
+        context: { ...params.context, exif },
+      };
+    },
+  },
+});
+```
+
+The hook fires on **all endpoints** (`/evaluate`, `/evaluate/stream`, `/evaluate/stream/jsonl`) and supports both sync and async implementations.
 
 ### Context Extension
 

@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import type { VenusEngine } from '../engine.js';
-import type { EvaluationResult } from '../types.js';
+import type { AdapterHooks, EvaluateParams, EvaluationResult } from '../types.js';
 import { GenreEnum, EvaluationContextSchema, getMetadata } from '../schema/index.js';
 import { VenusError, ValidationError } from '../utils/errors.js';
 
@@ -54,26 +54,71 @@ export function formatJSONLError(err: unknown): string {
 // 共享路由处理逻辑
 // ============================================================
 
-/** Shared POST /evaluate handler: validate body → call engine.evaluate */
+/**
+ * Apply the optional `beforeEvaluate` hook to validated params.
+ *
+ * Returns the params unchanged when no hook is configured, otherwise awaits
+ * the hook (sync or async) and returns its transformed result.
+ */
+export async function applyBeforeEvaluateHook(
+  params: EvaluateParams,
+  hooks?: AdapterHooks,
+): Promise<EvaluateParams> {
+  if (!hooks?.beforeEvaluate) return params;
+  return await hooks.beforeEvaluate(params);
+}
+
+/** Shared POST /evaluate handler: validate body → apply hook → call engine.evaluate */
 export async function handleEvaluate(
   engine: VenusEngine,
   body: unknown,
+  hooks?: AdapterHooks,
 ): Promise<
   { ok: true; data: EvaluationResult } | { ok: false; status: 400; body: { error: { code: string; message: string } } }
 > {
   const parsed = parseEvaluateRequest(body);
   if (!parsed.ok) return parsed;
-  const { imageUrl, genre, context } = parsed.data;
-  const result = await engine.evaluate(imageUrl, genre ?? null, context);
+  const params = await applyBeforeEvaluateHook(
+    {
+      imageUrl: parsed.data.imageUrl,
+      genre: parsed.data.genre ?? null,
+      context: parsed.data.context,
+    },
+    hooks,
+  );
+  const result = await engine.evaluate(params.imageUrl, params.genre, params.context);
   return { ok: true, data: result };
 }
 
 /** Shared GET /metadata handler */
 export { getMetadata as handleMetadata };
 
-/** Shared stream route: validate body → extract stream params */
-export function resolveStreamParams(body: unknown): ReturnType<typeof parseEvaluateRequest> {
-  return parseEvaluateRequest(body);
+/**
+ * Resolve stream params and apply the optional `beforeEvaluate` hook.
+ *
+ * On success the returned `data` is already in engine-ready shape
+ * (`genre: Genre | null`, `mode` defaulted from request, hook transformations
+ * applied). On validation failure returns a 400 error shape with a
+ * `VALIDATION_ERROR` code.
+ */
+export async function resolveStreamParamsWithHook(
+  body: unknown,
+  hooks?: AdapterHooks,
+): Promise<
+  { ok: true; data: EvaluateParams } | { ok: false; status: 400; body: { error: { code: string; message: string } } }
+> {
+  const parsed = parseEvaluateRequest(body);
+  if (!parsed.ok) return parsed;
+  const params = await applyBeforeEvaluateHook(
+    {
+      imageUrl: parsed.data.imageUrl,
+      genre: parsed.data.genre ?? null,
+      context: parsed.data.context,
+      mode: parsed.data.mode,
+    },
+    hooks,
+  );
+  return { ok: true, data: params };
 }
 
 // ============================================================

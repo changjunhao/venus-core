@@ -166,6 +166,86 @@ describe('BaseAgent', () => {
     });
   });
 
+  // ── callStream 降级路径 ──
+  describe('callStream fallback to call()', () => {
+    it('should fall back to call() when provider has no chatStream', async () => {
+      let callCount = 0;
+      const provider = defineProvider({
+        name: 'no-stream-provider',
+        capabilities: { vision: true },
+        // No chatStream defined → callStream should degrade to call()
+        chat: async (_params) => {
+          callCount++;
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      const agent = makeAgent(provider, 1);
+
+      const gen = agent.callStream('system', 'user', IMAGE_URL, testSchema);
+      const { value, done } = await gen.next();
+
+      // Should have called chat (not chatStream) and returned result via generator
+      expect(callCount).toBe(1);
+      expect(done).toBe(true);
+      expect(value).toEqual({ result: { score: 8.5, comment: 'Great shot' }, reasoning: null });
+    });
+  });
+
+  // ── callStream 流式重试逻辑 ──
+  describe('callStream retry logic', () => {
+    it('should retry on JSON parse failure in stream and succeed', async () => {
+      let callCount = 0;
+      const streamProvider = defineProvider({
+        name: 'stream-retry-provider',
+        capabilities: { vision: true, streaming: true },
+        chatStream: async function* () {
+          callCount++;
+          if (callCount === 1) {
+            yield { content: 'not valid json' };
+          } else {
+            yield { content: VALID_JSON };
+          }
+        },
+        chat: async () => ({ content: VALID_JSON, reasoning: null }),
+      });
+      const agent = new BaseAgent('test', streamProvider, { model: 'test', maxRetries: 3 });
+
+      const results: unknown[] = [];
+      for await (const chunk of agent.callStream('system', 'user', IMAGE_URL, testSchema)) {
+        results.push(chunk);
+      }
+
+      expect(callCount).toBe(2);
+    });
+
+    it('should retry on schema validation failure in stream and succeed', async () => {
+      let callCount = 0;
+      const streamProvider = defineProvider({
+        name: 'stream-schema-retry-provider',
+        capabilities: { vision: true, streaming: true },
+        chatStream: async function* () {
+          callCount++;
+          if (callCount === 1) {
+            yield { content: JSON.stringify({ score: 'wrong_type', comment: 123 }) };
+          } else if (callCount === 2) {
+            yield { content: JSON.stringify({ score: 5 }) };
+          } else {
+            yield { content: VALID_JSON };
+          }
+        },
+        chat: async () => ({ content: VALID_JSON, reasoning: null }),
+      });
+      const agent = new BaseAgent('test', streamProvider, { model: 'test', maxRetries: 3 });
+
+      const results: unknown[] = [];
+      for await (const chunk of agent.callStream('system', 'user', IMAGE_URL, testSchema)) {
+        results.push(chunk);
+      }
+
+      expect(callCount).toBe(3);
+    });
+  });
+
   // ── reasoning 参数传递（验证 reasoning 显式发送至 provider）──
   describe('Reasoning parameter passing', () => {
     it('should not pass reasoning to provider when reasoning is not configured', async () => {

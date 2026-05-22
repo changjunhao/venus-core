@@ -44,7 +44,7 @@ graph LR
 - **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时推理 + JSON 增量）
 - **上下文扩展** — 丰富的 `EvaluationContext`，支持 EXIF 元数据、用户备注和自定义数据，按门类智能注入
 - **事件系统** — `onEvent` 回调实现对每个管线阶段的实时可观测性
-- **Web 框架适配器** — 一流的 Hono 和 Express 集成，共享 Zod 校验
+- **Web 框架适配器** — 一流的 Hono 和 Express 集成，共享 Zod 校验与生命周期钩子
 - **推理链支持** — 按智能体配置推理 effort 级别和 token 预算，跨提供商自动适配
 - **动态 Zod Schema** — 按门类生成 Schema 并缓存，用于输入输出校验
 - **结构化错误** — 细粒度错误层级，含提供商级别错误码
@@ -385,6 +385,8 @@ import type {
   
   // 适配器类型
   AdapterOptions,
+  AdapterHooks,
+  EvaluateParams,
   MetadataResponse,
 } from '@theogony/venus-core';
 ```
@@ -467,7 +469,14 @@ const engine = createVenusEngine({
 });
 
 const app = new Hono();
-app.route('/api', createHonoAdapter(engine));
+app.route('/api', createHonoAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // 例如：上传图片到文件 API、注入 EXIF 上下文
+      return params;
+    },
+  },
+}));
 
 export default app; // 适用于 Bun、Deno、Node、Cloudflare Workers 等
 ```
@@ -486,7 +495,14 @@ const engine = createVenusEngine({
 
 const app = express();
 app.use(express.json());
-app.use('/api', createExpressAdapter(engine));
+app.use('/api', createExpressAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // 在评估前转换已验证的参数
+      return params;
+    },
+  },
+}));
 app.listen(3000);
 ```
 
@@ -498,6 +514,74 @@ app.listen(3000);
 | `POST` | `/evaluate/stream` | 流式评估（SSE / `text/event-stream`） |
 | `POST` | `/evaluate/stream/jsonl` | 流式评估（JSON Lines / `application/x-ndjson`） |
 | `GET` | `/metadata` | 门类元数据和维度信息 |
+
+### 适配器钩子
+
+适配器暴露 `beforeEvaluate` 生命周期钩子用于请求转换。钩子接收已验证的 `EvaluateParams`，可在调用引擎前对其进行转换 — 非常适合预处理工作流。
+
+#### `AdapterHooks`
+
+```ts
+interface AdapterHooks {
+  /**
+   * 在评估开始前调用（同步和流式端点均适用）。
+   * 接收已验证的请求参数，可转换并返回修改后的参数。
+   *
+   * 使用场景：上传图片到提供商文件 API、注入 EXIF 上下文、
+   * 覆盖门类、切换流式粒度等。
+   */
+  beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+}
+```
+
+#### `EvaluateParams`
+
+```ts
+interface EvaluateParams {
+  imageUrl: string;
+  genre: Genre | null;
+  context?: EvaluationContext;
+  mode?: StreamMode;
+}
+```
+
+#### 钩子示例：图片预上传
+
+将图片上传到提供商的文件 API（如 Kimi）并在评估前替换 URL：
+
+```ts
+import { createHonoAdapter } from '@theogony/venus-core/hono';
+
+const adapter = createHonoAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // 上传图片到提供商文件 API
+      const fileId = await uploadToFileAPI(params.imageUrl);
+      return { ...params, imageUrl: fileId };
+    },
+  },
+});
+```
+
+#### 钩子示例：EXIF 注入
+
+根据图片 URL 自动注入 EXIF 上下文：
+
+```ts
+const adapter = createExpressAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      const exif = await fetchExifData(params.imageUrl);
+      return {
+        ...params,
+        context: { ...params.context, exif },
+      };
+    },
+  },
+});
+```
+
+钩子在**所有端点**（`/evaluate`、`/evaluate/stream`、`/evaluate/stream/jsonl`）上触发，同时支持同步和异步实现。
 
 ### 上下文扩展
 

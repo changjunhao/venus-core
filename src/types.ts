@@ -273,10 +273,37 @@ export interface VenusEngineConfig {
 
 // ─── Adapter Types ────────────────────────────────────────
 
+/**
+ * Validated evaluate request parameters passed through adapter hooks.
+ *
+ * Represents the normalized shape of an `/evaluate` (or stream variant) request
+ * body after Zod validation, ready to be forwarded to the engine.
+ */
+export interface EvaluateParams {
+  imageUrl: string;
+  genre: Genre | null;
+  context?: EvaluationContext;
+  mode?: StreamMode;
+}
+
+/** Lifecycle hooks for adapter request transformation */
+export interface AdapterHooks {
+  /**
+   * Called before evaluation starts (both sync and stream endpoints).
+   * Receives the validated request params, can transform and return modified params.
+   *
+   * Use cases: upload image to provider file API, inject EXIF context,
+   * override genre, switch streaming granularity, etc.
+   */
+  beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+}
+
 /** Options for creating an adapter */
 export interface AdapterOptions {
   /** URL path prefix, e.g. '/api' */
   prefix?: string;
+  /** Lifecycle hooks for request transformation */
+  hooks?: AdapterHooks;
 }
 
 /** Evaluation request body (used by adapters) */

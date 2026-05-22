@@ -26,7 +26,7 @@ import {
   mapErrorToResponse,
   handleEvaluate,
   handleMetadata,
-  resolveStreamParams,
+  resolveStreamParamsWithHook,
   formatSSEError,
   formatJSONLError,
 } from './common.js';
@@ -34,11 +34,12 @@ import {
 export function createExpressAdapter(engine: VenusEngine, options?: AdapterOptions): Router {
   const router = Router();
   const prefix = options?.prefix ?? '';
+  const hooks = options?.hooks;
 
   // POST /evaluate
   router.post(`${prefix}/evaluate`, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await handleEvaluate(engine, req.body);
+      const result = await handleEvaluate(engine, req.body, hooks);
       if (!result.ok) {
         res.status(result.status).json(result.body);
         return;
@@ -57,7 +58,7 @@ export function createExpressAdapter(engine: VenusEngine, options?: AdapterOptio
   // POST /evaluate/stream (SSE)
   router.post(`${prefix}/evaluate/stream`, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const parsed = resolveStreamParams(req.body);
+      const parsed = await resolveStreamParamsWithHook(req.body, hooks);
       if (!parsed.ok) {
         res.status(parsed.status).json(parsed.body);
         return;
@@ -70,7 +71,7 @@ export function createExpressAdapter(engine: VenusEngine, options?: AdapterOptio
       res.flushHeaders();
 
       try {
-        for await (const event of engine.evaluateStream(imageUrl, { genre: genre ?? null, context, mode })) {
+        for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
       } catch (err) {
@@ -86,7 +87,7 @@ export function createExpressAdapter(engine: VenusEngine, options?: AdapterOptio
   // POST /evaluate/stream/jsonl (Streamable HTTP - JSON Lines)
   router.post(`${prefix}/evaluate/stream/jsonl`, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const parsed = resolveStreamParams(req.body);
+      const parsed = await resolveStreamParamsWithHook(req.body, hooks);
       if (!parsed.ok) {
         res.status(parsed.status).json(parsed.body);
         return;
@@ -100,7 +101,7 @@ export function createExpressAdapter(engine: VenusEngine, options?: AdapterOptio
       res.flushHeaders();
 
       try {
-        for await (const event of engine.evaluateStream(imageUrl, { genre: genre ?? null, context, mode })) {
+        for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
           res.write(`${JSON.stringify(event)}\n`);
         }
       } catch (err) {
