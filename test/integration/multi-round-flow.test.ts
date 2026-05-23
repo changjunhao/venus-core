@@ -14,7 +14,7 @@ import { mockFetch, restoreFetch, makeOpenAIResponse } from '../helpers/mock-fet
 import { PORTRAIT_DIMS, makeDimensions } from '../helpers/mock-data.js';
 import type { EvaluationStreamEvent } from '../../src/types.js';
 
-const TEST_IMAGE = 'https://example.com/test-portrait.jpg';
+const TEST_IMAGE = 'https://oss-materials.ifable.cn/DSCF1469.jpeg';
 
 // ── Mock JSON content builders ──
 function makeProposalContent(score = 7.5) {

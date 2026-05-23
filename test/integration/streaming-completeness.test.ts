@@ -26,8 +26,7 @@ import { PORTRAIT_DIMS, makeDimensions } from '../helpers/mock-data.js';
 const API_KEY = process.env.DASHSCOPE_API_KEY;
 const runIntegration = process.env.RUN_INTEGRATION === '1' && !!API_KEY;
 
-const TEST_IMAGE_URL =
-  'https://ifable-test.oss-cn-beijing.aliyuncs.com/uploads/b312d5367770a3fa094ac66cb0e95e43ac06a24116a26e8f95c7e0211d5b9467.jpg?Expires=1778862105&OSSAccessKeyId=TMP.3L1fYK3PcZcjM2BZgQXfcGVNwHUAXvRt23etcRFPEPWbxVuzKZSNvtjaumaNaJAjxvjQNhdfQLqcwPfTzZMn3nrmrWy4vS&Signature=M6oeCIX7HlzBFvn8c7QIDVDFDqM%3D';
+const TEST_IMAGE_URL = 'https://oss-materials.ifable.cn/DSCF1469.jpeg'
 
 const MOCK_IMAGE = 'https://example.com/test-portrait.jpg';
 
