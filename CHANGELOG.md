@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-24
+
+### BREAKING
+
+- **Engine now requires a provider instance**: `VenusEngineConfig` no longer accepts
+  `baseURL` / `apiKey` / `timeout`. Instead, callers must construct and pass an
+  `LLMProvider` instance via the required `provider` field.
+- **Provider factory renamed**: `createOpenAICompatProvider` → `createOpenAIChatProvider`;
+  `OpenAICompatOptions` → `OpenAIChatProviderOptions`. Update all imports.
+- **Reasoning adapter utilities removed from public API**: `adaptReasoningParams`,
+  `detectProviderStyle`, `extractReasoningContent`, `extractStreamReasoning`,
+  `extractTokenUsage`, `getDefaultBudget`, and the `ProviderStyle` type are no longer
+  exported. These are now internal implementation details of each provider.
+- **`defaultModel` no longer has a fallback**: previously defaulted to `qwen3-vl-flash`;
+  now throws a `CONFIG_ERROR` if missing. Configure `defaultModel` or per-agent `models`
+  explicitly.
+
+### Added
+
+- **New provider factories (experimental stubs)**: `createOpenAIResponsesProvider`,
+  `createAnthropicProvider`, and `createGeminiProvider` — type definitions and
+  option interfaces are exported for forward compatibility, but implementations
+  are skeletons that throw on invocation. Marked `@experimental`.
+- **Optional peer dependencies**: `@anthropic-ai/sdk` and `@google/genai` added
+  for the upcoming Anthropic and Gemini providers.
+- **Bilingual documentation**: detailed API reference, configuration guide, and usage
+  guide extracted from README into `docs/en/` and `docs/zh-CN/`.
+- **Skeleton provider test**: `test/providers/skeleton-providers.test.ts` validates
+  basic provider instantiation and capability declarations for all providers.
+
+### Changed
+
+- Provider source files reorganized: `openai-compat.ts` → `openai-chat.ts`,
+  `reasoning-adapter.ts` → `reasoning.ts` (internal only; public API uses new names).
+- `BaseAgent` error-history push logic extracted into `#pushErrorHistory()` helper,
+  shared by both `call()` and `callStream()` retry loops.
+- Proposer revision prompt now enforces Chinese language for thinking and all
+  natural-language text fields (critique, suggestions, etc.).
+- Logger: removed unused `silentLogger` export.
+- Dependency bumps: `openai` ^6.39.0, `hono` ^4.12.22, `eslint` ^10.4.0,
+  `typescript-eslint` ^8.59.4.
+
 ## [0.5.0] - 2026-05-23
 
 ### Added
