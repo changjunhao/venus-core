@@ -6,17 +6,26 @@
  *
  * Uses the `@google/genai` SDK for Google's Generative AI API.
  * Requires `@google/genai` as an optional peer dependency.
- * Currently a skeleton — implementation deferred.
+ *
+ * @experimental This provider is a skeleton and not yet implemented.
+ * Calling `createGeminiProvider()` will throw. Do not use in production.
  */
 
 import type { LLMProvider } from '../types.js';
 
-/** Options for creating a Gemini provider */
+/**
+ * Options for creating a Gemini provider.
+ * @experimental
+ */
 export interface GeminiProviderOptions {
   apiKey: string;
   defaultModel?: string;
 }
 
+/**
+ * Create a Google Gemini provider.
+ * @experimental Not yet implemented — throws on invocation.
+ */
 export function createGeminiProvider(_options: GeminiProviderOptions): LLMProvider {
   throw new Error('Gemini provider is not yet implemented');
 }
