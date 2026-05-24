@@ -2,8 +2,15 @@
 // Copyright 2026 Venus Contributors
 
 import { createVenusEngine } from '../../src/engine.js';
+import { defineProvider } from '../../src/providers/index.js';
 import type { EvaluationEvent } from '../../src/types.js';
 import { createMockProvider } from './mock-provider.js';
+
+/** Mock default provider — never actually called when per-agent providers are set */
+const mockDefaultProvider = defineProvider({
+  name: 'mock-default',
+  chat: async () => ({ content: 'unreachable', reasoning: null }),
+});
 
 /**
  * Create a VenusEngine wired with mock providers for each agent role.
@@ -18,8 +25,8 @@ export function createMockEngine(opts: {
   onEvent?: (event: EvaluationEvent) => void;
 }) {
   return createVenusEngine({
-    baseURL: 'https://mock.test/v1',
-    apiKey: 'mock-key',
+    provider: mockDefaultProvider,
+    defaultModel: 'test-model',
     providers: {
       proposer: createMockProvider(opts.proposerResponses),
       critic: createMockProvider(opts.criticResponses),

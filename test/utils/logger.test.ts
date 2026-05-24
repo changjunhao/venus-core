@@ -2,7 +2,7 @@
 // Copyright 2026 Venus Contributors
 
 import { describe, it, expect, mock, afterEach } from 'bun:test';
-import { createLogger, silentLogger, type Logger } from '../../src/utils/logger.js';
+import { createLogger } from '../../src/utils/logger.js';
 
 describe('Logger', () => {
   describe('createLogger()', () => {
@@ -91,32 +91,6 @@ describe('Logger', () => {
       expect(args!).toHaveLength(3);
       expect(args![1]).toEqual({ detail: 'extra' });
       expect(args![2]).toBe(42);
-    });
-  });
-
-  describe('silentLogger', () => {
-    it('should have debug/info/warn/error methods that do nothing', () => {
-      // All methods should exist and not throw
-      expect(() => silentLogger.debug('test')).not.toThrow();
-      expect(() => silentLogger.info('test')).not.toThrow();
-      expect(() => silentLogger.warn('test')).not.toThrow();
-      expect(() => silentLogger.error('test')).not.toThrow();
-    });
-
-    it('should satisfy the Logger interface', () => {
-      const logger: Logger = silentLogger;
-      expect(logger.debug).toBeDefined();
-      expect(logger.info).toBeDefined();
-      expect(logger.warn).toBeDefined();
-      expect(logger.error).toBeDefined();
-    });
-
-    it('should produce no console output', () => {
-      const spy = mock((_msg: string, ..._args: unknown[]) => {});
-      console.info = spy as unknown as typeof console.info;
-
-      silentLogger.info('should not appear');
-      expect(spy).not.toHaveBeenCalled();
     });
   });
 });

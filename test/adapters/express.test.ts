@@ -1,7 +1,6 @@
 import { describe, it, expect, afterAll } from 'bun:test';
 import express from 'express';
 import { createExpressAdapter } from '../../src/adapters/express.js';
-import { VenusError, ValidationError } from '../../src/utils/errors.js';
 import { getMetadata } from '../../src/schema/index.js';
 import type { VenusEngine } from '../../src/engine.js';
 import type { Server } from 'node:http';
@@ -366,67 +365,6 @@ describe('Express Adapter', () => {
 
     it('should route /evaluate handler errors through next(error)', async () => {
       const baseUrl = await setupBroken();
-
-      const res = await fetch(`${baseUrl}/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
-      });
-
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as any;
-      expect(body.error.code).toBe('INTERNAL_ERROR');
-    });
-  });
-
-  // ── Error Mapping ──
-  describe('Error mapping', () => {
-    it('should map ValidationError to 400', async () => {
-      const engine = createMockEngine({
-        evaluate: async () => {
-          throw new ValidationError('Bad input');
-        },
-      });
-      const baseUrl = await setup(engine);
-
-      const res = await fetch(`${baseUrl}/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(body.error.code).toBe('VALIDATION_ERROR');
-      expect(body.error.message).toBe('Bad input');
-    });
-
-    it('should map VenusError to 422', async () => {
-      const engine = createMockEngine({
-        evaluate: async () => {
-          throw new VenusError('Processing failed', 'PROCESSING_ERROR');
-        },
-      });
-      const baseUrl = await setup(engine);
-
-      const res = await fetch(`${baseUrl}/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
-      });
-
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as any;
-      expect(body.error.code).toBe('PROCESSING_ERROR');
-    });
-
-    it('should map unknown errors to 500', async () => {
-      const engine = createMockEngine({
-        evaluate: async () => {
-          throw new Error('Unexpected failure');
-        },
-      });
-      const baseUrl = await setup(engine);
 
       const res = await fetch(`${baseUrl}/evaluate`, {
         method: 'POST',

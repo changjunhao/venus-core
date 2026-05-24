@@ -5,23 +5,14 @@ import { describe, it, expect } from 'bun:test';
 import {
   getDefaultBudget,
   adaptReasoningParams,
-  detectProviderStyle,
+  detectEndpointBehavior,
   extractReasoningContent,
   extractStreamReasoning,
   extractTokenUsage,
-} from '../../src/providers/reasoning-adapter.js';
+} from '../../src/providers/reasoning.js';
 import type { ChatReasoningParams } from '../../src/types.js';
 
-/**
- * These tests are intentionally focused on the branches that openai-compat
- * exercises during streaming and non-streaming flows, to cover the lines that
- * were previously not reached by the higher-level provider tests:
- *   - getDefaultBudget (line 25-30) — only triggered when an Anthropic-style
- *     reasoning request omits `budgetTokens`.
- *   - adaptReasoningParams (lines 50-55, 70-73) — Anthropic and Gemini styles.
- *   - extractTokenUsage (lines 154, 156) — both reasoning_tokens fallbacks.
- */
-describe('reasoning-adapter', () => {
+describe('reasoning', () => {
   describe('getDefaultBudget()', () => {
     it('returns 2048 for low effort', () => {
       expect(getDefaultBudget('low')).toBe(2048);
@@ -41,39 +32,27 @@ describe('reasoning-adapter', () => {
       expect(adaptReasoningParams(undefined, 'openai')).toEqual({});
     });
 
-    it('produces { reasoning_effort } for openai style', () => {
+    it('produces { reasoning_effort } for openai endpoint', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       expect(adaptReasoningParams(params, 'openai')).toEqual({ reasoning_effort: 'medium' });
     });
 
-    it('produces { reasoning_effort } for deepseek style', () => {
+    it('produces reasoning_effort + extra_body.thinking for deepseek endpoint', () => {
       const params: ChatReasoningParams = { effort: 'high' };
-      expect(adaptReasoningParams(params, 'deepseek')).toEqual({ reasoning_effort: 'high' });
-    });
-
-    it('produces anthropic thinking with explicit budgetTokens when provided', () => {
-      const params: ChatReasoningParams = { effort: 'low', budgetTokens: 1024 };
-      expect(adaptReasoningParams(params, 'anthropic')).toEqual({
-        thinking: { type: 'enabled', budget_tokens: 1024 },
+      expect(adaptReasoningParams(params, 'deepseek')).toEqual({
+        reasoning_effort: 'high',
+        extra_body: { thinking: { type: 'enabled' } },
       });
     });
 
-    it('produces anthropic thinking with default budget when budgetTokens is omitted', () => {
-      // This exercises the `getDefaultBudget(reasoning.effort)` fallback path.
-      const params: ChatReasoningParams = { effort: 'medium' };
-      expect(adaptReasoningParams(params, 'anthropic')).toEqual({
-        thinking: { type: 'enabled', budget_tokens: 8192 },
-      });
-    });
-
-    it('produces qwen enable_thinking without thinking_budget when omitted', () => {
+    it('produces dashscope enable_thinking without thinking_budget when omitted', () => {
       const params: ChatReasoningParams = { effort: 'low' };
-      expect(adaptReasoningParams(params, 'qwen')).toEqual({ enable_thinking: true });
+      expect(adaptReasoningParams(params, 'dashscope')).toEqual({ enable_thinking: true });
     });
 
-    it('produces qwen enable_thinking with thinking_budget when provided', () => {
+    it('produces dashscope enable_thinking with thinking_budget when provided', () => {
       const params: ChatReasoningParams = { effort: 'low', budgetTokens: 4096 };
-      expect(adaptReasoningParams(params, 'qwen')).toEqual({
+      expect(adaptReasoningParams(params, 'dashscope')).toEqual({
         enable_thinking: true,
         thinking_budget: 4096,
       });
@@ -86,45 +65,58 @@ describe('reasoning-adapter', () => {
       });
     });
 
-    it('produces gemini thinkingConfig with thinkingLevel', () => {
-      const params: ChatReasoningParams = { effort: 'high' };
-      expect(adaptReasoningParams(params, 'gemini')).toEqual({
-        thinkingConfig: { thinkingLevel: 'high' },
+    it('produces openrouter reasoning object with effort', () => {
+      const params: ChatReasoningParams = { effort: 'medium' };
+      expect(adaptReasoningParams(params, 'openrouter')).toEqual({
+        reasoning: { effort: 'medium', enabled: true },
       });
     });
 
-    it('falls back to reasoning_effort for unknown style', () => {
+    it('produces openrouter reasoning object with max_tokens when budgetTokens provided', () => {
+      const params: ChatReasoningParams = { effort: 'high', budgetTokens: 8192 };
+      expect(adaptReasoningParams(params, 'openrouter')).toEqual({
+        reasoning: { effort: 'high', max_tokens: 8192, enabled: true },
+      });
+    });
+
+    it('falls back to reasoning_effort for unknown endpoint', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
-      // Cast to bypass the exhaustive ProviderStyle union for the default branch.
+      // Cast to bypass the exhaustive EndpointBehavior union for the default branch.
       const result = adaptReasoningParams(params, 'unknown' as never);
       expect(result).toEqual({ reasoning_effort: 'medium' });
     });
   });
 
-  describe('detectProviderStyle()', () => {
-    it('detects qwen from dashscope baseURL', () => {
-      expect(detectProviderStyle('https://dashscope.aliyuncs.com/compatible-mode/v1')).toBe('qwen');
+  describe('detectEndpointBehavior()', () => {
+    it('detects dashscope from dashscope.aliyuncs.com baseURL', () => {
+      expect(detectEndpointBehavior('https://dashscope.aliyuncs.com/compatible-mode/v1')).toBe('dashscope');
     });
 
-    it('detects anthropic from anthropic baseURL', () => {
-      expect(detectProviderStyle('https://api.anthropic.com/v1')).toBe('anthropic');
+    it('detects deepseek from api.deepseek.com baseURL', () => {
+      expect(detectEndpointBehavior('https://api.deepseek.com/v1')).toBe('deepseek');
     });
 
-    it('detects deepseek from deepseek baseURL', () => {
-      expect(detectProviderStyle('https://api.deepseek.com/v1')).toBe('deepseek');
-    });
-
-    it('detects gemini from generativelanguage.googleapis.com baseURL', () => {
-      expect(detectProviderStyle('https://generativelanguage.googleapis.com/v1beta')).toBe('gemini');
+    it('detects deepseek from generic deepseek.com baseURL', () => {
+      expect(detectEndpointBehavior('https://deepseek.com/api')).toBe('deepseek');
     });
 
     it('detects kimi from moonshot.cn baseURL', () => {
-      expect(detectProviderStyle('https://api.moonshot.cn/v1')).toBe('kimi');
+      expect(detectEndpointBehavior('https://api.moonshot.cn/v1')).toBe('kimi');
+    });
+
+    it('detects kimi from moonshot.cn subdomain', () => {
+      expect(detectEndpointBehavior('https://api.moonshot.cn/v1')).toBe('kimi');
+    });
+
+    it('detects openrouter from openrouter.ai baseURL', () => {
+      expect(detectEndpointBehavior('https://openrouter.ai/api/v1')).toBe('openrouter');
     });
 
     it('falls back to openai for unrecognized hosts', () => {
-      expect(detectProviderStyle('https://api.openai.com/v1')).toBe('openai');
-      expect(detectProviderStyle('https://example.test/v1')).toBe('openai');
+      expect(detectEndpointBehavior('https://api.openai.com/v1')).toBe('openai');
+      expect(detectEndpointBehavior('https://example.test/v1')).toBe('openai');
+      expect(detectEndpointBehavior('https://generativelanguage.googleapis.com/v1beta')).toBe('openai');
+      expect(detectEndpointBehavior('https://api.anthropic.com/v1')).toBe('openai');
     });
   });
 
@@ -175,8 +167,6 @@ describe('reasoning-adapter', () => {
     });
 
     it('returns reasoning_content even when empty string (delta semantics)', () => {
-      // Stream deltas can legitimately yield "" to signal the field is present;
-      // the implementation only requires the field to be a string.
       expect(extractStreamReasoning({ reasoning_content: '' })).toBe('');
     });
 
@@ -226,7 +216,7 @@ describe('reasoning-adapter', () => {
       expect(usage).toEqual({ inputTokens: 5, outputTokens: 7 });
     });
 
-    it('reads reasoning_tokens from completion_tokens_details (line 154)', () => {
+    it('reads reasoning_tokens from completion_tokens_details', () => {
       const usage = extractTokenUsage({
         usage: {
           prompt_tokens: 10,
@@ -237,7 +227,7 @@ describe('reasoning-adapter', () => {
       expect(usage).toEqual({ inputTokens: 10, outputTokens: 20, reasoningTokens: 8 });
     });
 
-    it('reads reasoning_tokens directly from usage as fallback (line 156)', () => {
+    it('reads reasoning_tokens directly from usage as fallback', () => {
       const usage = extractTokenUsage({
         usage: {
           prompt_tokens: 1,
@@ -249,8 +239,6 @@ describe('reasoning-adapter', () => {
     });
 
     it('returns reasoningTokens-only result when input/output are zero but reasoning is present', () => {
-      // Hits the path where `inputTokens === 0 && outputTokens === 0` but reasoningTokens is defined,
-      // so the early-return guard does NOT trigger.
       const usage = extractTokenUsage({
         usage: { reasoning_tokens: 100 },
       });

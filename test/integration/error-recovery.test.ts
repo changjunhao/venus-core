@@ -12,6 +12,7 @@
 
 import { describe, it, expect, afterEach } from 'bun:test';
 import { createVenusEngine } from '../../src/engine.js';
+import { createOpenAIChatProvider } from '../../src/providers/index.js';
 import { VenusError } from '../../src/utils/errors.js';
 import { mockFetch, restoreFetch, makeOpenAIResponse } from '../helpers/mock-fetch.js';
 import { PORTRAIT_DIMS, makeDimensions } from '../helpers/mock-data.js';
@@ -106,8 +107,8 @@ describe('Integration — Error recovery and propagation', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'test-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'test-key' }),
+      defaultModel: 'test-model',
       maxRetries: 3,
     });
 
@@ -125,8 +126,8 @@ describe('Integration — Error recovery and propagation', () => {
     mockFetch(async () => makeOpenAIResponse({ error: { message: 'Invalid API key', type: 'auth_error' } }, 401));
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'invalid-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'invalid-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 
@@ -149,8 +150,8 @@ describe('Integration — Error recovery and propagation', () => {
     mockFetch(async () => makeOpenAIResponse({ error: { message: 'Invalid API key', type: 'auth_error' } }, 401));
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'invalid-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'invalid-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 
@@ -180,8 +181,8 @@ describe('Integration — Error recovery and propagation', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'test-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'test-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 
@@ -208,8 +209,8 @@ describe('Integration — Error recovery and propagation', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'test-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'test-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 

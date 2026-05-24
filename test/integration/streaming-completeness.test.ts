@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from 'bun:test';
 import { createVenusEngine } from '../../src/engine.js';
+import { createOpenAIChatProvider } from '../../src/providers/index.js';
 import type { EvaluationStreamEvent, EvaluationResult } from '../../src/types.js';
 import { createMockEngine } from '../helpers/mock-engine.js';
 import { PORTRAIT_DIMS, makeDimensions } from '../helpers/mock-data.js';
@@ -26,7 +27,7 @@ import { PORTRAIT_DIMS, makeDimensions } from '../helpers/mock-data.js';
 const API_KEY = process.env.DASHSCOPE_API_KEY;
 const runIntegration = process.env.RUN_INTEGRATION === '1' && !!API_KEY;
 
-const TEST_IMAGE_URL = 'https://oss-materials.ifable.cn/DSCF1469.jpeg'
+const TEST_IMAGE_URL = 'https://oss-materials.ifable.cn/DSCF1469.jpeg';
 
 const MOCK_IMAGE = 'https://example.com/test-portrait.jpg';
 
@@ -295,8 +296,10 @@ describe('Mock - Streaming completeness rules', () => {
 
 function createRealEngine() {
   return createVenusEngine({
-    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiKey: API_KEY!,
+    provider: createOpenAIChatProvider({
+      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: API_KEY!,
+    }),
     defaultModel: 'qwen3.6-plus',
     reasoning: {
       effort: 'medium',

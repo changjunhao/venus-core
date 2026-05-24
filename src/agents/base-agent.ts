@@ -75,6 +75,25 @@ export class BaseAgent {
   }
 
   /**
+   * Append error feedback messages to the conversation history so the
+   * model can self-correct on the next retry attempt.
+   */
+  #pushErrorHistory(history: ChatMessage[], userPrompt: string, imageUrl: string, errorMessage: string): void {
+    history.push({
+      role: 'user' as const,
+      content: this.#buildUserContent(userPrompt, imageUrl),
+    });
+    history.push({
+      role: 'assistant' as const,
+      content: errorMessage.includes('JSON') ? '{"error": "format error"}' : '{}',
+    });
+    history.push({
+      role: 'user' as const,
+      content: `你的上次输出格式有误: ${errorMessage}。请严格按照要求的 JSON 格式重新输出，不要包含任何多余文字。`,
+    });
+  }
+
+  /**
    * 核心调用方法：发送图片+文本给 VLM，获取 JSON 响应
    *
    * @param systemPrompt - 系统提示词
@@ -120,18 +139,7 @@ export class BaseAgent {
 
         // 如果不是最后一次尝试，将错误信息加入对话历史让模型自我修正
         if (attempt < this.#maxRetries - 1) {
-          history.push({
-            role: 'user' as const,
-            content: this.#buildUserContent(userPrompt, imageUrl),
-          });
-          history.push({
-            role: 'assistant' as const,
-            content: lastError.message.includes('JSON') ? '{"error": "format error"}' : '{}',
-          });
-          history.push({
-            role: 'user' as const,
-            content: `你的上次输出格式有误: ${lastError.message}。请严格按照要求的 JSON 格式重新输出，不要包含任何多余文字。`,
-          });
+          this.#pushErrorHistory(history, userPrompt, imageUrl, lastError.message);
         }
       }
     }
@@ -199,18 +207,7 @@ export class BaseAgent {
 
         // 将错误信息加入对话历史，让模型在下一次流式尝试中自我修正（与 call() 重试模式一致）
         if (attempt < this.#maxRetries - 1) {
-          history.push({
-            role: 'user' as const,
-            content: this.#buildUserContent(userPrompt, imageUrl),
-          });
-          history.push({
-            role: 'assistant' as const,
-            content: lastError.message.includes('JSON') ? '{"error": "format error"}' : '{}',
-          });
-          history.push({
-            role: 'user' as const,
-            content: `你的上次输出格式有误: ${lastError.message}。请严格按照要求的 JSON 格式重新输出，不要包含任何多余文字。`,
-          });
+          this.#pushErrorHistory(history, userPrompt, imageUrl, lastError.message);
         }
       }
     }

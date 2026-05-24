@@ -98,7 +98,9 @@ ${critiqueReasoning}
 `
     : ''
 }
-请认真考虑批判者指出的问题，如果有道理就调整分数，如果你认为你是对的也可以坚持。但必须给出修正后的完整 JSON 结果。`;
+请认真考虑批判者指出的问题，如果有道理就调整分数，如果你认为你是对的也可以坚持。但必须给出修正后的完整 JSON 结果。
+
+注意：你的思考过程和所有自然语言文本（包括 critique、suggestions 等字段的内容）必须全程使用中文。`;
 
   if (context) {
     prompt += formatContextForProposer(context, genre);

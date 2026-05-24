@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { createOpenAICompatProvider } from '../src/providers/index.js';
+import { createOpenAIChatProvider } from '../src/providers/index.js';
 import { createVenusEngine } from '../src/engine.js';
 import { defineProvider } from '../src/providers/index.js';
 import { ProviderError, VenusError } from '../src/utils/errors.js';
@@ -11,7 +11,7 @@ import { restoreFetch, makeOpenAIResponse } from './helpers/mock-fetch.js';
  */
 function createProviderWithMockedFetch(fetchImpl: (...args: any[]) => any) {
   globalThis.fetch = fetchImpl as typeof globalThis.fetch;
-  return createOpenAICompatProvider({
+  return createOpenAIChatProvider({
     baseURL: 'https://mock-api.test/v1',
     apiKey: 'test-key',
     timeout: 5000,
@@ -289,8 +289,8 @@ describe('Error Handling — Engine Error Event Propagation', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock.test/v1',
-      apiKey: 'mock-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+      defaultModel: 'test-model',
       providers: {
         proposer: errorProvider,
         critic: errorProvider,
@@ -321,8 +321,8 @@ describe('Error Handling — Engine Error Event Propagation', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock.test/v1',
-      apiKey: 'mock-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+      defaultModel: 'test-model',
       providers: {
         proposer: errorProvider,
         critic: errorProvider,
@@ -350,8 +350,8 @@ describe('Error Handling — Engine Error Event Propagation', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock.test/v1',
-      apiKey: 'mock-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+      defaultModel: 'test-model',
       providers: {
         proposer: errorProvider,
         critic: errorProvider,

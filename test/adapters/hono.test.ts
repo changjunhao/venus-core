@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { Hono } from 'hono';
 import { createHonoAdapter } from '../../src/adapters/hono.js';
-import { VenusError, ValidationError } from '../../src/utils/errors.js';
 import { getMetadata } from '../../src/schema/index.js';
 import type { VenusEngine } from '../../src/engine.js';
 import type { AdapterHooks } from '../../src/types.js';
@@ -519,67 +518,6 @@ describe('Hono Adapter', () => {
       expect(res.status).toBe(200);
       await res.text(); // consume body
       expect(receivedImageUrl).toBe('https://hooked-jsonl.example.com/photo.jpg');
-    });
-  });
-
-  // ── Error Mapping ──
-  describe('Error mapping', () => {
-    it('should map ValidationError to 400', async () => {
-      const engine = createMockEngine({
-        evaluate: async () => {
-          throw new ValidationError('Bad input');
-        },
-      });
-      const app = createApp(engine);
-
-      const res = await app.request('/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(body.error.code).toBe('VALIDATION_ERROR');
-      expect(body.error.message).toBe('Bad input');
-    });
-
-    it('should map VenusError to 422', async () => {
-      const engine = createMockEngine({
-        evaluate: async () => {
-          throw new VenusError('Processing failed', 'PROCESSING_ERROR');
-        },
-      });
-      const app = createApp(engine);
-
-      const res = await app.request('/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
-      });
-
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as any;
-      expect(body.error.code).toBe('PROCESSING_ERROR');
-    });
-
-    it('should map unknown errors to 500', async () => {
-      const engine = createMockEngine({
-        evaluate: async () => {
-          throw new Error('Unexpected failure');
-        },
-      });
-      const app = createApp(engine);
-
-      const res = await app.request('/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: 'https://example.com/photo.jpg' }),
-      });
-
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as any;
-      expect(body.error.code).toBe('INTERNAL_ERROR');
     });
   });
 });

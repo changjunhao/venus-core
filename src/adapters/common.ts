@@ -60,10 +60,7 @@ export function formatJSONLError(err: unknown): string {
  * Returns the params unchanged when no hook is configured, otherwise awaits
  * the hook (sync or async) and returns its transformed result.
  */
-export async function applyBeforeEvaluateHook(
-  params: EvaluateParams,
-  hooks?: AdapterHooks,
-): Promise<EvaluateParams> {
+export async function applyBeforeEvaluateHook(params: EvaluateParams, hooks?: AdapterHooks): Promise<EvaluateParams> {
   if (!hooks?.beforeEvaluate) return params;
   return await hooks.beforeEvaluate(params);
 }

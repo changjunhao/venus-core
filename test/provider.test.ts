@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { createOpenAICompatProvider, defineProvider } from '../src/providers/index.js';
+import { createOpenAIChatProvider, defineProvider } from '../src/providers/index.js';
 import { ProviderError } from '../src/utils/errors.js';
 import { mockFetch, restoreFetch, makeOpenAIResponse } from './helpers/mock-fetch.js';
 
@@ -67,15 +67,15 @@ describe('Provider Layer', () => {
     });
   });
 
-  // ── createOpenAICompatProvider ──
-  describe('createOpenAICompatProvider()', () => {
+  // ── createOpenAIChatProvider ──
+  describe('createOpenAIChatProvider()', () => {
     it('should create a provider with correct properties', () => {
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://api.example.com/v1',
         apiKey: 'test-key',
       });
 
-      expect(provider.name).toContain('openai-compat');
+      expect(provider.name).toContain('openai-chat');
       expect(provider.name).toContain('api.example.com');
       expect(provider.capabilities.vision).toBe(true);
       expect(provider.capabilities.reasoning).toBe(true);
@@ -87,7 +87,7 @@ describe('Provider Layer', () => {
   // ── ProviderError error classification ──
   describe('ProviderError classification', () => {
     // We test the error classification logic by examining the provider's
-    // catch block behavior. Since the openai-compat provider wraps errors,
+    // catch block behavior. Since the openai-chat provider wraps errors,
     // we verify the classification via the ProviderError itself.
 
     it('should classify 401 as auth_error', () => {
@@ -131,7 +131,7 @@ describe('Provider Layer', () => {
           reasoning_content: 'I think this photo has excellent composition...',
         }),
       );
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-cot.test/v1',
         apiKey: 'test-key',
       });
@@ -152,7 +152,7 @@ describe('Provider Layer', () => {
           reasoning: 'Let me analyze the lighting in detail...',
         }),
       );
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-cot.test/v1',
         apiKey: 'test-key',
       });
@@ -173,7 +173,7 @@ describe('Provider Layer', () => {
           thinking: 'Anthropic-style thinking trace...',
         }),
       );
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-cot.test/v1',
         apiKey: 'test-key',
       });
@@ -195,7 +195,7 @@ describe('Provider Layer', () => {
           thinking: 'Anthropic thinking',
         }),
       );
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-cot.test/v1',
         apiKey: 'test-key',
       });
@@ -215,7 +215,7 @@ describe('Provider Layer', () => {
           content: 'Just a plain response',
         }),
       );
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-cot.test/v1',
         apiKey: 'test-key',
       });
@@ -231,7 +231,7 @@ describe('Provider Layer', () => {
   });
 
   // ── extra parameter merging via real provider ──
-  describe('extra parameter merging (openai-compat)', () => {
+  describe('extra parameter merging (openai-chat)', () => {
     afterEach(() => restoreFetch());
 
     it('should merge extra params into request body', async () => {
@@ -241,7 +241,7 @@ describe('Provider Layer', () => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-extra.test/v1',
         apiKey: 'test-key',
       });
@@ -263,7 +263,7 @@ describe('Provider Layer', () => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-extra.test/v1',
         apiKey: 'test-key',
         defaultExtra: { top_k: 50, repetition_penalty: 1.1 },
@@ -285,7 +285,7 @@ describe('Provider Layer', () => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-extra.test/v1',
         apiKey: 'test-key',
         defaultExtra: { top_p: 0.9, custom_param: 'default_value' },
@@ -306,21 +306,20 @@ describe('Provider Layer', () => {
     });
   });
 
-  // ── reasoning parameter construction (per-style adapter) ──
-  describe('Reasoning parameter construction (style-aware)', () => {
+  // ── reasoning parameter construction (endpoint-aware) ──
+  describe('Reasoning parameter construction (endpoint-aware)', () => {
     afterEach(() => restoreFetch());
 
-    it('should send reasoning_effort when reasoning is enabled (openai style)', async () => {
+    it('should send reasoning_effort when reasoning is enabled (unrecognized host → openai fallback)', async () => {
       let capturedBody: any = null;
 
       mockFetch(async (_input, init) => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
-        baseURL: 'https://mock-reasoning.test/v1',
+      const provider = createOpenAIChatProvider({
+        baseURL: 'https://mock-reasoning.test/v1', // unrecognized → openai endpoint behavior
         apiKey: 'test-key',
-        style: 'openai',
       });
 
       await provider.chat({
@@ -332,14 +331,14 @@ describe('Provider Layer', () => {
       expect(capturedBody.reasoning_effort).toBe('medium');
     });
 
-    it('should send enable_thinking and thinking_budget when reasoning is enabled (qwen style)', async () => {
+    it('should send enable_thinking and thinking_budget when reasoning is enabled (dashscope endpoint)', async () => {
       let capturedBody: any = null;
 
       mockFetch(async (_input, init) => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         apiKey: 'test-key',
       });
@@ -354,14 +353,14 @@ describe('Provider Layer', () => {
       expect(capturedBody.thinking_budget).toBe(4096);
     });
 
-    it('should send thinking.enabled and omit temperature when reasoning is enabled (kimi style)', async () => {
+    it('should send thinking.enabled and omit temperature when reasoning is enabled (kimi endpoint)', async () => {
       let capturedBody: any = null;
 
       mockFetch(async (_input, init) => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://api.moonshot.cn/v1',
         apiKey: 'test-key',
       });
@@ -381,14 +380,14 @@ describe('Provider Layer', () => {
       expect(capturedBody.thinking_budget).toBeUndefined();
     });
 
-    it('should send thinking.disabled when reasoning is NOT configured (kimi style)', async () => {
+    it('should send thinking.disabled when reasoning is NOT configured (kimi endpoint)', async () => {
       let capturedBody: any = null;
 
       mockFetch(async (_input, init) => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://api.moonshot.cn/v1',
         apiKey: 'test-key',
       });
@@ -406,7 +405,7 @@ describe('Provider Layer', () => {
     });
 
     it('should detect kimi style via moonshot.cn baseURL and expose proper capabilities', () => {
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://api.moonshot.cn/v1',
         apiKey: 'test-key',
       });
@@ -423,7 +422,7 @@ describe('Provider Layer', () => {
         capturedBody = JSON.parse(init?.body as string);
         return makeChatCompletion({ content: 'ok' });
       });
-      const provider = createOpenAICompatProvider({
+      const provider = createOpenAIChatProvider({
         baseURL: 'https://mock-reasoning.test/v1',
         apiKey: 'test-key',
       });

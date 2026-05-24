@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { createVenusEngine } from '../src/engine.js';
-import { defineProvider } from '../src/providers/index.js';
+import { defineProvider, createOpenAIChatProvider } from '../src/providers/index.js';
 import { createMockEngine } from './helpers/mock-engine.js';
 import type { EvaluationStreamEvent, EvaluationEvent, EvaluationContext } from '../src/types.js';
 import { PORTRAIT_DIMS, makeDimensions } from './helpers/mock-data.js';
@@ -330,20 +330,22 @@ describe('Engine Layer', () => {
           yield { partial: { scene_type: 'studio' } };
           yield { partial: { total_score: 7.5 } };
           yield { partial: { dimensions: makeDimensions(PORTRAIT_DIMS, 7.5) } };
-          yield { content: JSON.stringify({
-            scene_type: 'studio',
-            total_score: 7.5,
-            dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
-            critique: 'Good.',
-            suggestions: 'Improve.',
-          }) };
+          yield {
+            content: JSON.stringify({
+              scene_type: 'studio',
+              total_score: 7.5,
+              dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
+              critique: 'Good.',
+              suggestions: 'Improve.',
+            }),
+          };
         },
         chat: async () => ({ content: makeProposalJSON(), reasoning: null }),
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           proposer: multiChunkProvider,
           critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
@@ -380,8 +382,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           proposer: errorProvider,
           critic: errorProvider,
@@ -402,8 +404,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           proposer: errorProvider,
           critic: errorProvider,
@@ -431,8 +433,8 @@ describe('Engine Layer', () => {
       const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.92 });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           genreDetector: createMockProvider([{ content: genreDetectionJSON, reasoning: 'Detected portrait scene' }]),
           proposer: createMockProvider([{ content: makeProposalJSON() }]),
@@ -479,8 +481,8 @@ describe('Engine Layer', () => {
       const context: EvaluationContext = { exif: { cameraModel: 'Sony A7III' } };
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           genreDetector: createMockProvider([
             { content: genreDetectionJSON, reasoning: 'Subject is centered, portrait orientation' },
@@ -505,8 +507,8 @@ describe('Engine Layer', () => {
       const genreDetectionJSON = JSON.stringify({ genre: 'portrait', confidence: 0.87 });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           genreDetector: createMockProvider([{ content: genreDetectionJSON, reasoning: 'Natural elements detected' }]),
           proposer: createMockProvider([{ content: makeProposalJSON() }]),
@@ -559,8 +561,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: { proposer: spyProposer, critic: spyCritic, arbiter: spyArbiter },
         reasoning: { effort: 'medium', budgetTokens: 4096 },
       });
@@ -594,8 +596,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           proposer: spyProposer,
           critic: spyCritic,
@@ -637,8 +639,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           proposer: spyProposer,
           critic: spyCritic,
@@ -680,8 +682,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           proposer: spyProposer,
           critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
@@ -709,8 +711,8 @@ describe('Engine Layer', () => {
       });
 
       const engine = createVenusEngine({
-        baseURL: 'https://mock.test/v1',
-        apiKey: 'mock-key',
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
         providers: {
           genreDetector: spyGenreDetector,
           proposer: createMockProvider([{ content: makeProposalJSON() }]),

@@ -39,7 +39,7 @@ function makeStreamChunk(deltaFields: Record<string, unknown> | undefined, hasCh
   };
 }
 
-describe('OpenAI-Compat chatStream()', () => {
+describe('OpenAI-Chat chatStream()', () => {
   // We mock the OpenAI client and vectorjson at the module level
   let mockCreate: ReturnType<typeof mock>;
   let mockParserInstance: {
@@ -48,7 +48,7 @@ describe('OpenAI-Compat chatStream()', () => {
     destroy: ReturnType<typeof mock>;
   };
   let mockCreateParser: ReturnType<typeof mock>;
-  let createOpenAICompatProvider: typeof import('../../src/providers/openai-compat.js').createOpenAICompatProvider;
+  let createOpenAIChatProvider: typeof import('../../src/providers/openai-chat.js').createOpenAIChatProvider;
 
   beforeEach(async () => {
     // Fresh mocks per test
@@ -61,10 +61,6 @@ describe('OpenAI-Compat chatStream()', () => {
     mockCreateParser = mock(() => mockParserInstance);
 
     // Mock modules
-    await import('../../src/providers/openai-compat.js');
-
-    // We override the internal OpenAI client by mocking fetch and intercepting
-    // Actually, let's mock at the module level using Bun's mock.module
     mock.module('vectorjson', () => ({
       createParser: mockCreateParser,
     }));
@@ -80,12 +76,12 @@ describe('OpenAI-Compat chatStream()', () => {
     }));
 
     // Re-import to pick up mocks - use dynamic import with cache busting
-    const mod = await import('../../src/providers/openai-compat.js');
-    createOpenAICompatProvider = mod.createOpenAICompatProvider;
+    const mod = await import('../../src/providers/openai-chat.js');
+    createOpenAIChatProvider = mod.createOpenAIChatProvider;
   });
 
   function makeProvider() {
-    return createOpenAICompatProvider({
+    return createOpenAIChatProvider({
       baseURL: 'https://mock-stream.test/v1',
       apiKey: 'test-key',
     });

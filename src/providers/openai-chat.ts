@@ -2,29 +2,48 @@
 // Copyright 2026 Venus Contributors
 
 /**
- * Venus Core - OpenAI Compatible Provider
+ * Venus Core - OpenAI Chat Provider
  *
- * Default LLM provider implementation using the OpenAI SDK.
- * Works with any OpenAI-compatible API (OpenAI, DashScope, Together, vLLM, etc.)
+ * LLM provider using the OpenAI SDK for Chat Completions API.
+ * Works with any OpenAI-compatible endpoint (OpenAI, DashScope, DeepSeek, Kimi, OpenRouter, etc.).
+ *
+ * Endpoint behavior (reasoning parameter format) is auto-detected from `baseURL`
+ * at construction time via internal `detectEndpointBehavior`. No `style` parameter
+ * is exposed — consumers just pass the endpoint URL and everything is handled
+ * internally.
  */
 
 import OpenAI from 'openai';
 import type { LLMProvider, ChatParams, ChatResponse, StreamChunk } from '../types.js';
-import type { OpenAICompatOptions } from './types.js';
 import { ProviderError } from '../utils/errors.js';
 import type { ProviderErrorCode } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
 import {
   adaptReasoningParams,
-  detectProviderStyle,
+  detectEndpointBehavior,
   extractReasoningContent,
   extractStreamReasoning,
   extractTokenUsage,
-  type ProviderStyle,
-} from './reasoning-adapter.js';
+} from './reasoning.js';
 
-export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMProvider {
+/** Options for creating an OpenAI Chat provider */
+export interface OpenAIChatProviderOptions {
+  /** OpenAI-compatible API base URL */
+  baseURL: string;
+  /** API key */
+  apiKey: string;
+  /** Default model identifier (fallback when params.model is omitted) */
+  defaultModel?: string;
+  /** Extra headers to include in requests */
+  headers?: Record<string, string>;
+  /** Request timeout in milliseconds (default: 60000) */
+  timeout?: number;
+  /** Default vendor-specific extra parameters merged into every request (per-call extra takes priority) */
+  defaultExtra?: Record<string, unknown>;
+}
+
+export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LLMProvider {
   const client = new OpenAI({
     baseURL: options.baseURL,
     apiKey: options.apiKey,
@@ -32,12 +51,13 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
     defaultHeaders: options.headers,
   });
 
-  const style: ProviderStyle = options.style ?? detectProviderStyle(options.baseURL);
+  // Auto-detect endpoint behavior from baseURL (internal — not exposed to consumers)
+  const behavior = detectEndpointBehavior(options.baseURL);
 
   /** Build common request body for chat / chatStream */
   function buildRequestBody(params: ChatParams, stream?: boolean): Record<string, unknown> {
     const body: Record<string, unknown> = {
-      model: params.model || options.defaultModel || 'qwen3-vl-flash',
+      model: params.model || options.defaultModel,
       messages: params.messages,
     };
 
@@ -46,20 +66,20 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
     // Kimi k2.6/k2.5 fix temperature internally (1.0 for thinking, 0.6 for non-thinking)
     // and will reject any other value. OpenAI/DeepSeek reasoning models also ignore temperature.
     const skipTemperature =
-      style === 'kimi' || (params.reasoning !== undefined && (style === 'openai' || style === 'deepseek'));
+      behavior === 'kimi' || (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek'));
     if (params.temperature !== undefined && !skipTemperature) {
       body.temperature = params.temperature;
     }
 
     if (params.response_format) body.response_format = params.response_format;
 
-    // Adapt reasoning params into vendor-specific request fields
-    const reasoningFields = adaptReasoningParams(params.reasoning, style);
+    // Adapt reasoning params into endpoint-specific request fields
+    const reasoningFields = adaptReasoningParams(params.reasoning, behavior);
     Object.assign(body, reasoningFields);
 
     // Kimi's thinking models default to enabled. When the caller does NOT configure
     // reasoning, we must explicitly disable thinking to get standard (non-reasoning) behavior.
-    if (style === 'kimi' && params.reasoning === undefined) {
+    if (behavior === 'kimi' && params.reasoning === undefined) {
       body.thinking = { type: 'disabled' };
     }
 
@@ -73,11 +93,11 @@ export function createOpenAICompatProvider(options: OpenAICompatOptions): LLMPro
   }
 
   const provider = defineProvider({
-    name: `openai-compat(${options.baseURL})`,
+    name: `openai-chat(${options.baseURL})`,
     capabilities: {
       vision: true,
       reasoning: true,
-      reasoningBudget: style === 'anthropic' || style === 'qwen',
+      reasoningBudget: behavior === 'dashscope' || behavior === 'openrouter',
       streaming: true,
     },
 

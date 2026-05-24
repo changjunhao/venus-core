@@ -251,10 +251,8 @@ export interface EvaluationEvent {
 
 /** Configuration for VenusEngine */
 export interface VenusEngineConfig {
-  /** OpenAI-compatible API base URL */
-  baseURL: string;
-  /** API key */
-  apiKey: string;
+  /** LLM provider instance (required — construct and pass a provider) */
+  provider: LLMProvider;
   /** Default model for all agents (can be overridden per agent) */
   defaultModel?: string;
   /** Per-agent model assignments */
@@ -265,8 +263,6 @@ export interface VenusEngineConfig {
   reasoning?: ReasoningConfig;
   /** Maximum retry attempts for agent LLM calls (default: 3 per agent) */
   maxRetries?: number;
-  /** Request timeout in milliseconds (passed to LLM provider) */
-  timeout?: number;
   /** Event callback for observability */
   onEvent?: (event: EvaluationEvent) => void;
 }

@@ -10,6 +10,7 @@
 
 import { describe, it, expect, afterEach } from 'bun:test';
 import { createVenusEngine } from '../../src/engine.js';
+import { createOpenAIChatProvider } from '../../src/providers/index.js';
 import { mockFetch, restoreFetch, makeOpenAIResponse } from '../helpers/mock-fetch.js';
 import { PORTRAIT_DIMS, makeDimensions } from '../helpers/mock-data.js';
 import type { EvaluationStreamEvent } from '../../src/types.js';
@@ -138,8 +139,8 @@ describe('Integration — Multi-round evaluation flow (fetch mock)', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'test-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'test-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 
@@ -176,8 +177,8 @@ describe('Integration — Multi-round evaluation flow (fetch mock)', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'test-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'test-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 
@@ -214,8 +215,8 @@ describe('Integration — Multi-round evaluation flow (fetch mock)', () => {
     });
 
     const engine = createVenusEngine({
-      baseURL: 'https://mock-api.test/v1',
-      apiKey: 'test-key',
+      provider: createOpenAIChatProvider({ baseURL: 'https://mock-api.test/v1', apiKey: 'test-key' }),
+      defaultModel: 'test-model',
       maxRetries: 1,
     });
 

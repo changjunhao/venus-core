@@ -27,11 +27,3 @@ export function createLogger(prefix: string = '@theogony/venus-core'): Logger {
     error: (message, ...args) => console.error(format('error', message), ...args),
   };
 }
-
-/** No-op logger for silent operation */
-export const silentLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-};

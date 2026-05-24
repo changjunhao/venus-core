@@ -5,15 +5,19 @@
  * Venus Core - Providers
  */
 
-export { createOpenAICompatProvider } from './openai-compat.js';
+// ─── New provider factories ─────────────────────────────────
+export { createOpenAIChatProvider } from './openai-chat.js';
+export type { OpenAIChatProviderOptions } from './openai-chat.js';
+
+export { createOpenAIResponsesProvider } from './openai-responses.js';
+export type { OpenAIResponsesProviderOptions } from './openai-responses.js';
+
+export { createAnthropicProvider } from './anthropic.js';
+export type { AnthropicProviderOptions } from './anthropic.js';
+
+export { createGeminiProvider } from './gemini.js';
+export type { GeminiProviderOptions } from './gemini.js';
+
+// ─── Generic provider factory ───────────────────────────────
 export { defineProvider } from './factory.js';
-export type { OpenAICompatOptions, OpenAICompatProviderOptions, DefineProviderOptions } from './types.js';
-export {
-  adaptReasoningParams,
-  detectProviderStyle,
-  extractReasoningContent,
-  extractStreamReasoning,
-  extractTokenUsage,
-  getDefaultBudget,
-} from './reasoning-adapter.js';
-export type { ProviderStyle } from './reasoning-adapter.js';
+export type { DefineProviderOptions } from './types.js';

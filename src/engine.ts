@@ -19,7 +19,6 @@ import type {
   EvaluationContext,
   ChatReasoningParams,
 } from './types.js';
-import { createOpenAICompatProvider } from './providers/index.js';
 import { ProposerAgent } from './agents/proposer.js';
 import { CriticAgent } from './agents/critic.js';
 import { ArbiterAgent } from './agents/arbiter.js';
@@ -46,11 +45,7 @@ export class VenusEngine {
 
   constructor(config: VenusEngineConfig) {
     this.#config = config;
-    this.#defaultProvider = createOpenAICompatProvider({
-      baseURL: config.baseURL,
-      apiKey: config.apiKey,
-      timeout: config.timeout,
-    });
+    this.#defaultProvider = config.provider;
     this.#logger = createLogger('venus-engine');
   }
 
@@ -170,7 +165,15 @@ export class VenusEngine {
     if (models?.[role]) {
       return models[role]!;
     }
-    return this.#config.defaultModel ?? 'qwen3-vl-flash';
+    const model = this.#config.defaultModel;
+    if (!model) {
+      throw new VenusError(
+        `No model configured for agent role '${role}'. ` +
+          `Provide 'defaultModel' or per-agent 'models' in VenusEngineConfig.`,
+        'CONFIG_ERROR',
+      );
+    }
+    return model;
   }
 
   /**

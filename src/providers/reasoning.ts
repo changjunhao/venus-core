@@ -4,19 +4,29 @@
 /**
  * Venus Core - Reasoning Adapter
  *
- * Translates Venus's standardized `ChatReasoningParams` into the vendor-specific
- * request fields required by each provider style (OpenAI, Anthropic, Qwen, etc.),
- * and conversely extracts reasoning content / token usage from provider responses.
+ * Translates Venus's standardized `ChatReasoningParams` into the endpoint-specific
+ * request fields required by each provider's OpenAI-compatible API, and conversely
+ * extracts reasoning content / token usage from provider responses.
  *
  * The user-facing terminology is `reasoning`. The provider-specific output
- * field names below (e.g. `enable_thinking` for Qwen, `thinking` for Anthropic)
+ * field names below (e.g. `enable_thinking` for DashScope, `thinking` for Kimi)
  * are intentional — they reflect each vendor's actual API parameter names.
+ *
+ * ## EndpointBehavior (internal — NOT exported)
+ *
+ * Determined from `baseURL` at provider construction time via
+ * `detectEndpointBehavior`. This is different from per-model routing:
+ * within a single endpoint (e.g. DashScope), ALL models use the same
+ * parameter format regardless of which upstream vendor trained them.
  */
 
 import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.js';
 
-/** Supported provider API styles */
-export type ProviderStyle = 'openai' | 'anthropic' | 'qwen' | 'deepseek' | 'gemini' | 'kimi';
+/**
+ * Endpoint behavior classification used internally by OpenAI Chat provider.
+ * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
+ */
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'openrouter';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -32,44 +42,47 @@ export function getDefaultBudget(effort: ReasoningEffort): number {
 }
 
 /**
- * Translate Venus's reasoning params into provider-specific request fields.
+ * Translate Venus's reasoning params into endpoint-specific request fields.
  *
  * The returned object should be merged into the request body via `Object.assign`.
  */
 export function adaptReasoningParams(
   reasoning: ChatReasoningParams | undefined,
-  style: ProviderStyle,
+  behavior: EndpointBehavior,
 ): Record<string, unknown> {
   if (!reasoning) return {};
 
-  switch (style) {
+  switch (behavior) {
     case 'openai':
-    case 'deepseek':
       return { reasoning_effort: reasoning.effort };
 
-    case 'anthropic':
-      return {
-        thinking: {
-          type: 'enabled',
-          budget_tokens: reasoning.budgetTokens ?? getDefaultBudget(reasoning.effort),
-        },
-      };
-
-    case 'qwen':
+    case 'dashscope':
       return {
         enable_thinking: true,
-        ...(reasoning.budgetTokens && { thinking_budget: reasoning.budgetTokens }),
+        ...(reasoning.budgetTokens ? { thinking_budget: reasoning.budgetTokens } : {}),
+      };
+
+    case 'deepseek':
+      // DeepSeek requires both reasoning_effort (top-level) and
+      // thinking toggle (via extra_body for native endpoint).
+      return {
+        reasoning_effort: reasoning.effort,
+        extra_body: { thinking: { type: 'enabled' as const } },
       };
 
     case 'kimi':
       // Kimi (Moonshot) uses `thinking: { type: "enabled" }`. Budget tokens are not supported.
       return {
-        thinking: { type: 'enabled' },
+        thinking: { type: 'enabled' as const },
       };
 
-    case 'gemini':
+    case 'openrouter':
       return {
-        thinkingConfig: { thinkingLevel: reasoning.effort },
+        reasoning: {
+          effort: reasoning.effort,
+          ...(reasoning.budgetTokens ? { max_tokens: reasoning.budgetTokens } : {}),
+          enabled: true,
+        },
       };
 
     default:
@@ -78,15 +91,16 @@ export function adaptReasoningParams(
 }
 
 /**
- * Auto-detect a provider style from its baseURL.
+ * Auto-detect endpoint behavior from its baseURL.
  * Falls back to 'openai' for any unrecognized host.
+ *
+ * @internal NOT exported — used only inside createOpenAIChatProvider
  */
-export function detectProviderStyle(baseURL: string): ProviderStyle {
-  if (baseURL.includes('dashscope.aliyuncs.com')) return 'qwen';
-  if (baseURL.includes('anthropic')) return 'anthropic';
-  if (baseURL.includes('deepseek')) return 'deepseek';
-  if (baseURL.includes('generativelanguage.googleapis.com')) return 'gemini';
-  if (baseURL.includes('moonshot.cn')) return 'kimi';
+export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
+  if (baseURL.includes('dashscope.aliyuncs.com')) return 'dashscope';
+  if (baseURL.includes('openrouter.ai')) return 'openrouter';
+  if (baseURL.includes('api.deepseek.com') || baseURL.includes('deepseek.com')) return 'deepseek';
+  if (baseURL.includes('moonshot.cn') || baseURL.includes('api.moonshot.cn')) return 'kimi';
   return 'openai';
 }
 
