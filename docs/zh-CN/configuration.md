@@ -23,12 +23,12 @@
 ```ts
 interface ReasoningConfig {
   /** 应用于所有智能体的默认推理 effort（设置时） */
-  effort?: 'low' | 'medium' | 'high';
+  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
   /** 推理的默认 token 预算 */
   budgetTokens?: number;
   /** 按智能体覆盖；设置为 `false` 可禁用特定智能体的推理 */
   agents?: Partial<Record<AgentRole, {
-    effort: 'low' | 'medium' | 'high';  // 必填
+    effort: 'minimal' | 'low' | 'medium' | 'high' | 'max';  // 必填
     budgetTokens?: number;
   } | false>>;
 }
@@ -62,6 +62,7 @@ const engine = createVenusEngine({
 引擎会自动将推理参数适配到不同的提供商 API：
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
+- **豆包 (火山方舟)**：使用 `thinking.type` 开关 + `reasoning_effort`
 
 > **注意**：推理适配器也包含了 OpenAI、Anthropic、DeepSeek 和 Gemini API 的适配代码，但这些提供商尚未在 Venus 评估管线中使用视觉模型进行实际测试。DeepSeek 不支持视觉输入。
 

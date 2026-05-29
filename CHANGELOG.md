@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-29
+
+### Added
+
+- **Volcano Ark (Doubao) endpoint support**: `detectEndpointBehavior` now recognizes
+  `ark.cn-beijing.volces.com` base URLs and auto-adapts reasoning parameters to
+  Doubao's `thinking.type` toggle + `reasoning_effort` format.
+- **`ReasoningEffort` extended to 5 levels**: `'minimal'` and `'max'` added to the
+  existing `'low'` / `'medium'` / `'high'` union, with corresponding default
+  token budgets (512 / 65536).
+- **`thinking: { type: "disabled" }` for Volcano Ark minimal**: when
+  `reasoning.effort === 'minimal'`, sends `thinking: { type: "disabled" }` to
+  explicitly disable reasoning on all Doubao models.
+
 ## [0.6.0] - 2026-05-24
 
 ### BREAKING

@@ -23,12 +23,12 @@
 ```ts
 interface ReasoningConfig {
   /** Default reasoning effort applied to all agents (when set) */
-  effort?: 'low' | 'medium' | 'high';
+  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
   /** Default token budget for reasoning */
   budgetTokens?: number;
   /** Per-agent overrides; set to `false` to disable reasoning for a specific agent */
   agents?: Partial<Record<AgentRole, {
-    effort: 'low' | 'medium' | 'high';  // Required
+    effort: 'minimal' | 'low' | 'medium' | 'high' | 'max';  // Required
     budgetTokens?: number;
   } | false>>;
 }
@@ -62,6 +62,7 @@ const engine = createVenusEngine({
 The engine automatically adapts reasoning parameters to different provider APIs:
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
+- **Doubao (Volcano Ark)**: Uses `thinking.type` toggle + `reasoning_effort`
 
 > **Note**: The reasoning adapter also includes scaffolding for OpenAI, Anthropic, DeepSeek, and Gemini APIs, but these have not been tested with vision-enabled models in the Venus evaluation pipeline. DeepSeek does not support vision inputs.
 
