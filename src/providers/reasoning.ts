@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'openrouter';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'openrouter' | 'volcanoark';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -34,9 +34,11 @@ type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'openrout
  */
 export function getDefaultBudget(effort: ReasoningEffort): number {
   const budgets: Record<ReasoningEffort, number> = {
+    minimal: 512,
     low: 2048,
     medium: 8192,
     high: 32768,
+    max: 65536,
   };
   return budgets[effort];
 }
@@ -85,6 +87,18 @@ export function adaptReasoningParams(
         },
       };
 
+    case 'volcanoark':
+      // Volcano Ark (Doubao) controls thinking via two orthogonal parameters:
+      //   thinking.type   — enabled/disabled toggle (always sent explicitly)
+      //   reasoning_effort — effort level when enabled (minimal/low/medium/high/max)
+      if (reasoning.effort === 'minimal') {
+        return { thinking: { type: 'disabled' as const } };
+      }
+      return {
+        thinking: { type: 'enabled' as const },
+        reasoning_effort: reasoning.effort,
+      };
+
     default:
       return { reasoning_effort: reasoning.effort };
   }
@@ -101,6 +115,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('openrouter.ai')) return 'openrouter';
   if (baseURL.includes('api.deepseek.com') || baseURL.includes('deepseek.com')) return 'deepseek';
   if (baseURL.includes('moonshot.cn') || baseURL.includes('api.moonshot.cn')) return 'kimi';
+  if (baseURL.includes('ark.cn-beijing.volces.com')) return 'volcanoark';
   return 'openai';
 }
 

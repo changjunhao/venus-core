@@ -14,6 +14,10 @@ import type { ChatReasoningParams } from '../../src/types.js';
 
 describe('reasoning', () => {
   describe('getDefaultBudget()', () => {
+    it('returns 512 for minimal effort', () => {
+      expect(getDefaultBudget('minimal')).toBe(512);
+    });
+
     it('returns 2048 for low effort', () => {
       expect(getDefaultBudget('low')).toBe(2048);
     });
@@ -24,6 +28,10 @@ describe('reasoning', () => {
 
     it('returns 32768 for high effort', () => {
       expect(getDefaultBudget('high')).toBe(32768);
+    });
+
+    it('returns 65536 for max effort', () => {
+      expect(getDefaultBudget('max')).toBe(65536);
     });
   });
 
@@ -79,6 +87,27 @@ describe('reasoning', () => {
       });
     });
 
+    it('produces thinking disabled for volcanoark minimal effort', () => {
+      const params: ChatReasoningParams = { effort: 'minimal' };
+      expect(adaptReasoningParams(params, 'volcanoark')).toEqual({ thinking: { type: 'disabled' } });
+    });
+
+    it('produces thinking enabled + reasoning_effort for volcanoark medium effort', () => {
+      const params: ChatReasoningParams = { effort: 'medium' };
+      expect(adaptReasoningParams(params, 'volcanoark')).toEqual({
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'medium',
+      });
+    });
+
+    it('produces thinking enabled + reasoning_effort for volcanoark max effort', () => {
+      const params: ChatReasoningParams = { effort: 'max' };
+      expect(adaptReasoningParams(params, 'volcanoark')).toEqual({
+        thinking: { type: 'enabled' },
+        reasoning_effort: 'max',
+      });
+    });
+
     it('falls back to reasoning_effort for unknown endpoint', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       // Cast to bypass the exhaustive EndpointBehavior union for the default branch.
@@ -110,6 +139,10 @@ describe('reasoning', () => {
 
     it('detects openrouter from openrouter.ai baseURL', () => {
       expect(detectEndpointBehavior('https://openrouter.ai/api/v1')).toBe('openrouter');
+    });
+
+    it('detects volcanoark from ark.cn-beijing.volces.com baseURL', () => {
+      expect(detectEndpointBehavior('https://ark.cn-beijing.volces.com/api/v3')).toBe('volcanoark');
     });
 
     it('falls back to openai for unrecognized hosts', () => {

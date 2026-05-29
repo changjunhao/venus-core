@@ -41,8 +41,8 @@ export type AgentRole = 'genreDetector' | 'proposer' | 'critic' | 'arbiter' | 'r
 
 // ─── Reasoning Types ─────────────────────────────────────
 
-/** Reasoning effort level (aligned with OpenAI Reasoning API) */
-export type ReasoningEffort = 'low' | 'medium' | 'high';
+/** Reasoning effort level (aligned with OpenAI Reasoning API, extended for Volcano Ark) */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max';
 
 /** Per-agent reasoning configuration */
 export interface AgentReasoningConfig {
