@@ -62,6 +62,7 @@ const engine = createVenusEngine({
 The engine automatically adapts reasoning parameters to different provider APIs:
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
+- **Xiaomi MIMO**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
 - **Doubao (Volcano Ark)**: Uses `thinking.type` toggle + `reasoning_effort`
 
 > **Note**: The reasoning adapter also includes scaffolding for OpenAI, Anthropic, DeepSeek, and Gemini APIs, but these have not been tested with vision-enabled models in the Venus evaluation pipeline. DeepSeek does not support vision inputs.

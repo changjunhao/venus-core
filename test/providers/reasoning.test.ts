@@ -73,6 +73,13 @@ describe('reasoning', () => {
       });
     });
 
+    it('produces mimo thinking enabled (Xiaomi MIMO, same format as Kimi)', () => {
+      const params: ChatReasoningParams = { effort: 'high', budgetTokens: 9999 };
+      expect(adaptReasoningParams(params, 'mimo')).toEqual({
+        thinking: { type: 'enabled' },
+      });
+    });
+
     it('produces openrouter reasoning object with effort', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       expect(adaptReasoningParams(params, 'openrouter')).toEqual({
@@ -135,6 +142,10 @@ describe('reasoning', () => {
 
     it('detects kimi from moonshot.cn subdomain', () => {
       expect(detectEndpointBehavior('https://api.moonshot.cn/v1')).toBe('kimi');
+    });
+
+    it('detects mimo from xiaomimimo.com baseURL (Xiaomi MIMO uses thinking format)', () => {
+      expect(detectEndpointBehavior('https://api.xiaomimimo.com/v1')).toBe('mimo');
     });
 
     it('detects openrouter from openrouter.ai baseURL', () => {

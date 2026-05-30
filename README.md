@@ -40,7 +40,7 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **Multi-Agent Adversarial Pipeline** — Proposer → Critic → Revision → Arbiter ensures robust, bias-mitigated scoring
 - **8 Photography Genres** — Portrait, Landscape, Documentary, Fine Art, Commercial, Architecture, Nature, Sports
 - **Multi-Model Routing** — Per-agent model selection and per-agent custom LLM providers
-- **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope), Kimi (Moonshot), and Doubao (Volcano Ark)
+- **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope), Kimi (Moonshot), Xiaomi MIMO, and Doubao (Volcano Ark)
 - **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth

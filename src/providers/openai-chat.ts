@@ -64,9 +64,10 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     if (stream) body.stream = true;
 
     // Kimi k2.6/k2.5 fix temperature internally (1.0 for thinking, 0.6 for non-thinking)
-    // and will reject any other value. OpenAI/DeepSeek reasoning models also ignore temperature.
+    // and will reject any other value. MIMO also uses its own internal temperature.
+    // OpenAI/DeepSeek reasoning models also ignore temperature.
     const skipTemperature =
-      behavior === 'kimi' || (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek'));
+      behavior === 'kimi' || behavior === 'mimo' || (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek'));
     if (params.temperature !== undefined && !skipTemperature) {
       body.temperature = params.temperature;
     }
@@ -77,9 +78,9 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     const reasoningFields = adaptReasoningParams(params.reasoning, behavior);
     Object.assign(body, reasoningFields);
 
-    // Kimi's thinking models default to enabled. When the caller does NOT configure
+    // Kimi/MIMO thinking models default to enabled. When the caller does NOT configure
     // reasoning, we must explicitly disable thinking to get standard (non-reasoning) behavior.
-    if (behavior === 'kimi' && params.reasoning === undefined) {
+    if ((behavior === 'kimi' || behavior === 'mimo') && params.reasoning === undefined) {
       body.thinking = { type: 'disabled' };
     }
 

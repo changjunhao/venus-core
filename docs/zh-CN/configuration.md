@@ -62,6 +62,7 @@ const engine = createVenusEngine({
 引擎会自动将推理参数适配到不同的提供商 API：
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
+- **小米 MiMo**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
 - **豆包 (火山方舟)**：使用 `thinking.type` 开关 + `reasoning_effort`
 
 > **注意**：推理适配器也包含了 OpenAI、Anthropic、DeepSeek 和 Gemini API 的适配代码，但这些提供商尚未在 Venus 评估管线中使用视觉模型进行实际测试。DeepSeek 不支持视觉输入。
