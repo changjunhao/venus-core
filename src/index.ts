@@ -6,6 +6,8 @@
  *
  * Venus AI Photography Evaluation Engine
  * Framework-agnostic, runtime-agnostic TypeScript SDK
+ *
+ * @module
  */
 
 // ─── Core Engine ──────────────────────────────────────────
