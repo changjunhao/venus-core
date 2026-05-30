@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Venus Contributors
 
-import type { AgentCallResult, AgentConfig, LLMProvider, StreamChunk } from '../types.js';
+import type { AgentCallResult, AgentConfig, Genre, LLMProvider, StreamChunk } from '../types.js';
 import { BaseAgent } from './base-agent.js';
 import { GenreEnum } from '../schema/index.js';
 import { getGenreDetectorSystemPrompt, getGenreDetectorUserPrompt } from '../prompts/genre-detector.js';
@@ -13,8 +13,11 @@ const GenreDetectionSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-/** 门类检测结果类型（模块内部使用） */
-type GenreDetectionResult = z.infer<typeof GenreDetectionSchema>;
+/** 门类检测结果类型 */
+interface GenreDetectionResult {
+  genre: Genre;
+  confidence: number;
+}
 
 export class GenreDetectorAgent extends BaseAgent {
   constructor(provider: LLMProvider, config: AgentConfig) {

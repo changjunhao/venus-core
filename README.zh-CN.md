@@ -6,6 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm](https://img.shields.io/npm/v/@theogony/venus-core)](https://www.npmjs.com/package/@theogony/venus-core)
+[![JSR](https://jsr.io/badges/@theogony/venus-core)](https://jsr.io/@theogony/venus-core)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6.svg)](https://www.typescriptlang.org/)
 
 ---
@@ -56,6 +57,8 @@ graph LR
 npm install @theogony/venus-core
 # 或
 bun add @theogony/venus-core
+# 或 (Deno)
+deno add jsr:@theogony/venus-core
 ```
 
 ```ts
@@ -126,19 +129,20 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 npm install @theogony/venus-core
 # 或
 bun add @theogony/venus-core
+# 或 (Deno)
+deno add jsr:@theogony/venus-core
 ```
 
-### Peer 依赖
+核心依赖（`openai`、`zod`、`vectorjson`）会自动安装。
 
-| 包名 | 是否必需 | 说明 |
-|---------|----------|-------|
-| `openai` ^6.39 | **是** | OpenAI SDK，用于 OpenAI Chat/Responses 提供商 |
-| `zod` ^4.4 | **是** | Schema 校验 |
-| `vectorjson` ^0.5 | **是** | 流式 JSON 增量解析 |
-| `@anthropic-ai/sdk` ^0.98 | 可选 | 用于 Anthropic 提供商 |
-| `@google/genai` ^2.6 | 可选 | 用于 Gemini 提供商 |
-| `hono` ^4.12 | 可选 | 用于 Hono 适配器（`@theogony/venus-core/hono`） |
-| `express` ^5.2 | 可选 | 用于 Express 适配器（`@theogony/venus-core/express`） |
+### 可选 Peer 依赖
+
+| 包名                         | 是否必需 | 说明 |
+|----------------------------|----------|-------|
+| `@anthropic-ai/sdk` ^0.100 | 可选 | 用于 Anthropic 提供商 |
+| `@google/genai` ^2.7       | 可选 | 用于 Gemini 提供商 |
+| `hono` ^4.12               | 可选 | 用于 Hono 适配器（`@theogony/venus-core/hono`） |
+| `express` ^5.2             | 可选 | 用于 Express 适配器（`@theogony/venus-core/express`） |
 
 ### 运行时支持
 

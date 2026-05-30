@@ -24,7 +24,7 @@ export interface GenreMetadata {
 // ============================================================
 // 1. GenreEnum — 8 大门类
 // ============================================================
-export const GenreEnum = z.enum([
+export const GenreEnum: z.ZodType<Genre> = z.enum([
   'portrait',
   'landscape',
   'documentary',
@@ -35,14 +35,59 @@ export const GenreEnum = z.enum([
   'sports',
 ]);
 
-/** 从 GenreEnum 派生的门类键名联合类型 */
-export type Genre = z.infer<typeof GenreEnum>;
+/** 门类键名联合类型 */
+export type Genre =
+  | 'portrait'
+  | 'landscape'
+  | 'documentary'
+  | 'fine_art'
+  | 'commercial'
+  | 'architecture'
+  | 'nature'
+  | 'sports';
 
 /** 从 GENRE_CONFIG 推导的精确子类型（如 portrait → "studio" | "environmental" | "wedding"） */
-export type SubtypeForGenre<G extends Genre = Genre> = (typeof GENRE_CONFIG)[G]['subtypes'][number];
+export type SubtypeForGenre<G extends Genre = Genre> = G extends 'portrait'
+  ? 'studio' | 'environmental' | 'wedding'
+  : G extends 'landscape'
+    ? 'natural' | 'urban' | 'seascape' | 'astro'
+    : G extends 'documentary'
+      ? 'news' | 'street' | 'social'
+      : G extends 'fine_art'
+        ? 'conceptual' | 'abstract' | 'experimental'
+        : G extends 'commercial'
+          ? 'product' | 'fashion'
+          : G extends 'architecture'
+            ? 'interior' | 'exterior'
+            : G extends 'nature'
+              ? 'wildlife' | 'flora' | 'macro'
+              : G extends 'sports'
+                ? 'action' | 'extreme'
+                : string;
 
 /** 从 GENRE_CONFIG 推导的精确维度键名（如 portrait → "facial_expression" | "pose_body" | ...） */
-export type DimensionForGenre<G extends Genre = Genre> = (typeof GENRE_CONFIG)[G]['dimensions'][number];
+export type DimensionForGenre<G extends Genre = Genre> = G extends 'portrait'
+  ? 'facial_expression' | 'pose_body' | 'lighting_quality' | 'color_mood' | 'composition_focus'
+  : G extends 'landscape'
+    ? 'composition_depth' | 'light_atmosphere' | 'color_harmony' | 'sharpness_detail' | 'emotional_resonance'
+    : G extends 'documentary'
+      ? 'storytelling' | 'decisive_moment' | 'composition_angle' | 'authenticity' | 'emotional_impact'
+      : G extends 'fine_art'
+        ? 'conceptual_depth' | 'visual_language' | 'technical_craft' | 'originality' | 'aesthetic_impact'
+        : G extends 'commercial'
+          ? 'subject_presentation' | 'lighting_technique' | 'styling_composition' | 'color_branding' | 'market_appeal'
+          : G extends 'architecture'
+            ?
+                | 'perspective_geometry'
+                | 'spatial_expression'
+                | 'light_material'
+                | 'contextual_harmony'
+                | 'architectural_narrative'
+            : G extends 'nature'
+              ? 'subject_capture' | 'focus_sharpness' | 'habitat_context' | 'technical_mastery' | 'natural_wonder'
+              : G extends 'sports'
+                ? 'peak_action' | 'timing_precision' | 'framing_tracking' | 'technical_execution' | 'drama_narrative'
+                : string;
 
 // ============================================================
 // 2. GENRE_CONFIG — 核心配置注册表
@@ -209,14 +254,14 @@ const GENRE_CONFIG = {
 // ============================================================
 // 3. 评分字段辅助
 // ============================================================
-const scoreField = () => z.number().min(0).max(10).multipleOf(0.1);
+const scoreField = (): z.ZodNumber => z.number().min(0).max(10).multipleOf(0.1);
 
 // ============================================================
 // 4. 子类型枚举注册表（缓存）
 // ============================================================
-const subtypeEnumCache: Record<string, z.ZodType> = {};
+const subtypeEnumCache: Record<string, z.ZodType<string>> = {};
 
-function getSubtypeEnum(genre: Genre) {
+function getSubtypeEnum(genre: Genre): z.ZodType<string> {
   if (!subtypeEnumCache[genre]) {
     const cfg = GENRE_CONFIG[genre];
     if (!cfg) throw new Error(`Unknown genre: ${genre}`);
@@ -240,7 +285,13 @@ function buildDimensionsSchema(genre: Genre) {
 }
 
 /** 创建 Proposal Schema */
-function createProposalSchema(genre: Genre) {
+function createProposalSchema(genre: Genre): z.ZodType<{
+  scene_type: string;
+  total_score: number;
+  dimensions: Record<string, number>;
+  critique: string;
+  suggestions: string;
+}> {
   return z.object({
     scene_type: getSubtypeEnum(genre),
     total_score: scoreField(),
@@ -251,8 +302,20 @@ function createProposalSchema(genre: Genre) {
 }
 
 /** 创建 Arbiter Schema（基于 Proposal 扩展 arbitration_notes） */
-function createArbiterSchema(genre: Genre) {
-  return createProposalSchema(genre).extend({
+function createArbiterSchema(genre: Genre): z.ZodType<{
+  scene_type: string;
+  total_score: number;
+  dimensions: Record<string, number>;
+  critique: string;
+  suggestions: string;
+  arbitration_notes: string;
+}> {
+  return z.object({
+    scene_type: getSubtypeEnum(genre),
+    total_score: scoreField(),
+    dimensions: buildDimensionsSchema(genre),
+    critique: z.string().min(1),
+    suggestions: z.string().min(1),
     arbitration_notes: z.string().min(1),
   });
 }
@@ -260,7 +323,7 @@ function createArbiterSchema(genre: Genre) {
 // ============================================================
 // 6. CritiqueSchema — 通用
 // ============================================================
-export const CritiqueSchema = z.object({
+export const CritiqueSchema: z.ZodType<CritiqueResult> = z.object({
   scene_type_review: z.object({
     proposer_scene: z.string(),
     is_correct: z.boolean(),
@@ -280,12 +343,30 @@ export const CritiqueSchema = z.object({
   suggested_total_score: scoreField(),
 });
 
-/** 批判结果类型 — 从 Schema 推断 */
-export type CritiqueResult = z.infer<typeof CritiqueSchema>;
-/** 批判挑战项 — 从 Schema 推断 */
-export type CritiqueChallenge = CritiqueResult['challenges'][number];
-/** 场景类型审查 — 从 Schema 推断 */
-export type SceneTypeReview = CritiqueResult['scene_type_review'];
+/** 批判结果类型 */
+export interface CritiqueResult {
+  scene_type_review: SceneTypeReview;
+  challenges: CritiqueChallenge[];
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  overall_assessment: string;
+  suggested_total_score: number;
+}
+
+/** 批判挑战项 */
+export interface CritiqueChallenge {
+  dimension: string;
+  issue: string;
+  evidence: string;
+  suggested_score: number;
+}
+
+/** 场景类型审查 */
+export interface SceneTypeReview {
+  proposer_scene: string;
+  is_correct: boolean;
+  correct_scene: string | null;
+  reason: string;
+}
 
 // ============================================================
 // 7. Schema 缓存 — 类型由工厂函数 ReturnType 自动推断
@@ -299,7 +380,11 @@ const assessmentCache: Record<string, ReturnType<typeof buildProposerResultSchem
 // ============================================================
 
 /** 根据 genre 返回 { proposalSchema, critiqueSchema, arbiterSchema } */
-export function getSchemas(genre: Genre) {
+export function getSchemas(genre: Genre): {
+  proposalSchema: ReturnType<typeof createProposalSchema>;
+  critiqueSchema: typeof CritiqueSchema;
+  arbiterSchema: ReturnType<typeof createArbiterSchema>;
+} {
   if (!proposalCache[genre]) {
     proposalCache[genre] = createProposalSchema(genre);
   }
@@ -399,7 +484,7 @@ function buildProposerResultSchema(genre: Genre) {
 // ============================================================
 // 9. EXIF 数据 Schema
 // ============================================================
-export const ExifDataSchema = z.object({
+export const ExifDataSchema: z.ZodType<ExifData> = z.object({
   shutterSpeed: z.string().nullable().optional(),
   iso: z.number().nullable().optional(),
   fNumber: z.number().nullable().optional(),
@@ -410,13 +495,22 @@ export const ExifDataSchema = z.object({
   flash: z.string().nullable().optional(),
 });
 
-/** EXIF 元数据类型 — 从 Schema 推断 */
-export type ExifData = z.infer<typeof ExifDataSchema>;
+/** EXIF 元数据类型 */
+export interface ExifData {
+  shutterSpeed?: string | null;
+  iso?: number | null;
+  fNumber?: number | null;
+  focalLength?: number | null;
+  cameraModel?: string | null;
+  lensModel?: string | null;
+  dateTimeOriginal?: string | null;
+  flash?: string | null;
+}
 
 // ============================================================
 // 10. 评估上下文 Schema
 // ============================================================
-export const EvaluationContextSchema = z.object({
+export const EvaluationContextSchema: z.ZodType<EvaluationContext> = z.object({
   /** 门类检测器的推理链输出（引擎内部注入，用于传播到 Proposer） */
   genreDetectionReasoning: z.string().nullable().optional(),
   exif: ExifDataSchema.optional(),
@@ -424,5 +518,11 @@ export const EvaluationContextSchema = z.object({
   custom: z.record(z.string(), z.unknown()).optional(),
 });
 
-/** 评估上下文类型 — 从 Schema 推断 */
-export type EvaluationContext = z.infer<typeof EvaluationContextSchema>;
+/** 评估上下文类型 */
+export interface EvaluationContext {
+  /** 门类检测器的推理链输出（引擎内部注入，用于传播到 Proposer） */
+  genreDetectionReasoning?: string | null;
+  exif?: ExifData;
+  userNotes?: string;
+  custom?: Record<string, unknown>;
+}

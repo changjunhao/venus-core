@@ -310,7 +310,6 @@ function createRealEngine() {
         arbiter: { effort: 'medium', budgetTokens: 2048 },
       },
     },
-    timeout: 180_000,
   });
 }
 

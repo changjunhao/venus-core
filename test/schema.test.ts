@@ -38,7 +38,7 @@ describe('Schema Layer', () => {
       const config = getGenreConfig(genre);
 
       // Build a valid object to extract the dimensions shape
-      const dimShape = (proposalSchema.shape as any).dimensions.shape;
+      const dimShape = ((proposalSchema as any).shape).dimensions.shape;
       const schemaKeys = Object.keys(dimShape);
 
       expect(schemaKeys.sort()).toEqual([...config.dimensions].sort());

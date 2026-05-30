@@ -104,6 +104,23 @@ const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
 
 返回 `{ proposalSchema, critiqueSchema, arbiterSchema }` — 指定门类的 Zod Schema。
 
+### `getProposerResultSchema(genre: Genre)`
+
+返回指定门类的完整评估结果 Zod Schema,包括所有嵌套的 `process` 和 `metadata` 字段。适用于验证自定义评估结果或构建自定义适配器。
+
+```ts
+import { getProposerResultSchema } from '@theogony/venus-core';
+
+const schema = getProposerResultSchema('portrait');
+const validated = schema.parse({
+  imageUrl: '...',
+  genre: 'portrait',
+  sceneType: 'studio',
+  totalScore: 8.5,
+  // ... 完整评估结果结构
+});
+```
+
 ### `getGenreConfig(genre: Genre): GenreConfig`
 
 返回某个门类的完整配置，包括标签、维度和子类型。
@@ -324,6 +341,11 @@ import type {
   
   // 错误类型
   ProviderErrorCode,
+  VenusError,
+  ValidationError,
+  ProviderError,
+  SchemaError,
+  TimeoutError,
   
   // 适配器类型
   AdapterOptions,

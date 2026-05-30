@@ -104,6 +104,23 @@ const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
 
 Returns `{ proposalSchema, critiqueSchema, arbiterSchema }` — Zod schemas for the given genre.
 
+### `getProposerResultSchema(genre: Genre)`
+
+Returns the complete evaluation result Zod schema for the given genre, including all nested `process` and `metadata` fields. Useful for validating custom evaluation results or building custom adapters.
+
+```ts
+import { getProposerResultSchema } from '@theogony/venus-core';
+
+const schema = getProposerResultSchema('portrait');
+const validated = schema.parse({
+  imageUrl: '...',
+  genre: 'portrait',
+  sceneType: 'studio',
+  totalScore: 8.5,
+  // ... full evaluation result structure
+});
+```
+
 ### `getGenreConfig(genre: Genre): GenreConfig`
 
 Returns full configuration for a genre including labels, dimensions, and subtypes.
@@ -324,6 +341,11 @@ import type {
   
   // Error types
   ProviderErrorCode,
+  VenusError,
+  ValidationError,
+  ProviderError,
+  SchemaError,
+  TimeoutError,
   
   // Adapter types
   AdapterOptions,

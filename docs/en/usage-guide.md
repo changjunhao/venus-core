@@ -10,10 +10,10 @@ Pass an image URL and optionally specify a genre. If omitted, the engine auto-de
 
 ```ts
 // Auto-detect genre
-const result = await engine.evaluate('https://example.com/photo.jpg');
+const result1 = await engine.evaluate('https://example.com/photo.jpg');
 
 // Specify genre explicitly
-const result = await engine.evaluate('https://example.com/portrait.jpg', 'portrait');
+const result2 = await engine.evaluate('https://example.com/portrait.jpg', 'portrait');
 ```
 
 ## Streaming Evaluation
@@ -96,12 +96,14 @@ export default app; // Works with Bun, Deno, Node, Cloudflare Workers, etc.
 
 ```ts
 import express from 'express';
-import { createVenusEngine } from '@theogony/venus-core';
+import { createVenusEngine, createOpenAIChatProvider } from '@theogony/venus-core';
 import { createExpressAdapter } from '@theogony/venus-core/express';
 
 const engine = createVenusEngine({
-  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  apiKey: process.env.API_KEY!,
+  provider: createOpenAIChatProvider({
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: process.env.API_KEY!,
+  }),
 });
 
 const app = express();

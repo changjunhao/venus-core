@@ -6,6 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![npm](https://img.shields.io/npm/v/@theogony/venus-core)](https://www.npmjs.com/package/@theogony/venus-core)
+[![JSR](https://jsr.io/badges/@theogony/venus-core)](https://jsr.io/@theogony/venus-core)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6.svg)](https://www.typescriptlang.org/)
 
 ---
@@ -56,6 +57,8 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 npm install @theogony/venus-core
 # or
 bun add @theogony/venus-core
+# or (Deno)
+deno add jsr:@theogony/venus-core
 ```
 
 ```ts
@@ -126,19 +129,20 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 npm install @theogony/venus-core
 # or
 bun add @theogony/venus-core
+# or (Deno)
+deno add jsr:@theogony/venus-core
 ```
 
-### Peer Dependencies
+Core dependencies (`openai`, `zod`, `vectorjson`) are included automatically.
 
-| Package | Required | Notes |
-|---------|----------|-------|
-| `openai` ^6.39 | **Yes** | OpenAI SDK for OpenAI Chat/Responses providers |
-| `zod` ^4.4 | **Yes** | Schema validation |
-| `vectorjson` ^0.5 | **Yes** | Streaming JSON incremental parsing |
-| `@anthropic-ai/sdk` ^0.98 | Optional | For Anthropic provider |
-| `@google/genai` ^2.6 | Optional | For Gemini provider |
-| `hono` ^4.12 | Optional | For Hono adapter (`@theogony/venus-core/hono`) |
-| `express` ^5.2 | Optional | For Express adapter (`@theogony/venus-core/express`) |
+### Optional Peer Dependencies
+
+| Package                    | Required | Notes |
+|----------------------------|----------|-------|
+| `@anthropic-ai/sdk` ^0.100 | Optional | For Anthropic provider |
+| `@google/genai` ^2.7       | Optional | For Gemini provider |
+| `hono` ^4.12               | Optional | For Hono adapter (`@theogony/venus-core/hono`) |
+| `express` ^5.2             | Optional | For Express adapter (`@theogony/venus-core/express`) |
 
 ### Runtime Support
 

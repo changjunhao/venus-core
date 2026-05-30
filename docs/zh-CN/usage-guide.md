@@ -10,10 +10,10 @@
 
 ```ts
 // 自动检测门类
-const result = await engine.evaluate('https://example.com/photo.jpg');
+const result1 = await engine.evaluate('https://example.com/photo.jpg');
 
 // 明确指定门类
-const result = await engine.evaluate('https://example.com/portrait.jpg', 'portrait');
+const result2 = await engine.evaluate('https://example.com/portrait.jpg', 'portrait');
 ```
 
 ## 流式评估
