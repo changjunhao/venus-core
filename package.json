@@ -61,7 +61,11 @@
     "lint:fix": "eslint --fix 'src/**/*.ts' 'test/**/*.ts'",
     "prepublishOnly": "bun run lint && bun run build && bun test"
   },
-  "dependencies": {},
+  "dependencies": {
+    "openai": "^6.39.0",
+    "zod": "^4.4.3",
+    "vectorjson": "^0.5.1"
+  },
   "peerDependencies": {
     "openai": "^6.39.0",
     "zod": "^4.4.3",
