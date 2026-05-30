@@ -6,6 +6,7 @@
  *
  * Creates Hono routes for the evaluation API (Web Standards, cross-runtime).
  *
+ * @module
  * @example
  * ```ts
  * import { Hono } from 'hono';

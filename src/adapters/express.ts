@@ -6,6 +6,7 @@
  *
  * Creates Express router for the evaluation API (backward compatibility).
  *
+ * @module
  * @example
  * ```ts
  * import express from 'express';
