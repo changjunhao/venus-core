@@ -10,10 +10,12 @@
  * @example
  * ```ts
  * import { Hono } from 'hono';
- * import { createVenusEngine } from '@theogony/venus-core';
+ * import { createVenusEngine, createOpenAIChatProvider } from '@theogony/venus-core';
  * import { createHonoAdapter } from '@theogony/venus-core/hono';
  *
- * const engine = createVenusEngine({ baseURL: '...', apiKey: '...' });
+ * const engine = createVenusEngine({
+ *   provider: createOpenAIChatProvider({ baseURL: '...', apiKey: '...' }),
+ * });
  * const venus = createHonoAdapter(engine);
  * const app = new Hono();
  * app.route('/api', venus);

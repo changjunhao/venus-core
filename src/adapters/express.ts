@@ -10,10 +10,12 @@
  * @example
  * ```ts
  * import express from 'express';
- * import { createVenusEngine } from '@theogony/venus-core';
+ * import { createVenusEngine, createOpenAIChatProvider } from '@theogony/venus-core';
  * import { createExpressAdapter } from '@theogony/venus-core/express';
  *
- * const engine = createVenusEngine({ baseURL: '...', apiKey: '...' });
+ * const engine = createVenusEngine({
+ *   provider: createOpenAIChatProvider({ baseURL: '...', apiKey: '...' }),
+ * });
  * const app = express();
  * app.use('/api', createExpressAdapter(engine));
  * ```
