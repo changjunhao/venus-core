@@ -80,6 +80,13 @@ describe('reasoning', () => {
       });
     });
 
+    it('produces zhipu thinking enabled (Zhipu BigModel, same format as Kimi)', () => {
+      const params: ChatReasoningParams = { effort: 'high', budgetTokens: 9999 };
+      expect(adaptReasoningParams(params, 'zhipu')).toEqual({
+        thinking: { type: 'enabled' },
+      });
+    });
+
     it('produces openrouter reasoning object with effort', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       expect(adaptReasoningParams(params, 'openrouter')).toEqual({
@@ -154,6 +161,14 @@ describe('reasoning', () => {
 
     it('detects volcanoark from ark.cn-beijing.volces.com baseURL', () => {
       expect(detectEndpointBehavior('https://ark.cn-beijing.volces.com/api/v3')).toBe('volcanoark');
+    });
+
+    it('detects zhipu from open.bigmodel.cn baseURL', () => {
+      expect(detectEndpointBehavior('https://open.bigmodel.cn/api/paas/v4')).toBe('zhipu');
+    });
+
+    it('detects zhipu from bigmodel.cn baseURL', () => {
+      expect(detectEndpointBehavior('https://bigmodel.cn/api/paas/v4')).toBe('zhipu');
     });
 
     it('falls back to openai for unrecognized hosts', () => {

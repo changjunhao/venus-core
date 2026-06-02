@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'openrouter' | 'volcanoark';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'openrouter' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -74,7 +74,8 @@ export function adaptReasoningParams(
 
     case 'kimi':
     case 'mimo':
-      // Kimi (Moonshot) / Xiaomi MIMO use `thinking: { type: "enabled" }`. Budget tokens are not supported.
+    case 'zhipu':
+      // Kimi (Moonshot) / Xiaomi MIMO / Zhipu (BigModel) use `thinking: { type: "enabled" }`. Budget tokens are not supported.
       return {
         thinking: { type: 'enabled' as const },
       };
@@ -118,6 +119,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('moonshot.cn') || baseURL.includes('api.moonshot.cn')) return 'kimi';
   if (baseURL.includes('xiaomimimo.com')) return 'mimo';
   if (baseURL.includes('ark.cn-beijing.volces.com')) return 'volcanoark';
+  if (baseURL.includes('bigmodel.cn') || baseURL.includes('open.bigmodel.cn')) return 'zhipu';
   return 'openai';
 }
 

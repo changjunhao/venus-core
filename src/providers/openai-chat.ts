@@ -78,9 +78,9 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     const reasoningFields = adaptReasoningParams(params.reasoning, behavior);
     Object.assign(body, reasoningFields);
 
-    // Kimi/MIMO thinking models default to enabled. When the caller does NOT configure
+    // Kimi/MIMO/Zhipu thinking models default to enabled. When the caller does NOT configure
     // reasoning, we must explicitly disable thinking to get standard (non-reasoning) behavior.
-    if ((behavior === 'kimi' || behavior === 'mimo') && params.reasoning === undefined) {
+    if ((behavior === 'kimi' || behavior === 'mimo' || behavior === 'zhipu') && params.reasoning === undefined) {
       body.thinking = { type: 'disabled' };
     }
 
