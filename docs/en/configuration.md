@@ -63,7 +63,10 @@ The engine automatically adapts reasoning parameters to different provider APIs:
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
 - **Xiaomi MIMO**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
+- **StepFun**: Uses `reasoning_effort: "low" | "medium" | "high"` (5-level mapped to 3-level: minimal→low, max→high)
+- **MiniMax**: Uses `thinking: { type: "adaptive" }` with `reasoning_split: true`
 - **Doubao (Volcano Ark)**: Uses `thinking.type` toggle + `reasoning_effort`
+- **Baidu Qianfan (ERNIE)**: Uses `enable_thinking: true`
 
 > **Note**: The reasoning adapter also includes scaffolding for OpenAI, Anthropic, DeepSeek, and Gemini APIs, but these have not been tested with vision-enabled models in the Venus evaluation pipeline. DeepSeek does not support vision inputs.
 
