@@ -266,3 +266,106 @@ describe('OpenAI-Chat chatStream()', () => {
     expect(mockParserInstance.destroy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('OpenAI-Chat chatStream() — MiniMax reasoning_details', () => {
+  let mockCreate: ReturnType<typeof mock>;
+  let mockParserInstance: {
+    feed: ReturnType<typeof mock>;
+    getValue: ReturnType<typeof mock>;
+    destroy: ReturnType<typeof mock>;
+  };
+  let createOpenAIChatProvider: typeof import('../../src/providers/openai-chat.js').createOpenAIChatProvider;
+
+  beforeEach(async () => {
+    mockCreate = mock();
+    mockParserInstance = {
+      feed: mock(),
+      getValue: mock(() => undefined),
+      destroy: mock(),
+    };
+    const mockCreateParser = mock(() => mockParserInstance);
+
+    mock.module('vectorjson', () => ({
+      createParser: mockCreateParser,
+    }));
+
+    mock.module('openai', () => ({
+      default: class MockOpenAI {
+        chat = {
+          completions: {
+            create: mockCreate,
+          },
+        };
+      },
+    }));
+
+    const mod = await import('../../src/providers/openai-chat.js');
+    createOpenAIChatProvider = mod.createOpenAIChatProvider;
+  });
+
+  function makeMiniMaxProvider() {
+    return createOpenAIChatProvider({
+      baseURL: 'https://api.minimaxi.com/v1',
+      apiKey: 'test-key',
+    });
+  }
+
+  async function collectStream(provider: ReturnType<typeof makeMiniMaxProvider>, params?: any) {
+    const chunks: any[] = [];
+    const stream = provider.chatStream!(
+      params ?? { model: 'MiniMax-M3', messages: [{ role: 'user' as const, content: 'hi' }] },
+    );
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    return chunks;
+  }
+
+  it('should compute incremental reasoning deltas from cumulative MiniMax reasoning_details', async () => {
+    const streamChunks = [
+      makeStreamChunk({ reasoning_details: [{ text: 'step 1' }] }),
+      makeStreamChunk({ reasoning_details: [{ text: 'step 1 and step 2' }] }),
+      makeStreamChunk({ reasoning_details: [{ text: 'step 1 and step 2 and step 3' }] }),
+    ];
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeMiniMaxProvider();
+    const result = await collectStream(provider);
+
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual({ reasoning: 'step 1' });
+    expect(result[1]).toEqual({ reasoning: ' and step 2' });
+    expect(result[2]).toEqual({ reasoning: ' and step 3' });
+  });
+
+  it('should skip reasoning_details chunks when text has not grown', async () => {
+    const streamChunks = [
+      makeStreamChunk({ reasoning_details: [{ text: 'hello' }] }),
+      makeStreamChunk({ reasoning_details: [{ text: 'hello' }] }), // same cumulative
+      makeStreamChunk({ content: 'world' }),
+    ];
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeMiniMaxProvider();
+    const result = await collectStream(provider);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ reasoning: 'hello' });
+    expect(result[1]).toEqual({ content: 'world' });
+  });
+
+  it('should yield both reasoning and content chunks for MiniMax', async () => {
+    const streamChunks = [
+      makeStreamChunk({ reasoning_details: [{ text: 'analyzing...' }] }),
+      makeStreamChunk({ content: 'final answer' }),
+    ];
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeMiniMaxProvider();
+    const result = await collectStream(provider);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ reasoning: 'analyzing...' });
+    expect(result[1]).toEqual({ content: 'final answer' });
+  });
+});

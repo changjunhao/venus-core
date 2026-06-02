@@ -8,6 +8,7 @@ import {
   detectEndpointBehavior,
   extractReasoningContent,
   extractStreamReasoning,
+  extractMiniMaxStreamReasoning,
   extractTokenUsage,
 } from '../../src/providers/reasoning.js';
 import type { ChatReasoningParams } from '../../src/types.js';
@@ -84,6 +85,20 @@ describe('reasoning', () => {
       const params: ChatReasoningParams = { effort: 'high', budgetTokens: 9999 };
       expect(adaptReasoningParams(params, 'zhipu')).toEqual({
         thinking: { type: 'enabled' },
+      });
+    });
+
+    it('produces minimax thinking adaptive (MiniMax uses adaptive thinking mode)', () => {
+      const params: ChatReasoningParams = { effort: 'high' };
+      expect(adaptReasoningParams(params, 'minimax')).toEqual({
+        thinking: { type: 'adaptive' },
+      });
+    });
+
+    it('produces minimax thinking adaptive regardless of budgetTokens', () => {
+      const params: ChatReasoningParams = { effort: 'medium', budgetTokens: 4096 };
+      expect(adaptReasoningParams(params, 'minimax')).toEqual({
+        thinking: { type: 'adaptive' },
       });
     });
 
@@ -171,6 +186,14 @@ describe('reasoning', () => {
       expect(detectEndpointBehavior('https://bigmodel.cn/api/paas/v4')).toBe('zhipu');
     });
 
+    it('detects minimax from api.minimaxi.com baseURL (domestic)', () => {
+      expect(detectEndpointBehavior('https://api.minimaxi.com/v1')).toBe('minimax');
+    });
+
+    it('detects minimax from api.minimax.io baseURL (international)', () => {
+      expect(detectEndpointBehavior('https://api.minimax.io/v1')).toBe('minimax');
+    });
+
     it('falls back to openai for unrecognized hosts', () => {
       expect(detectEndpointBehavior('https://api.openai.com/v1')).toBe('openai');
       expect(detectEndpointBehavior('https://example.test/v1')).toBe('openai');
@@ -217,6 +240,28 @@ describe('reasoning', () => {
         }),
       ).toBe('A');
     });
+
+    it('extracts reasoning from MiniMax reasoning_details array', () => {
+      expect(
+        extractReasoningContent({
+          content: 'response',
+          reasoning_details: [{ text: 'step 1: analyze' }, { text: 'step 2: conclude' }],
+        }),
+      ).toBe('step 1: analyzestep 2: conclude');
+    });
+
+    it('returns null for empty MiniMax reasoning_details array', () => {
+      expect(extractReasoningContent({ reasoning_details: [] })).toBeNull();
+    });
+
+    it('prefers standard reasoning fields over MiniMax reasoning_details', () => {
+      expect(
+        extractReasoningContent({
+          reasoning_content: 'preferred',
+          reasoning_details: [{ text: 'fallback' }],
+        }),
+      ).toBe('preferred');
+    });
   });
 
   describe('extractStreamReasoning()', () => {
@@ -239,6 +284,53 @@ describe('reasoning', () => {
 
     it('returns null when no recognized fields exist on the delta', () => {
       expect(extractStreamReasoning({ content: 'foo' })).toBeNull();
+    });
+  });
+
+  describe('extractMiniMaxStreamReasoning()', () => {
+    it('returns null when delta is null/undefined', () => {
+      expect(extractMiniMaxStreamReasoning(null, 0)).toBeNull();
+      expect(extractMiniMaxStreamReasoning(undefined, 0)).toBeNull();
+    });
+
+    it('returns null when no reasoning_details present', () => {
+      expect(extractMiniMaxStreamReasoning({ content: 'hello' }, 0)).toBeNull();
+    });
+
+    it('returns null when reasoning_details is empty array', () => {
+      expect(extractMiniMaxStreamReasoning({ reasoning_details: [] }, 0)).toBeNull();
+    });
+
+    it('extracts first chunk delta from cumulative text', () => {
+      const result = extractMiniMaxStreamReasoning(
+        { reasoning_details: [{ text: 'thinking step 1' }] },
+        0,
+      );
+      expect(result).toEqual({ text: 'thinking step 1', cumulativeLength: 15 });
+    });
+
+    it('extracts incremental delta from cumulative text', () => {
+      const result = extractMiniMaxStreamReasoning(
+        { reasoning_details: [{ text: 'thinking step 1 and step 2' }] },
+        15,
+      );
+      expect(result).toEqual({ text: ' and step 2', cumulativeLength: 26 });
+    });
+
+    it('returns null when cumulative text has not grown', () => {
+      const result = extractMiniMaxStreamReasoning(
+        { reasoning_details: [{ text: 'same text' }] },
+        9,
+      );
+      expect(result).toBeNull();
+    });
+
+    it('returns null when reasoning_details item has no text field', () => {
+      const result = extractMiniMaxStreamReasoning(
+        { reasoning_details: [{ type: 'thinking' }] },
+        0,
+      );
+      expect(result).toBeNull();
     });
   });
 

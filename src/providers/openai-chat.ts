@@ -24,6 +24,7 @@ import {
   detectEndpointBehavior,
   extractReasoningContent,
   extractStreamReasoning,
+  extractMiniMaxStreamReasoning,
   extractTokenUsage,
 } from './reasoning.js';
 
@@ -78,10 +79,15 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     const reasoningFields = adaptReasoningParams(params.reasoning, behavior);
     Object.assign(body, reasoningFields);
 
-    // Kimi/MIMO/Zhipu thinking models default to enabled. When the caller does NOT configure
+    // Kimi/MIMO/Zhipu/MiniMax thinking models default to enabled. When the caller does NOT configure
     // reasoning, we must explicitly disable thinking to get standard (non-reasoning) behavior.
-    if ((behavior === 'kimi' || behavior === 'mimo' || behavior === 'zhipu') && params.reasoning === undefined) {
+    if ((behavior === 'kimi' || behavior === 'mimo' || behavior === 'zhipu' || behavior === 'minimax') && params.reasoning === undefined) {
       body.thinking = { type: 'disabled' };
+    }
+
+    // MiniMax: always enable reasoning_split to get clean reasoning_details instead of inline  tags
+    if (behavior === 'minimax') {
+      body.reasoning_split = true;
     }
 
     // Merge defaultExtra and per-call extra (per-call takes priority)
@@ -178,6 +184,8 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
         );
 
         const parser = createParser();
+        // MiniMax streaming reasoning: track cumulative text length for delta computation
+        let miniMaxReasoningLen = 0;
 
         for await (const chunk of completion) {
           const delta = chunk.choices[0]?.delta;
@@ -186,9 +194,18 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
           const message = delta as unknown as Record<string, unknown>;
 
           // Yield reasoning chunks
-          const reasoningDelta = extractStreamReasoning(message);
-          if (reasoningDelta !== null) {
-            yield { reasoning: reasoningDelta };
+          if (behavior === 'minimax') {
+            // MiniMax uses cumulative reasoning_details; compute delta
+            const mmReasoning = extractMiniMaxStreamReasoning(message, miniMaxReasoningLen);
+            if (mmReasoning !== null) {
+              miniMaxReasoningLen = mmReasoning.cumulativeLength;
+              yield { reasoning: mmReasoning.text };
+            }
+          } else {
+            const reasoningDelta = extractStreamReasoning(message);
+            if (reasoningDelta !== null) {
+              yield { reasoning: reasoningDelta };
+            }
           }
 
           // Yield content and incremental JSON partials

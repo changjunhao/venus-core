@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'openrouter' | 'volcanoark' | 'zhipu';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -80,6 +80,13 @@ export function adaptReasoningParams(
         thinking: { type: 'enabled' as const },
       };
 
+    case 'minimax':
+      // MiniMax uses `thinking: { type: "adaptive" }` (default) or `{ type: "disabled" }`.
+      // When reasoning is requested, we enable adaptive thinking.
+      return {
+        thinking: { type: 'adaptive' as const },
+      };
+
     case 'openrouter':
       return {
         reasoning: {
@@ -120,6 +127,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('xiaomimimo.com')) return 'mimo';
   if (baseURL.includes('ark.cn-beijing.volces.com')) return 'volcanoark';
   if (baseURL.includes('bigmodel.cn') || baseURL.includes('open.bigmodel.cn')) return 'zhipu';
+  if (baseURL.includes('minimaxi.com') || baseURL.includes('minimax.io')) return 'minimax';
   return 'openai';
 }
 
@@ -143,6 +151,15 @@ export function extractReasoningContent(message: Record<string, unknown> | null 
   if (typeof message.thinking === 'string' && message.thinking.length > 0) {
     return message.thinking;
   }
+
+  // MiniMax: reasoning_details is an array of { text: string } when reasoning_split=true
+  if (Array.isArray(message.reasoning_details) && message.reasoning_details.length > 0) {
+    const texts = message.reasoning_details
+      .filter((d: unknown) => typeof d === 'object' && d !== null && typeof (d as Record<string, unknown>).text === 'string')
+      .map((d: Record<string, unknown>) => d.text as string);
+    if (texts.length > 0) return texts.join('');
+  }
+
   return null;
 }
 
@@ -157,6 +174,36 @@ export function extractStreamReasoning(delta: Record<string, unknown> | null | u
   if (typeof delta.reasoning_content === 'string') return delta.reasoning_content;
   if (typeof delta.reasoning === 'string') return delta.reasoning;
   if (typeof delta.thinking === 'string') return delta.thinking;
+  return null;
+}
+
+/**
+ * Extract a reasoning delta from a MiniMax streaming chunk.
+ *
+ * MiniMax uses `reasoning_details` with cumulative text when `reasoning_split=true`.
+ * Each chunk's `reasoning_details[0].text` contains the full cumulative reasoning so far.
+ * This function computes the incremental delta by tracking the previous cumulative length.
+ *
+ * @param delta - The delta object from a streaming chunk
+ * @param prevLen - The length of the previously seen cumulative reasoning text
+ * @returns A tuple of [delta_text, new_cumulative_length], or null if no reasoning is present
+ */
+export function extractMiniMaxStreamReasoning(
+  delta: Record<string, unknown> | null | undefined,
+  prevLen: number,
+): { text: string; cumulativeLength: number } | null {
+  if (!delta) return null;
+
+  if (Array.isArray(delta.reasoning_details) && delta.reasoning_details.length > 0) {
+    const first = delta.reasoning_details[0];
+    if (typeof first === 'object' && first !== null && typeof (first as Record<string, unknown>).text === 'string') {
+      const cumulativeText = (first as Record<string, unknown>).text as string;
+      if (cumulativeText.length > prevLen) {
+        return { text: cumulativeText.slice(prevLen), cumulativeLength: cumulativeText.length };
+      }
+    }
+  }
+
   return null;
 }
 
