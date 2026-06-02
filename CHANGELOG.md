@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-02
+
+### Added
+
+- **Zhipu (BigModel) endpoint auto-detection**: `detectEndpointBehavior` now recognizes
+  `bigmodel.cn` / `open.bigmodel.cn` base URLs and auto-adapts reasoning parameters to
+  Zhipu's `thinking: { type: "enabled" }` format. Explicitly disables thinking when
+  reasoning is not configured (GLM thinking models like `glm-5.1` default to enabled).
+- **MiniMax OpenAI-compatible API support**: detect `api.minimaxi.com` / `api.minimax.io`
+  endpoints, adapt reasoning to MiniMax's `thinking: { type: "adaptive" }` with
+  `reasoning_split: true`, and extract reasoning from `reasoning_details` array in both
+  streaming and non-streaming modes.
+- **Baidu Qianfan (ERNIE) endpoint support**: `detectEndpointBehavior` now recognizes
+  `qianfan.baidubce.com` base URLs, adapting reasoning with `enable_thinking: true`
+  (ERNIE does not support `thinking_budget`).
+- **StepFun API compatibility**: add `stepfun.com` endpoint detection and
+  `reasoning_effort` parameter mapping (5-level → 3-level: `minimal`→`low`, `max`→`high`).
+  StepFun is fully OpenAI-compatible with baseURL `https://api.stepfun.com/v1`.
+- Documentation updated in README (EN/ZH) and configuration guides (EN/ZH) listing
+  reasoning parameter formats for StepFun, MiniMax, and Baidu Qianfan.
+
 ## [0.8.2] - 2026-05-30
 
 ### Fixed

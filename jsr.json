@@ -1,6 +1,6 @@
 {
   "name": "@theogony/venus-core",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "exports": {
     ".": "./src/index.ts",
     "./hono": "./src/adapters/hono.ts",
