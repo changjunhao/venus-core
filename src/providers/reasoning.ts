@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'volcanoark' | 'zhipu';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -108,6 +108,11 @@ export function adaptReasoningParams(
         reasoning_effort: reasoning.effort,
       };
 
+    case 'qianfan':
+      // Baidu Qianfan (ERNIE) uses `enable_thinking: true` (same as DashScope).
+      // ERNIE thinking models do NOT support thinking_budget.
+      return { enable_thinking: true };
+
     default:
       return { reasoning_effort: reasoning.effort };
   }
@@ -128,6 +133,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('ark.cn-beijing.volces.com')) return 'volcanoark';
   if (baseURL.includes('bigmodel.cn') || baseURL.includes('open.bigmodel.cn')) return 'zhipu';
   if (baseURL.includes('minimaxi.com') || baseURL.includes('minimax.io')) return 'minimax';
+  if (baseURL.includes('qianfan.baidubce.com')) return 'qianfan';
   return 'openai';
 }
 

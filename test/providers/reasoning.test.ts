@@ -137,6 +137,16 @@ describe('reasoning', () => {
       });
     });
 
+    it('produces enable_thinking for qianfan endpoint (ERNIE, no thinking_budget)', () => {
+      const params: ChatReasoningParams = { effort: 'high' };
+      expect(adaptReasoningParams(params, 'qianfan')).toEqual({ enable_thinking: true });
+    });
+
+    it('produces enable_thinking for qianfan even when budgetTokens provided (ERNIE ignores budget)', () => {
+      const params: ChatReasoningParams = { effort: 'medium', budgetTokens: 4096 };
+      expect(adaptReasoningParams(params, 'qianfan')).toEqual({ enable_thinking: true });
+    });
+
     it('falls back to reasoning_effort for unknown endpoint', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       // Cast to bypass the exhaustive EndpointBehavior union for the default branch.
@@ -192,6 +202,10 @@ describe('reasoning', () => {
 
     it('detects minimax from api.minimax.io baseURL (international)', () => {
       expect(detectEndpointBehavior('https://api.minimax.io/v1')).toBe('minimax');
+    });
+
+    it('detects qianfan from qianfan.baidubce.com baseURL', () => {
+      expect(detectEndpointBehavior('https://qianfan.baidubce.com/v2')).toBe('qianfan');
     });
 
     it('falls back to openai for unrecognized hosts', () => {
