@@ -137,6 +137,31 @@ describe('reasoning', () => {
       });
     });
 
+    it('produces reasoning_effort for stepfun endpoint with low effort', () => {
+      const params: ChatReasoningParams = { effort: 'low' };
+      expect(adaptReasoningParams(params, 'stepfun')).toEqual({ reasoning_effort: 'low' });
+    });
+
+    it('produces reasoning_effort for stepfun endpoint with medium effort', () => {
+      const params: ChatReasoningParams = { effort: 'medium' };
+      expect(adaptReasoningParams(params, 'stepfun')).toEqual({ reasoning_effort: 'medium' });
+    });
+
+    it('produces reasoning_effort for stepfun endpoint with high effort', () => {
+      const params: ChatReasoningParams = { effort: 'high' };
+      expect(adaptReasoningParams(params, 'stepfun')).toEqual({ reasoning_effort: 'high' });
+    });
+
+    it('maps minimal to low for stepfun (3-level: low/medium/high)', () => {
+      const params: ChatReasoningParams = { effort: 'minimal' };
+      expect(adaptReasoningParams(params, 'stepfun')).toEqual({ reasoning_effort: 'low' });
+    });
+
+    it('maps max to high for stepfun (3-level: low/medium/high)', () => {
+      const params: ChatReasoningParams = { effort: 'max' };
+      expect(adaptReasoningParams(params, 'stepfun')).toEqual({ reasoning_effort: 'high' });
+    });
+
     it('produces enable_thinking for qianfan endpoint (ERNIE, no thinking_budget)', () => {
       const params: ChatReasoningParams = { effort: 'high' };
       expect(adaptReasoningParams(params, 'qianfan')).toEqual({ enable_thinking: true });
@@ -206,6 +231,14 @@ describe('reasoning', () => {
 
     it('detects qianfan from qianfan.baidubce.com baseURL', () => {
       expect(detectEndpointBehavior('https://qianfan.baidubce.com/v2')).toBe('qianfan');
+    });
+
+    it('detects stepfun from api.stepfun.com baseURL', () => {
+      expect(detectEndpointBehavior('https://api.stepfun.com/v1')).toBe('stepfun');
+    });
+
+    it('detects stepfun from step_plan baseURL', () => {
+      expect(detectEndpointBehavior('https://api.stepfun.com/step_plan/v1')).toBe('stepfun');
     });
 
     it('falls back to openai for unrecognized hosts', () => {

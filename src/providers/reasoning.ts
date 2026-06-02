@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'volcanoark' | 'zhipu';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -108,6 +108,13 @@ export function adaptReasoningParams(
         reasoning_effort: reasoning.effort,
       };
 
+    case 'stepfun':
+      // StepFun (阶跃星辰) supports reasoning_effort: low | medium | high.
+      // Map Venus 5-level effort to StepFun 3-level: minimal→low, max→high.
+      return {
+        reasoning_effort: reasoning.effort === 'minimal' ? 'low' : reasoning.effort === 'max' ? 'high' : reasoning.effort,
+      };
+
     case 'qianfan':
       // Baidu Qianfan (ERNIE) uses `enable_thinking: true` (same as DashScope).
       // ERNIE thinking models do NOT support thinking_budget.
@@ -134,6 +141,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('bigmodel.cn') || baseURL.includes('open.bigmodel.cn')) return 'zhipu';
   if (baseURL.includes('minimaxi.com') || baseURL.includes('minimax.io')) return 'minimax';
   if (baseURL.includes('qianfan.baidubce.com')) return 'qianfan';
+  if (baseURL.includes('stepfun.com')) return 'stepfun';
   return 'openai';
 }
 

@@ -5,7 +5,7 @@
  * Venus Core - OpenAI Chat Provider
  *
  * LLM provider using the OpenAI SDK for Chat Completions API.
- * Works with any OpenAI-compatible endpoint (OpenAI, DashScope, DeepSeek, Kimi, OpenRouter, Qianfan, etc.).
+ * Works with any OpenAI-compatible endpoint (OpenAI, DashScope, DeepSeek, Kimi, OpenRouter, Qianfan, StepFun, etc.).
  *
  * Endpoint behavior (reasoning parameter format) is auto-detected from `baseURL`
  * at construction time via internal `detectEndpointBehavior`. No `style` parameter
