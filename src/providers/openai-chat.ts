@@ -75,15 +75,11 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
 
     if (params.response_format) body.response_format = params.response_format;
 
-    // Adapt reasoning params into endpoint-specific request fields
+    // Adapt reasoning params into endpoint-specific request fields.
+    // adaptReasoningParams handles both enable (reasoning configured) and
+    // explicit disable (reasoning not configured but model defaults to thinking).
     const reasoningFields = adaptReasoningParams(params.reasoning, behavior);
     Object.assign(body, reasoningFields);
-
-    // Kimi/MIMO/Zhipu/MiniMax thinking models default to enabled. When the caller does NOT configure
-    // reasoning, we must explicitly disable thinking to get standard (non-reasoning) behavior.
-    if ((behavior === 'kimi' || behavior === 'mimo' || behavior === 'zhipu' || behavior === 'minimax') && params.reasoning === undefined) {
-      body.thinking = { type: 'disabled' };
-    }
 
     // MiniMax: always enable reasoning_split to get clean reasoning_details instead of inline  tags
     if (behavior === 'minimax') {

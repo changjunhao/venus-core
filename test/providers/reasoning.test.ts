@@ -37,8 +37,38 @@ describe('reasoning', () => {
   });
 
   describe('adaptReasoningParams()', () => {
-    it('returns empty object when reasoning is undefined', () => {
-      expect(adaptReasoningParams(undefined, 'openai')).toEqual({});
+    describe('when reasoning is undefined (explicit disable for thinking-default endpoints)', () => {
+      it('returns empty object for openai endpoint (no default thinking)', () => {
+        expect(adaptReasoningParams(undefined, 'openai')).toEqual({});
+      });
+
+      it('returns thinking disabled for kimi endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'kimi')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
+      it('returns thinking disabled for mimo endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'mimo')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
+      it('returns thinking disabled for zhipu endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'zhipu')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
+      it('returns thinking disabled for minimax endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'minimax')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
+      it('returns enable_thinking=false for dashscope endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'dashscope')).toEqual({ enable_thinking: false });
+      });
+
+      it('returns enable_thinking=false for qianfan endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'qianfan')).toEqual({ enable_thinking: false });
+      });
+
+      it('returns empty object for unknown endpoint', () => {
+        expect(adaptReasoningParams(undefined, 'unknown' as never)).toEqual({});
+      });
     });
 
     it('produces { reasoning_effort } for openai endpoint', () => {

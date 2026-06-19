@@ -404,6 +404,29 @@ describe('Provider Layer', () => {
       expect(capturedBody.temperature).toBeUndefined();
     });
 
+    it('should send enable_thinking=false when reasoning is NOT configured (dashscope endpoint)', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAIChatProvider({
+        baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'qwen3.7-plus',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.3,
+      });
+
+      // DashScope thinking models default to enabled; we must explicitly disable for standard mode
+      expect(capturedBody.enable_thinking).toBe(false);
+      expect(capturedBody.thinking_budget).toBeUndefined();
+    });
+
     it('should detect kimi style via moonshot.cn baseURL and expose proper capabilities', () => {
       const provider = createOpenAIChatProvider({
         baseURL: 'https://api.moonshot.cn/v1',

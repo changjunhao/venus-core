@@ -46,13 +46,34 @@ export function getDefaultBudget(effort: ReasoningEffort): number {
 /**
  * Translate Venus's reasoning params into endpoint-specific request fields.
  *
+ * Handles both the "reasoning configured" and "reasoning not configured" cases:
+ * - When reasoning IS configured → sends endpoint-specific enable fields
+ * - When reasoning is NOT configured → sends endpoint-specific disable fields
+ *   for endpoints whose models default to thinking enabled (DashScope, Qianfan,
+ *   Kimi, MIMO, Zhipu, MiniMax), ensuring predictable engine behavior regardless
+ *   of model defaults.
+ *
  * The returned object should be merged into the request body via `Object.assign`.
  */
 export function adaptReasoningParams(
   reasoning: ChatReasoningParams | undefined,
   behavior: EndpointBehavior,
 ): Record<string, unknown> {
-  if (!reasoning) return {};
+  if (!reasoning) {
+    // Explicitly disable thinking for endpoints whose models default to enabled.
+    switch (behavior) {
+      case 'kimi':
+      case 'mimo':
+      case 'zhipu':
+      case 'minimax':
+        return { thinking: { type: 'disabled' as const } };
+      case 'dashscope':
+      case 'qianfan':
+        return { enable_thinking: false };
+      default:
+        return {};
+    }
+  }
 
   switch (behavior) {
     case 'openai':
