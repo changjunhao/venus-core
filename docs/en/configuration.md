@@ -14,7 +14,7 @@
 | `defaultModel` | `string` | — | Default model for all agents (recommended) |
 | `models` | `ModelConfig` | — | Per-agent model overrides (`genreDetector`, `proposer`, `critic`, `arbiter`, `revision`) |
 | `providers` | `ProviderConfig` | — | Per-agent custom provider instances, falls back to `provider` if not set |
-| `reasoning` | `ReasoningConfig` | — | Reasoning config with global `effort`/`budgetTokens` and per-agent `agents` overrides |
+| `reasoning` | `ReasoningConfig` | — | Reasoning config with global `enabled`/`effort`/`budgetTokens` and per-agent `agents` overrides |
 | `maxRetries` | `number` | — | Max retry attempts per agent LLM call |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | Event callback for observability |
 
@@ -22,6 +22,8 @@
 
 ```ts
 interface ReasoningConfig {
+  /** Whether reasoning is enabled globally (default: true when this object is present). Set to `false` to disable reasoning for all agents. */
+  enabled?: boolean;
   /** Default reasoning effort applied to all agents (when set) */
   effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
   /** Default token budget for reasoning */
@@ -60,15 +62,21 @@ const engine = createVenusEngine({
 ```
 
 The engine automatically adapts reasoning parameters to different provider APIs:
+- **OpenAI**: Uses `reasoning_effort` (minimal/low/medium/high/max)
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
 - **Xiaomi MIMO**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
+- **Zhipu (BigModel)**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
 - **StepFun**: Uses `reasoning_effort: "low" | "medium" | "high"` (5-level mapped to 3-level: minimal→low, max→high)
 - **MiniMax**: Uses `thinking: { type: "adaptive" }` with `reasoning_split: true`
 - **Doubao (Volcano Ark)**: Uses `thinking.type` toggle + `reasoning_effort`
 - **Baidu Qianfan (ERNIE)**: Uses `enable_thinking: true`
+- **Grok (xAI)**: Uses `reasoning_effort` (none/low/medium/high; 5-level mapped: minimal→none, max→high)
+- **Gemini**: Uses `reasoning_effort` (same as OpenAI, internally mapped to thinking_level/thinking_budget)
+- **DeepSeek**: Uses `reasoning_effort` + `thinking: { type: "enabled" }`
+- **OpenRouter**: Uses `reasoning: { effort, max_tokens, enabled: true }`
 
-> **Note**: The reasoning adapter also includes scaffolding for OpenAI, Anthropic, DeepSeek, and Gemini APIs, but these have not been tested with vision-enabled models in the Venus evaluation pipeline. DeepSeek does not support vision inputs.
+> **Note**: When reasoning is not configured, the adapter explicitly disables thinking for endpoints whose models default to enabled (DashScope, Qianfan, Kimi, MIMO, Zhipu, MiniMax, Grok), ensuring predictable behavior.
 
 ## See Also
 

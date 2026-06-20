@@ -14,7 +14,7 @@
 | `defaultModel` | `string` | — | 所有智能体的默认模型（建议） |
 | `models` | `ModelConfig` | — | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`） |
 | `providers` | `ProviderConfig` | — | 按智能体自定义提供商实例，未设置时回退到 `provider` |
-| `reasoning` | `ReasoningConfig` | — | 推理配置，支持全局 `effort`/`budgetTokens` 和按智能体 `agents` 覆盖 |
+| `reasoning` | `ReasoningConfig` | — | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖 |
 | `maxRetries` | `number` | — | 每次智能体 LLM 调用的最大重试次数 |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | 用于可观测性的事件回调 |
 
@@ -22,6 +22,8 @@
 
 ```ts
 interface ReasoningConfig {
+  /** 推理是否全局启用（存在此对象时默认为 true）。设置为 `false` 可禁用所有智能体的推理。 */
+  enabled?: boolean;
   /** 应用于所有智能体的默认推理 effort（设置时） */
   effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
   /** 推理的默认 token 预算 */
@@ -60,15 +62,21 @@ const engine = createVenusEngine({
 ```
 
 引擎会自动将推理参数适配到不同的提供商 API：
+- **OpenAI**：使用 `reasoning_effort`（minimal/low/medium/high/max）
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
 - **小米 MiMo**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
+- **智谱（BigModel）**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
 - **阶跃星辰（StepFun）**：使用 `reasoning_effort: "low" | "medium" | "high"`（五级映射为三级：minimal→low，max→high）
 - **MiniMax**：使用 `thinking: { type: "adaptive" }` 并强制 `reasoning_split: true`
 - **豆包（火山方舟）**：使用 `thinking.type` 开关 + `reasoning_effort`
 - **百度千帆（ERNIE）**：使用 `enable_thinking: true`
+- **Grok（xAI）**：使用 `reasoning_effort`（none/low/medium/high；五级映射：minimal→none，max→high）
+- **Gemini**：使用 `reasoning_effort`（与 OpenAI 相同，内部映射为 thinking_level/thinking_budget）
+- **DeepSeek**：使用 `reasoning_effort` + `thinking: { type: "enabled" }`
+- **OpenRouter**：使用 `reasoning: { effort, max_tokens, enabled: true }`
 
-> **注意**：推理适配器也包含了 OpenAI、Anthropic、DeepSeek 和 Gemini API 的适配代码，但这些提供商尚未在 Venus 评估管线中使用视觉模型进行实际测试。DeepSeek 不支持视觉输入。
+> **注意**：当未配置推理时，适配器会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、Grok）显式禁用推理，确保行为可预测。
 
 ## 参见
 

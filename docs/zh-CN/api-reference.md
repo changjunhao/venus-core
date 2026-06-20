@@ -179,6 +179,7 @@ const provider = createOpenAIChatProvider({
 | `headers` | `Record<string, string>` | — | 额外 HTTP 头 |
 | `timeout` | `number` | 60000 | 请求超时（毫秒） |
 | `defaultExtra` | `Record<string, unknown>` | — | 厂商特定额外参数 |
+| `includeUsage` | `boolean` | `true` | 是否在流式模式下通过 `stream_options.include_usage` 请求 token 用量统计。对于不支持此参数的端点，设置为 `false`。 |
 
 ### `createOpenAIResponsesProvider(options: OpenAIResponsesProviderOptions): LLMProvider`
 

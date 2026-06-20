@@ -179,6 +179,7 @@ const provider = createOpenAIChatProvider({
 | `headers` | `Record<string, string>` | — | Extra HTTP headers |
 | `timeout` | `number` | 60000 | Request timeout in milliseconds |
 | `defaultExtra` | `Record<string, unknown>` | — | Vendor-specific extra parameters |
+| `includeUsage` | `boolean` | `true` | Whether to request token usage in streaming mode via `stream_options.include_usage`. Set to `false` for endpoints that do not support this parameter. |
 
 ### `createOpenAIResponsesProvider(options: OpenAIResponsesProviderOptions): LLMProvider`
 
