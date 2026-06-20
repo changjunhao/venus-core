@@ -70,6 +70,10 @@ describe('reasoning', () => {
         expect(adaptReasoningParams(undefined, 'gemini')).toEqual({});
       });
 
+      it('returns reasoning_effort=none for grok endpoint (Grok defaults to low)', () => {
+        expect(adaptReasoningParams(undefined, 'grok')).toEqual({ reasoning_effort: 'none' });
+      });
+
       it('returns empty object for unknown endpoint', () => {
         expect(adaptReasoningParams(undefined, 'unknown' as never)).toEqual({});
       });
@@ -216,6 +220,31 @@ describe('reasoning', () => {
       expect(adaptReasoningParams(params, 'qianfan')).toEqual({ enable_thinking: true });
     });
 
+    it('produces reasoning_effort=low for grok endpoint with low effort', () => {
+      const params: ChatReasoningParams = { effort: 'low' };
+      expect(adaptReasoningParams(params, 'grok')).toEqual({ reasoning_effort: 'low' });
+    });
+
+    it('produces reasoning_effort=medium for grok endpoint with medium effort', () => {
+      const params: ChatReasoningParams = { effort: 'medium' };
+      expect(adaptReasoningParams(params, 'grok')).toEqual({ reasoning_effort: 'medium' });
+    });
+
+    it('produces reasoning_effort=high for grok endpoint with high effort', () => {
+      const params: ChatReasoningParams = { effort: 'high' };
+      expect(adaptReasoningParams(params, 'grok')).toEqual({ reasoning_effort: 'high' });
+    });
+
+    it('maps minimal to none for grok (disables reasoning entirely)', () => {
+      const params: ChatReasoningParams = { effort: 'minimal' };
+      expect(adaptReasoningParams(params, 'grok')).toEqual({ reasoning_effort: 'none' });
+    });
+
+    it('maps max to high for grok (4-level: none/low/medium/high)', () => {
+      const params: ChatReasoningParams = { effort: 'max' };
+      expect(adaptReasoningParams(params, 'grok')).toEqual({ reasoning_effort: 'high' });
+    });
+
     it('falls back to reasoning_effort for unknown endpoint', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       // Cast to bypass the exhaustive EndpointBehavior union for the default branch.
@@ -291,6 +320,10 @@ describe('reasoning', () => {
 
     it('detects gemini from generativelanguage.googleapis.com without openai path', () => {
       expect(detectEndpointBehavior('https://generativelanguage.googleapis.com/v1beta')).toBe('gemini');
+    });
+
+    it('detects grok from api.x.ai baseURL', () => {
+      expect(detectEndpointBehavior('https://api.x.ai/v1')).toBe('grok');
     });
 
     it('falls back to openai for unrecognized hosts', () => {
@@ -504,6 +537,29 @@ describe('reasoning', () => {
         },
       });
       expect(usage?.reasoningTokens).toBe(99);
+    });
+
+    it('reads reasoning_tokens from prompt_tokens_details (xAI/Grok style)', () => {
+      const usage = extractTokenUsage({
+        usage: {
+          prompt_tokens: 41,
+          completion_tokens: 15,
+          prompt_tokens_details: { reasoning_tokens: 12 },
+        },
+      });
+      expect(usage).toEqual({ inputTokens: 41, outputTokens: 15, reasoningTokens: 12 });
+    });
+
+    it('prefers completion_tokens_details over prompt_tokens_details for reasoning_tokens', () => {
+      const usage = extractTokenUsage({
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 20,
+          completion_tokens_details: { reasoning_tokens: 8 },
+          prompt_tokens_details: { reasoning_tokens: 5 },
+        },
+      });
+      expect(usage?.reasoningTokens).toBe(8);
     });
 
     it('omits reasoningTokens field when not present', () => {

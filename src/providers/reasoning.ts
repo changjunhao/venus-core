@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 'grok' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -70,6 +70,9 @@ export function adaptReasoningParams(
       case 'dashscope':
       case 'qianfan':
         return { enable_thinking: false };
+      case 'grok':
+        // Grok reasoning models default to reasoning_effort='low'; use 'none' to fully disable.
+        return { reasoning_effort: 'none' };
       default:
         return {};
     }
@@ -81,6 +84,14 @@ export function adaptReasoningParams(
       // Gemini OpenAI compat uses the same reasoning_effort field (minimal/low/medium/high).
       // Gemini 3 maps effort to thinking_level; Gemini 2.5 maps to thinking_budget.
       return { reasoning_effort: reasoning.effort };
+
+    case 'grok':
+      // Grok (xAI) supports reasoning_effort: 'none' | 'low' | 'medium' | 'high'.
+      // Map Venus 5-level effort: minimal→none (disable), max→high.
+      return {
+        reasoning_effort:
+          reasoning.effort === 'minimal' ? 'none' : reasoning.effort === 'max' ? 'high' : reasoning.effort,
+      };
 
     case 'dashscope':
       return {
@@ -167,6 +178,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('qianfan.baidubce.com')) return 'qianfan';
   if (baseURL.includes('stepfun.com')) return 'stepfun';
   if (baseURL.includes('generativelanguage.googleapis.com')) return 'gemini';
+  if (baseURL.includes('api.x.ai')) return 'grok';
   return 'openai';
 }
 
@@ -273,6 +285,12 @@ export function extractTokenUsage(raw: unknown): TokenUsage | undefined {
     reasoningTokens = details.reasoning_tokens;
   } else if (typeof usage.reasoning_tokens === 'number') {
     reasoningTokens = usage.reasoning_tokens;
+  } else {
+    // xAI (Grok) exposes reasoning_tokens under prompt_tokens_details in Responses API
+    const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+    if (promptDetails && typeof promptDetails.reasoning_tokens === 'number') {
+      reasoningTokens = promptDetails.reasoning_tokens;
+    }
   }
 
   if (inputTokens === 0 && outputTokens === 0 && reasoningTokens === undefined) {
