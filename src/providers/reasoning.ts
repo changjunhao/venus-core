@@ -26,7 +26,7 @@ import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.
  * Endpoint behavior classification used internally by OpenAI Chat provider.
  * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
+type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -77,6 +77,9 @@ export function adaptReasoningParams(
 
   switch (behavior) {
     case 'openai':
+    case 'gemini':
+      // Gemini OpenAI compat uses the same reasoning_effort field (minimal/low/medium/high).
+      // Gemini 3 maps effort to thinking_level; Gemini 2.5 maps to thinking_budget.
       return { reasoning_effort: reasoning.effort };
 
     case 'dashscope':
@@ -163,6 +166,7 @@ export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
   if (baseURL.includes('minimaxi.com') || baseURL.includes('minimax.io')) return 'minimax';
   if (baseURL.includes('qianfan.baidubce.com')) return 'qianfan';
   if (baseURL.includes('stepfun.com')) return 'stepfun';
+  if (baseURL.includes('generativelanguage.googleapis.com')) return 'gemini';
   return 'openai';
 }
 

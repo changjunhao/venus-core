@@ -66,6 +66,10 @@ describe('reasoning', () => {
         expect(adaptReasoningParams(undefined, 'qianfan')).toEqual({ enable_thinking: false });
       });
 
+      it('returns empty object for gemini endpoint (no explicit disable for Gemini)', () => {
+        expect(adaptReasoningParams(undefined, 'gemini')).toEqual({});
+      });
+
       it('returns empty object for unknown endpoint', () => {
         expect(adaptReasoningParams(undefined, 'unknown' as never)).toEqual({});
       });
@@ -74,6 +78,16 @@ describe('reasoning', () => {
     it('produces { reasoning_effort } for openai endpoint', () => {
       const params: ChatReasoningParams = { effort: 'medium' };
       expect(adaptReasoningParams(params, 'openai')).toEqual({ reasoning_effort: 'medium' });
+    });
+
+    it('produces { reasoning_effort } for gemini endpoint (same format as OpenAI)', () => {
+      const params: ChatReasoningParams = { effort: 'low' };
+      expect(adaptReasoningParams(params, 'gemini')).toEqual({ reasoning_effort: 'low' });
+    });
+
+    it('produces { reasoning_effort } for gemini endpoint with high effort', () => {
+      const params: ChatReasoningParams = { effort: 'high' };
+      expect(adaptReasoningParams(params, 'gemini')).toEqual({ reasoning_effort: 'high' });
     });
 
     it('produces reasoning_effort + top-level thinking for deepseek endpoint', () => {
@@ -271,10 +285,17 @@ describe('reasoning', () => {
       expect(detectEndpointBehavior('https://api.stepfun.com/step_plan/v1')).toBe('stepfun');
     });
 
+    it('detects gemini from generativelanguage.googleapis.com baseURL', () => {
+      expect(detectEndpointBehavior('https://generativelanguage.googleapis.com/v1beta/openai/')).toBe('gemini');
+    });
+
+    it('detects gemini from generativelanguage.googleapis.com without openai path', () => {
+      expect(detectEndpointBehavior('https://generativelanguage.googleapis.com/v1beta')).toBe('gemini');
+    });
+
     it('falls back to openai for unrecognized hosts', () => {
       expect(detectEndpointBehavior('https://api.openai.com/v1')).toBe('openai');
       expect(detectEndpointBehavior('https://example.test/v1')).toBe('openai');
-      expect(detectEndpointBehavior('https://generativelanguage.googleapis.com/v1beta')).toBe('openai');
       expect(detectEndpointBehavior('https://api.anthropic.com/v1')).toBe('openai');
     });
   });

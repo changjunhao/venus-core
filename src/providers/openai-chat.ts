@@ -81,7 +81,7 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     // and will reject any other value. MIMO also uses its own internal temperature.
     // OpenAI/DeepSeek reasoning models also ignore temperature.
     const skipTemperature =
-      behavior === 'kimi' || behavior === 'mimo' || (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek'));
+      behavior === 'kimi' || behavior === 'mimo' || (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek' || behavior === 'gemini'));
     if (params.temperature !== undefined && !skipTemperature) {
       body.temperature = params.temperature;
     }
