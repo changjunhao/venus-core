@@ -181,14 +181,18 @@ export class VenusEngine {
    *
    * Resolution order:
    * 1. No reasoning config → undefined (standard mode)
-   * 2. Per-agent override === false → undefined (explicitly disabled)
-   * 3. Per-agent override (object) → use it (with global budgetTokens fallback)
-   * 4. Global default effort → use it
-   * 5. Otherwise → undefined (standard mode)
+   * 2. Global enabled === false → undefined (globally disabled)
+   * 3. Per-agent override === false → undefined (explicitly disabled)
+   * 4. Per-agent override (object) → use it (with global budgetTokens fallback)
+   * 5. Global default effort → use it
+   * 6. Otherwise → undefined (standard mode)
    */
   #getReasoningConfig(role: AgentRole): ChatReasoningParams | undefined {
     const config = this.#config.reasoning;
     if (!config) return undefined;
+
+    // Global kill switch: `enabled: false` disables reasoning for all agents
+    if (config.enabled === false) return undefined;
 
     const agentOverride = config.agents?.[role];
 

@@ -698,6 +698,108 @@ describe('Engine Layer', () => {
       expect(arbiterParams.reasoning).toBeUndefined();
     });
 
+    it('should disable reasoning for all agents when enabled is false', async () => {
+      let proposerParams: any = null;
+      let criticParams: any = null;
+      let arbiterParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer-global-off',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+      const spyCritic = defineProvider({
+        name: 'spy-critic-global-off',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          criticParams = params;
+          return { content: makeCritiqueJSON('LOW'), reasoning: null };
+        },
+      });
+      const spyArbiter = defineProvider({
+        name: 'spy-arbiter-global-off',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          arbiterParams = params;
+          return { content: makeArbiterJSON(), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
+        providers: { proposer: spyProposer, critic: spyCritic, arbiter: spyArbiter },
+        reasoning: { enabled: false, effort: 'high' },
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      // All agents should have NO reasoning despite effort being configured
+      expect(proposerParams.reasoning).toBeUndefined();
+      expect(criticParams.reasoning).toBeUndefined();
+      expect(arbiterParams.reasoning).toBeUndefined();
+    });
+
+    it('should enable reasoning when enabled is true (explicit)', async () => {
+      let proposerParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer-explicit-on',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
+        providers: {
+          proposer: spyProposer,
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+        reasoning: { enabled: true, effort: 'medium' },
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      expect(proposerParams.reasoning).toEqual({ effort: 'medium' });
+    });
+
+    it('should enable reasoning when enabled is omitted (backward compatible)', async () => {
+      let proposerParams: any = null;
+
+      const spyProposer = defineProvider({
+        name: 'spy-proposer-compat',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          proposerParams = params;
+          return { content: makeProposalJSON(), reasoning: null };
+        },
+      });
+
+      const engine = createVenusEngine({
+        provider: createOpenAIChatProvider({ baseURL: 'https://mock.test/v1', apiKey: 'mock-key' }),
+        defaultModel: 'test-model',
+        providers: {
+          proposer: spyProposer,
+          critic: createMockProvider([{ content: makeCritiqueJSON('LOW') }]),
+          arbiter: createMockProvider([{ content: makeArbiterJSON() }]),
+        },
+        // enabled not specified — should default to true
+        reasoning: { effort: 'low' },
+      });
+
+      await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      expect(proposerParams.reasoning).toEqual({ effort: 'low' });
+    });
+
     it('should pass reasoning to genreDetector when auto-detection is triggered', async () => {
       let genreDetectorParams: any = null;
 

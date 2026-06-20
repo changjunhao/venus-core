@@ -52,6 +52,8 @@ export interface AgentReasoningConfig {
 
 /** Engine-level reasoning configuration with optional per-agent overrides */
 export interface ReasoningConfig {
+  /** Whether reasoning is enabled globally (default: true when this object is present). Set to `false` to disable reasoning for all agents. */
+  enabled?: boolean;
   /** Default reasoning effort applied to all agents (when set) */
   effort?: ReasoningEffort;
   /** Default token budget for reasoning */
