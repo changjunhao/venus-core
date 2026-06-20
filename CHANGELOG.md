@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-20
+
+### Added
+
+- **Gemini OpenAI-compatible endpoint support**: `detectEndpointBehavior` now recognizes
+  `generativelanguage.googleapis.com` base URLs and auto-adapts reasoning to
+  `reasoning_effort` (same format as OpenAI, internally mapped to thinking_level /
+  thinking_budget by Gemini API). Temperature is skipped when reasoning is enabled
+  (Gemini reasoning models ignore temperature, consistent with OpenAI/DeepSeek).
+- **Grok (xAI) OpenAI-compatible support**: `detectEndpointBehavior` now recognizes
+  `api.x.ai` base URLs, mapping 5-level reasoning effort to Grok's 4-level format
+  (`none` / `low` / `medium` / `high`; `minimal`→`none`, `max`→`high`). Explicitly
+  disables reasoning with `reasoning_effort='none'` when not configured (Grok defaults
+  to `low`). Extracts `reasoning_tokens` from `prompt_tokens_details` (xAI Responses
+  API style).
+- **`ReasoningConfig.enabled` global toggle**: Add optional `enabled?: boolean` field
+  providing a clear global kill switch for reasoning across all agents. When set to
+  `false`, reasoning is disabled for every agent regardless of `effort` or per-agent
+  overrides. Fully backward compatible when omitted.
+
+### Fixed
+
+- **OpenAI Chat Completions API compatibility**:
+  - DeepSeek reasoning: move `thinking` to top-level request body field instead of
+    invalid `extra_body` wrapper (SDK method param, not API request field).
+  - Add `developer` role to `ChatMessage` for o1/o3/o4-mini reasoning models.
+  - Add `detail` option to `image_url` content part (`auto` / `low` / `high`).
+  - Enable `stream_options.include_usage` in streaming mode to capture token usage
+    from the final chunk; add `usage` field to `StreamChunk`.
+  - Add configurable `includeUsage` option (default: `true`) to
+    `OpenAIChatProviderOptions` for endpoints that don't support `stream_options`.
+
+### Changed
+
+- **Reasoning parameter adaptation consolidated**: `adaptReasoningParams()` is now the
+  single source of truth for both enabling and disabling reasoning. When reasoning is
+  undefined, returns endpoint-specific disable fields for dashscope/qianfan
+  (`enable_thinking: false`), kimi/mimo/zhipu/minimax (`thinking: { type: 'disabled' }`),
+  and grok (`reasoning_effort: 'none'`), ensuring predictable behavior regardless of
+  model defaults.
+
 ## [0.9.0] - 2026-06-02
 
 ### Added
