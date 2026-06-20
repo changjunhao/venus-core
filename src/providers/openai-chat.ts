@@ -42,6 +42,12 @@ export interface OpenAIChatProviderOptions {
   timeout?: number;
   /** Default vendor-specific extra parameters merged into every request (per-call extra takes priority) */
   defaultExtra?: Record<string, unknown>;
+  /**
+   * Whether to request token usage in streaming mode via `stream_options.include_usage`.
+   * Set to `false` for endpoints that do not support this parameter.
+   * @default true
+   */
+  includeUsage?: boolean;
 }
 
 export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LLMProvider {
@@ -62,7 +68,14 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
       messages: params.messages,
     };
 
-    if (stream) body.stream = true;
+    if (stream) {
+      body.stream = true;
+      // Request token usage in the final streaming chunk (OpenAI Chat Completions API).
+      // Can be disabled via `includeUsage: false` for endpoints that do not support it.
+      if (options.includeUsage !== false) {
+        body.stream_options = { include_usage: true };
+      }
+    }
 
     // Kimi k2.6/k2.5 fix temperature internally (1.0 for thinking, 0.6 for non-thinking)
     // and will reject any other value. MIMO also uses its own internal temperature.
@@ -184,6 +197,12 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
         let miniMaxReasoningLen = 0;
 
         for await (const chunk of completion) {
+          // Extract token usage from the final chunk (enabled by stream_options.include_usage)
+          const chunkUsage = extractTokenUsage(chunk);
+          if (chunkUsage) {
+            yield { usage: chunkUsage };
+          }
+
           const delta = chunk.choices[0]?.delta;
           if (!delta) continue;
 

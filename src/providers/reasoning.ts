@@ -86,11 +86,11 @@ export function adaptReasoningParams(
       };
 
     case 'deepseek':
-      // DeepSeek requires both reasoning_effort (top-level) and
-      // thinking toggle (via extra_body for native endpoint).
+      // DeepSeek native API uses top-level `thinking` parameter (not `extra_body`,
+      // which is an OpenAI SDK method-level parameter, not a request body field).
       return {
         reasoning_effort: reasoning.effort,
-        extra_body: { thinking: { type: 'enabled' as const } },
+        thinking: { type: 'enabled' as const },
       };
 
     case 'kimi':

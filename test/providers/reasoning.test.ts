@@ -76,11 +76,11 @@ describe('reasoning', () => {
       expect(adaptReasoningParams(params, 'openai')).toEqual({ reasoning_effort: 'medium' });
     });
 
-    it('produces reasoning_effort + extra_body.thinking for deepseek endpoint', () => {
+    it('produces reasoning_effort + top-level thinking for deepseek endpoint', () => {
       const params: ChatReasoningParams = { effort: 'high' };
       expect(adaptReasoningParams(params, 'deepseek')).toEqual({
         reasoning_effort: 'high',
-        extra_body: { thinking: { type: 'enabled' } },
+        thinking: { type: 'enabled' },
       });
     });
 

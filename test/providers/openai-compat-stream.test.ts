@@ -265,6 +265,92 @@ describe('OpenAI-Chat chatStream()', () => {
 
     expect(mockParserInstance.destroy).toHaveBeenCalledTimes(1);
   });
+
+  // ─── Test 11: stream_options.include_usage is passed in streaming request ───
+  it('should include stream_options with include_usage in the request body', async () => {
+    const streamChunks = [makeStreamChunk({ content: 'hello' })];
+    mockParserInstance.getValue.mockReturnValue(undefined);
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeProvider();
+    await collectStream(provider);
+
+    const callArgs = mockCreate.mock.calls[0]?.[0];
+    expect(callArgs).toBeDefined();
+    expect(callArgs.stream).toBe(true);
+    expect(callArgs.stream_options).toEqual({ include_usage: true });
+  });
+
+  // ─── Test 11b: stream_options is omitted when includeUsage is false ───
+  it('should NOT include stream_options when includeUsage is set to false', async () => {
+    const streamChunks = [makeStreamChunk({ content: 'hello' })];
+    mockParserInstance.getValue.mockReturnValue(undefined);
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = createOpenAIChatProvider({
+      baseURL: 'https://mock-stream.test/v1',
+      apiKey: 'test-key',
+      includeUsage: false,
+    });
+    await collectStream(provider);
+
+    const callArgs = mockCreate.mock.calls[0]?.[0];
+    expect(callArgs).toBeDefined();
+    expect(callArgs.stream).toBe(true);
+    expect(callArgs.stream_options).toBeUndefined();
+  });
+
+  // ─── Test 12: usage is extracted from the final streaming chunk ───
+  it('should yield { usage } when the final chunk contains usage data', async () => {
+    const usageChunk = {
+      choices: [],
+      usage: {
+        prompt_tokens: 19,
+        completion_tokens: 10,
+        total_tokens: 29,
+      },
+    };
+    const streamChunks = [
+      makeStreamChunk({ content: 'hello' }),
+      usageChunk,
+    ];
+    mockParserInstance.getValue.mockReturnValue(undefined);
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeProvider();
+    const result = await collectStream(provider);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ content: 'hello' });
+    expect(result[1]).toEqual({ usage: { inputTokens: 19, outputTokens: 10 } });
+  });
+
+  // ─── Test 13: usage with reasoning_tokens is extracted correctly ───
+  it('should extract reasoning_tokens from streaming usage chunk', async () => {
+    const usageChunk = {
+      choices: [],
+      usage: {
+        prompt_tokens: 50,
+        completion_tokens: 30,
+        total_tokens: 80,
+        completion_tokens_details: { reasoning_tokens: 20 },
+      },
+    };
+    const streamChunks = [
+      makeStreamChunk({ content: 'result' }),
+      usageChunk,
+    ];
+    mockParserInstance.getValue.mockReturnValue(undefined);
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeProvider();
+    const result = await collectStream(provider);
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual({
+      usage: { inputTokens: 50, outputTokens: 30, reasoningTokens: 20 },
+    });
+  });
 });
 
 describe('OpenAI-Chat chatStream() — MiniMax reasoning_details', () => {

@@ -88,11 +88,13 @@ export interface TokenUsage {
 // ─── LLM Provider Types ──────────────────────────────────
 
 /** Content types for multi-modal messages */
-export type ChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
 
 /** Chat message */
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'developer' | 'user' | 'assistant';
   content: string | ChatContentPart[];
 }
 
@@ -146,6 +148,8 @@ export interface StreamChunk {
   content?: string;
   /** Incrementally parsed JSON partial (available when content is JSON) */
   partial?: Record<string, unknown>;
+  /** Token usage statistics (typically present in the final streaming chunk when include_usage is enabled) */
+  usage?: TokenUsage;
 }
 
 /** Options for evaluateStream */
