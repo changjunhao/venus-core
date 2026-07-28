@@ -140,14 +140,14 @@ deno add jsr:@theogony/venus-core
 
 | 包名                         | 是否必需 | 说明 |
 |----------------------------|----------|-------|
-| `@anthropic-ai/sdk` ^0.100 | 可选 | 用于 Anthropic 提供商 |
-| `@google/genai` ^2.7       | 可选 | 用于 Gemini 提供商 |
+| `@anthropic-ai/sdk` ^0.115 | 可选 | 用于 Anthropic 提供商 |
+| `@google/genai` ^2.13      | 可选 | 用于 Gemini 提供商 |
 | `hono` ^4.12               | 可选 | 用于 Hono 适配器（`@theogony/venus-core/hono`） |
 | `express` ^5.2             | 可选 | 用于 Express 适配器（`@theogony/venus-core/express`） |
 
 ### 运行时支持
 
-- **Node.js** >= 18.0.0
+- **Node.js** >= 22.0.0
 - **Bun**（推荐用于开发/测试）
 - **Deno**、**Cloudflare Workers**（Hono 适配器）
 

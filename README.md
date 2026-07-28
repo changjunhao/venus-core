@@ -140,14 +140,14 @@ Core dependencies (`openai`, `zod`, `vectorjson`) are included automatically.
 
 | Package                    | Required | Notes |
 |----------------------------|----------|-------|
-| `@anthropic-ai/sdk` ^0.100 | Optional | For Anthropic provider |
-| `@google/genai` ^2.7       | Optional | For Gemini provider |
+| `@anthropic-ai/sdk` ^0.115 | Optional | For Anthropic provider |
+| `@google/genai` ^2.13      | Optional | For Gemini provider |
 | `hono` ^4.12               | Optional | For Hono adapter (`@theogony/venus-core/hono`) |
 | `express` ^5.2             | Optional | For Express adapter (`@theogony/venus-core/express`) |
 
 ### Runtime Support
 
-- **Node.js** >= 18.0.0
+- **Node.js** >= 22.0.0
 - **Bun** (recommended for development/testing)
 - **Deno**, **Cloudflare Workers** (Hono adapter)
 
