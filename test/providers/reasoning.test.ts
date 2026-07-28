@@ -258,6 +258,16 @@ describe('reasoning', () => {
       expect(detectEndpointBehavior('https://dashscope.aliyuncs.com/compatible-mode/v1')).toBe('dashscope');
     });
 
+    it('detects dashscope from dashscope-intl.aliyuncs.com baseURL (international)', () => {
+      expect(detectEndpointBehavior('https://dashscope-intl.aliyuncs.com/compatible-mode/v1')).toBe('dashscope');
+    });
+
+    it('detects dashscope from token-plan maas.aliyuncs.com baseURL (Alibaba Token Plan)', () => {
+      expect(detectEndpointBehavior('https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1')).toBe(
+        'dashscope',
+      );
+    });
+
     it('detects deepseek from api.deepseek.com baseURL', () => {
       expect(detectEndpointBehavior('https://api.deepseek.com/v1')).toBe('deepseek');
     });
@@ -272,6 +282,10 @@ describe('reasoning', () => {
 
     it('detects kimi from moonshot.cn subdomain', () => {
       expect(detectEndpointBehavior('https://api.moonshot.cn/v1')).toBe('kimi');
+    });
+
+    it('detects kimi from api.moonshot.ai baseURL (international)', () => {
+      expect(detectEndpointBehavior('https://api.moonshot.ai/v1')).toBe('kimi');
     });
 
     it('detects mimo from xiaomimimo.com baseURL (Xiaomi MIMO uses thinking format)', () => {
@@ -312,6 +326,10 @@ describe('reasoning', () => {
 
     it('detects stepfun from step_plan baseURL', () => {
       expect(detectEndpointBehavior('https://api.stepfun.com/step_plan/v1')).toBe('stepfun');
+    });
+
+    it('detects stepfun from api.stepfun.ai baseURL (international)', () => {
+      expect(detectEndpointBehavior('https://api.stepfun.ai/v1')).toBe('stepfun');
     });
 
     it('detects gemini from generativelanguage.googleapis.com baseURL', () => {

@@ -12,21 +12,26 @@
  * field names below (e.g. `enable_thinking` for DashScope, `thinking` for Kimi)
  * are intentional — they reflect each vendor's actual API parameter names.
  *
- * ## EndpointBehavior (internal — NOT exported)
+ * ## EndpointBehavior (internal)
  *
  * Determined from `baseURL` at provider construction time via
  * `detectEndpointBehavior`. This is different from per-model routing:
  * within a single endpoint (e.g. DashScope), ALL models use the same
  * parameter format regardless of which upstream vendor trained them.
+ *
+ * The hostname → behavior table lives in the generated `endpoint-hosts.ts`
+ * (derived from models.dev api.json via `bun run generate:endpoints`).
  */
 
 import type { ChatReasoningParams, ReasoningEffort, TokenUsage } from '../types.js';
+import { ENDPOINT_HOSTS } from './endpoint-hosts.js';
 
 /**
  * Endpoint behavior classification used internally by OpenAI Chat provider.
- * NOT exported — consumers use `createOpenAIChatProvider` which auto-detects.
+ * Exported as a type only for the generated `endpoint-hosts.ts` table —
+ * consumers use `createOpenAIChatProvider` which auto-detects.
  */
-type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 'grok' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
+export type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 'grok' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -162,23 +167,15 @@ export function adaptReasoningParams(
 
 /**
  * Auto-detect endpoint behavior from its baseURL.
- * Falls back to 'openai' for any unrecognized host.
+ * Matches against the generated `ENDPOINT_HOSTS` table (first match wins);
+ * falls back to 'openai' for any unrecognized host.
  *
- * @internal NOT exported — used only inside createOpenAIChatProvider
+ * @internal used only inside createOpenAIChatProvider (exported for tests)
  */
 export function detectEndpointBehavior(baseURL: string): EndpointBehavior {
-  if (baseURL.includes('dashscope.aliyuncs.com')) return 'dashscope';
-  if (baseURL.includes('openrouter.ai')) return 'openrouter';
-  if (baseURL.includes('api.deepseek.com') || baseURL.includes('deepseek.com')) return 'deepseek';
-  if (baseURL.includes('moonshot.cn') || baseURL.includes('api.moonshot.cn')) return 'kimi';
-  if (baseURL.includes('xiaomimimo.com')) return 'mimo';
-  if (baseURL.includes('ark.cn-beijing.volces.com')) return 'volcanoark';
-  if (baseURL.includes('bigmodel.cn') || baseURL.includes('open.bigmodel.cn')) return 'zhipu';
-  if (baseURL.includes('minimaxi.com') || baseURL.includes('minimax.io')) return 'minimax';
-  if (baseURL.includes('qianfan.baidubce.com')) return 'qianfan';
-  if (baseURL.includes('stepfun.com')) return 'stepfun';
-  if (baseURL.includes('generativelanguage.googleapis.com')) return 'gemini';
-  if (baseURL.includes('api.x.ai')) return 'grok';
+  for (const [host, behavior] of ENDPOINT_HOSTS) {
+    if (baseURL.includes(host)) return behavior;
+  }
   return 'openai';
 }
 

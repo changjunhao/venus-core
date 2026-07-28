@@ -53,6 +53,7 @@
     "build:cjs": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts --outdir ./dist --target node --format cjs --entry-naming '[dir]/[name].cjs' --chunk-naming '[name]-[hash].cjs' --packages external",
     "build:types": "tsc -p tsconfig.build.json && cp dist/index.d.ts dist/index.d.cts && cp dist/adapters/hono.d.ts dist/adapters/hono.d.cts && cp dist/adapters/express.d.ts dist/adapters/express.d.cts",
     "typecheck": "tsc --noEmit",
+    "generate:endpoints": "bun scripts/generate-endpoint-hosts.ts",
     "test": "bun test",
     "test:integration": "RUN_INTEGRATION=1 bun test test/integration/",
     "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'",
