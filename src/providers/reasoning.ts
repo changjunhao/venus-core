@@ -57,8 +57,8 @@ export function getDefaultBudget(effort: ReasoningEffort): number {
  * - When reasoning IS configured → sends endpoint-specific enable fields
  * - When reasoning is NOT configured → sends endpoint-specific disable fields
  *   for endpoints whose models default to thinking enabled (DashScope, Qianfan,
- *   Kimi, MIMO, Zhipu, MiniMax), ensuring predictable engine behavior regardless
- *   of model defaults.
+ *   Kimi, MIMO, Zhipu, MiniMax, Volcano Ark), ensuring predictable engine
+ *   behavior regardless of model defaults.
  *
  * The returned object should be merged into the request body via `Object.assign`.
  */
@@ -73,6 +73,8 @@ export function adaptReasoningParams(
       case 'mimo':
       case 'zhipu':
       case 'minimax':
+      case 'volcanoark':
+        // Volcano Ark (Doubao) also defaults to thinking enabled when `thinking` is omitted.
         return { thinking: { type: 'disabled' as const } };
       case 'dashscope':
       case 'qianfan':
@@ -165,6 +167,43 @@ export function adaptReasoningParams(
     default:
       return { reasoning_effort: reasoning.effort };
   }
+}
+
+/**
+ * Translate Venus's reasoning params into Responses API request fields.
+ *
+ * Unlike `adaptReasoningParams` (Chat Completions field shapes, e.g. top-level
+ * `reasoning_effort`), the Responses API nests effort under `reasoning: { effort }`.
+ * Currently only Volcano Ark (Doubao) needs endpoint-specific handling; every
+ * other endpoint uses the OpenAI Responses shape.
+ *
+ * The returned object should be merged into the request body via `Object.assign`.
+ */
+export function adaptResponsesReasoningParams(
+  reasoning: ChatReasoningParams | undefined,
+  behavior: EndpointBehavior,
+): Record<string, unknown> {
+  if (behavior === 'volcanoark') {
+    // Volcano Ark defaults to thinking ENABLED when `thinking` is omitted, so the
+    // toggle is always sent explicitly. Ark effort levels: minimal/low/medium/high/max
+    // (minimal disables thinking); `reasoning.summary` is not supported in requests.
+    if (!reasoning || reasoning.effort === 'none' || reasoning.effort === 'minimal') {
+      return { thinking: { type: 'disabled' as const } };
+    }
+    return {
+      thinking: { type: 'enabled' as const },
+      reasoning: { effort: reasoning.effort === 'xhigh' ? 'max' : reasoning.effort },
+    };
+  }
+
+  if (!reasoning) return {};
+
+  // OpenAI Responses shape — pass effort directly with optional summary
+  const fields: Record<string, unknown> = { effort: reasoning.effort };
+  if (reasoning.summary) {
+    fields.summary = reasoning.summary;
+  }
+  return { reasoning: fields };
 }
 
 /**

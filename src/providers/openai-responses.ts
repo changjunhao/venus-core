@@ -6,6 +6,10 @@
  *
  * Uses OpenAI's `/v1/responses` API with `text.format` json_schema
  * for structured output. Supports reasoning-capable models (o-series).
+ *
+ * Also works with Responses-compatible endpoints such as Volcano Ark (Doubao).
+ * Endpoint behavior (reasoning parameter shape) is auto-detected from `baseURL`
+ * at construction time via internal `detectEndpointBehavior`.
  */
 
 import OpenAI from 'openai';
@@ -22,6 +26,7 @@ import { ProviderError } from '../utils/errors.js';
 import { classifyOpenAIError } from './openai-errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
+import { adaptResponsesReasoningParams, detectEndpointBehavior } from './reasoning.js';
 
 /** Options for creating an OpenAI Responses provider */
 export interface OpenAIResponsesProviderOptions {
@@ -74,8 +79,10 @@ export function extractResponsesTokenUsage(response: unknown): TokenUsage | unde
 }
 
 /**
- * Extract reasoning summary text from Responses API output items.
- * Reasoning items have `type: "reasoning"` with a `summary` array.
+ * Extract reasoning text from Responses API output items.
+ * Reasoning items have `type: "reasoning"` with a `summary` array
+ * (OpenAI; also Volcano Ark digest) and/or a `content` array of
+ * `reasoning_text` items (Volcano Ark raw chain-of-thought).
  */
 export function extractResponsesReasoning(output: unknown[]): string | null {
   if (!Array.isArray(output)) return null;
@@ -91,6 +98,19 @@ export function extractResponsesReasoning(output: unknown[]): string | null {
       for (const s of summary) {
         if (s && typeof s === 'object' && typeof (s as Record<string, unknown>).text === 'string') {
           parts.push((s as Record<string, unknown>).text as string);
+        }
+      }
+    }
+
+    // Volcano Ark (Doubao) places the raw chain-of-thought in `content` items of
+    // type `reasoning_text` (newer models keep only a digest in `summary`).
+    const content = obj.content;
+    if (Array.isArray(content)) {
+      for (const c of content) {
+        if (!c || typeof c !== 'object') continue;
+        const part = c as Record<string, unknown>;
+        if (part.type === 'reasoning_text' && typeof part.text === 'string') {
+          parts.push(part.text);
         }
       }
     }
@@ -161,6 +181,9 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
     defaultHeaders: options.headers,
   });
 
+  // Auto-detect endpoint behavior from baseURL (internal — not exposed to consumers)
+  const behavior = detectEndpointBehavior(options.baseURL);
+
   /** Build common request body for Responses API */
   function buildRequestBody(params: ChatParams, stream?: boolean): Record<string, unknown> {
     const { instructions, input } = convertMessages(params.messages);
@@ -180,8 +203,10 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
     }
 
     // Temperature — reasoning models (o-series / GPT-5) reject it on the
-    // Responses API, so skip it whenever reasoning is configured
-    if (params.temperature !== undefined && params.reasoning === undefined) {
+    // Responses API, so skip it whenever reasoning is configured. Volcano Ark
+    // accepts temperature alongside thinking (models ignore it instead of rejecting).
+    const skipTemperature = params.reasoning !== undefined && behavior !== 'volcanoark';
+    if (params.temperature !== undefined && !skipTemperature) {
       body.temperature = params.temperature;
     }
 
@@ -197,16 +222,9 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
       }
     }
 
-    // Reasoning configuration — pass effort directly (OpenAI Responses API values)
-    if (params.reasoning) {
-      const reasoning: Record<string, unknown> = {
-        effort: params.reasoning.effort,
-      };
-      if (params.reasoning.summary) {
-        reasoning.summary = params.reasoning.summary;
-      }
-      body.reasoning = reasoning;
-    }
+    // Reasoning configuration — endpoint-specific Responses API shape
+    // (OpenAI: reasoning.effort/summary; Volcano Ark: thinking.type + reasoning.effort)
+    Object.assign(body, adaptResponsesReasoningParams(params.reasoning, behavior));
 
     // Merge defaultExtra and per-call extra (per-call takes priority)
     const mergedExtra = { ...options.defaultExtra, ...params.extra };

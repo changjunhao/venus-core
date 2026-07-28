@@ -5,6 +5,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   getDefaultBudget,
   adaptReasoningParams,
+  adaptResponsesReasoningParams,
   detectEndpointBehavior,
   extractReasoningContent,
   extractStreamReasoning,
@@ -56,6 +57,10 @@ describe('reasoning', () => {
 
       it('returns thinking disabled for minimax endpoint', () => {
         expect(adaptReasoningParams(undefined, 'minimax')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
+      it('returns thinking disabled for volcanoark endpoint (Doubao defaults to thinking enabled)', () => {
+        expect(adaptReasoningParams(undefined, 'volcanoark')).toEqual({ thinking: { type: 'disabled' } });
       });
 
       it('returns enable_thinking=false for dashscope endpoint', () => {
@@ -250,6 +255,73 @@ describe('reasoning', () => {
       // Cast to bypass the exhaustive EndpointBehavior union for the default branch.
       const result = adaptReasoningParams(params, 'unknown' as never);
       expect(result).toEqual({ reasoning_effort: 'medium' });
+    });
+  });
+
+  describe('adaptResponsesReasoningParams()', () => {
+    describe('volcanoark behavior', () => {
+      it('returns thinking disabled when reasoning is undefined (Ark defaults to enabled)', () => {
+        expect(adaptResponsesReasoningParams(undefined, 'volcanoark')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
+      it('returns thinking disabled for minimal effort', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'minimal' }, 'volcanoark')).toEqual({
+          thinking: { type: 'disabled' },
+        });
+      });
+
+      it('returns thinking disabled for none effort', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'none' }, 'volcanoark')).toEqual({
+          thinking: { type: 'disabled' },
+        });
+      });
+
+      it('returns thinking enabled + nested reasoning.effort for medium effort', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'medium' }, 'volcanoark')).toEqual({
+          thinking: { type: 'enabled' },
+          reasoning: { effort: 'medium' },
+        });
+      });
+
+      it('passes max effort through (Ark supports max)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'max' }, 'volcanoark')).toEqual({
+          thinking: { type: 'enabled' },
+          reasoning: { effort: 'max' },
+        });
+      });
+
+      it('maps xhigh to max (Ark 5-level: minimal/low/medium/high/max)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'xhigh' }, 'volcanoark')).toEqual({
+          thinking: { type: 'enabled' },
+          reasoning: { effort: 'max' },
+        });
+      });
+
+      it('never includes summary (unsupported by Ark requests)', () => {
+        const result = adaptResponsesReasoningParams({ effort: 'high', summary: 'detailed' }, 'volcanoark');
+        expect(result).toEqual({
+          thinking: { type: 'enabled' },
+          reasoning: { effort: 'high' },
+        });
+      });
+    });
+
+    describe('openai behavior (default Responses shape)', () => {
+      it('returns empty object when reasoning is undefined', () => {
+        expect(adaptResponsesReasoningParams(undefined, 'openai')).toEqual({});
+      });
+
+      it('returns nested reasoning.effort without summary', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'medium' }, 'openai')).toEqual({
+          reasoning: { effort: 'medium' },
+        });
+      });
+
+      it('passes summary through when provided', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'high', summary: 'detailed' }, 'openai')).toEqual({
+          reasoning: { effort: 'high', summary: 'detailed' },
+        });
+      });
     });
   });
 

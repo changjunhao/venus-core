@@ -211,6 +211,31 @@ describe('OpenAI Responses Provider', () => {
       ]);
       expect(result).toBe('keep');
     });
+
+    it('extracts reasoning_text content items (Volcano Ark raw chain-of-thought)', () => {
+      const result = extractResponsesReasoning([
+        { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'ark thinking' }] },
+      ]);
+      expect(result).toBe('ark thinking');
+    });
+
+    it('merges summary and reasoning_text content when both are present', () => {
+      const result = extractResponsesReasoning([
+        {
+          type: 'reasoning',
+          summary: [{ text: 'digest' }],
+          content: [{ type: 'reasoning_text', text: 'full thought' }],
+        },
+      ]);
+      expect(result).toBe('digest\nfull thought');
+    });
+
+    it('ignores non-reasoning_text content items', () => {
+      const result = extractResponsesReasoning([
+        { type: 'reasoning', content: [{ type: 'output_text', text: 'not reasoning' }, null, 42] },
+      ]);
+      expect(result).toBeNull();
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -353,6 +378,8 @@ describe('OpenAI Responses Provider', () => {
         reasoning: { effort: 'high', summary: 'detailed' },
       });
       expect(lastRequestBody().reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+      // OpenAI path must never gain the Volcano Ark thinking toggle
+      expect(lastRequestBody().thinking).toBeUndefined();
     });
 
     it('merges defaultExtra and per-call extra (per-call wins)', async () => {
@@ -409,6 +436,133 @@ describe('OpenAI Responses Provider', () => {
         response_format: { type: 'json_object' },
       });
       expect(lastRequestBody().text).toEqual({ format: { type: 'json_object' } });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Volcano Ark (Doubao) endpoint behavior
+  // ═══════════════════════════════════════════════════════════════════════
+  describe('Volcano Ark (volcanoark) behavior', () => {
+    function makeArkProvider(overrides: Record<string, unknown> = {}) {
+      return createOpenAIResponsesProvider({
+        baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+        apiKey: 'test-key',
+        ...overrides,
+      });
+    }
+
+    it('sends thinking enabled + nested reasoning.effort without summary when reasoning is configured', async () => {
+      const provider = makeArkProvider();
+      await provider.chat({
+        model: 'doubao-seed-2-0-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'medium', summary: 'detailed' },
+      });
+
+      const body = lastRequestBody();
+      expect(body.thinking).toEqual({ type: 'enabled' });
+      expect(body.reasoning).toEqual({ effort: 'medium' });
+    });
+
+    it('sends thinking disabled when reasoning is not configured (Ark defaults to enabled)', async () => {
+      const provider = makeArkProvider();
+      await provider.chat({ model: 'doubao-seed-2-0-pro', messages: [{ role: 'user', content: 'hi' }] });
+
+      const body = lastRequestBody();
+      expect(body.thinking).toEqual({ type: 'disabled' });
+      expect(body.reasoning).toBeUndefined();
+    });
+
+    it('sends thinking disabled for minimal effort', async () => {
+      const provider = makeArkProvider();
+      await provider.chat({
+        model: 'doubao-seed-2-0-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'minimal' },
+      });
+
+      const body = lastRequestBody();
+      expect(body.thinking).toEqual({ type: 'disabled' });
+      expect(body.reasoning).toBeUndefined();
+    });
+
+    it('maps xhigh effort to max', async () => {
+      const provider = makeArkProvider();
+      await provider.chat({
+        model: 'doubao-seed-2-0-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'xhigh' },
+      });
+
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'max' });
+    });
+
+    it('keeps temperature even when reasoning is configured (Ark accepts it)', async () => {
+      const provider = makeArkProvider();
+      await provider.chat({
+        model: 'doubao-seed-2-0-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.3,
+        reasoning: { effort: 'medium' },
+      });
+
+      expect(lastRequestBody().temperature).toBe(0.3);
+    });
+
+    it('extracts reasoning from reasoning_text content items in non-stream responses', async () => {
+      mockFetch(async () =>
+        makeNonStreamResponse('{"score":8}', {
+          output: [
+            { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'ark chain of thought' }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '{"score":8}' }] },
+          ],
+        }),
+      );
+
+      const provider = makeArkProvider();
+      const result = await provider.chat({ model: 'doubao-seed-2-0-pro', messages: [{ role: 'user', content: 'hi' }] });
+
+      expect(result.content).toBe('{"score":8}');
+      expect(result.reasoning).toBe('ark chain of thought');
+    });
+
+    it('parses Ark streaming events (reasoning summary delta, text delta, completed usage)', async () => {
+      mockParserInstance.getValue.mockReturnValue(undefined);
+
+      // Event shapes taken from the official Ark Responses streaming events doc
+      mockFetch(async () =>
+        makeSSEResponse([
+          { type: 'response.created', response: { id: 'resp_1', object: 'response' }, sequence_number: 0 },
+          { type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning' }, sequence_number: 1 },
+          { type: 'response.reasoning_summary_text.delta', delta: 'thinking...', summary_index: 0, sequence_number: 2 },
+          { type: 'response.output_text.delta', delta: '{"score":8}', content_index: 0, sequence_number: 3 },
+          {
+            type: 'response.completed',
+            response: {
+              usage: {
+                input_tokens: 58,
+                output_tokens: 1647,
+                total_tokens: 1705,
+                output_tokens_details: { reasoning_tokens: 1273 },
+              },
+            },
+            sequence_number: 4,
+          },
+        ]),
+      );
+
+      const provider = makeArkProvider();
+      const result = await collectStream(provider, {
+        model: 'doubao-seed-2-0-pro',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        reasoning: { effort: 'medium' },
+      });
+
+      expect(result).toEqual([
+        { reasoning: 'thinking...' },
+        { content: '{"score":8}' },
+        { usage: { inputTokens: 58, outputTokens: 1647, reasoningTokens: 1273 } },
+      ]);
     });
   });
 

@@ -69,14 +69,27 @@ const engine = createVenusEngine({
 - **智谱（BigModel）**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
 - **阶跃星辰（StepFun）**：使用 `reasoning_effort: "low" | "medium" | "high"`（五级映射为三级：minimal→low，max→high）
 - **MiniMax**：使用 `thinking: { type: "adaptive" }` 并强制 `reasoning_split: true`
-- **豆包（火山方舟）**：使用 `thinking.type` 开关 + `reasoning_effort`
+- **豆包（火山方舟）**：Chat Completions 使用 `thinking.type` 开关 + `reasoning_effort`；Responses API 端点（通过 `createOpenAIResponsesProvider` 配合 `https://ark.cn-beijing.volces.com/api/v3`）使用 `thinking.type` + 嵌套 `reasoning: { effort }`（minimal→关闭思考，xhigh→max；不会发送 `reasoning.summary`）
 - **百度千帆（ERNIE）**：使用 `enable_thinking: true`
 - **Grok（xAI）**：使用 `reasoning_effort`（none/low/medium/high；五级映射：minimal→none，max→high）
 - **Gemini**：使用 `reasoning_effort`（与 OpenAI 相同，内部映射为 thinking_level/thinking_budget）
 - **DeepSeek**：使用 `reasoning_effort` + `thinking: { type: "enabled" }`
 - **OpenRouter**：使用 `reasoning: { effort, max_tokens, enabled: true }`
 
-> **注意**：当未配置推理时，适配器会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、Grok）显式禁用推理，确保行为可预测。
+> **注意**：当未配置推理时，适配器会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、火山方舟、Grok）显式禁用推理，确保行为可预测。
+
+### 豆包（火山方舟）Responses API
+
+Responses provider 可直接对接火山方舟的豆包模型——端点行为从 `baseURL` 自动检测：
+
+```ts
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+  apiKey: process.env.ARK_API_KEY!,
+});
+```
+
+火山特有的可选参数（如 `caching`、`service_tier`、`expire_at`）可通过 `defaultExtra`（provider 级）或 `extra`（单次调用级）透传。注意：火山方舟的 `text.format` 结构化输出（`json_schema`/`json_object`）目前处于 beta 阶段。
 
 ## 参见
 
