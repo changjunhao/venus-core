@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-28
+
+### Added
+
+- **OpenAI Responses provider implemented**: `createOpenAIResponsesProvider` is no
+  longer an experimental skeleton — full `/v1/responses` support with non-streaming
+  and SSE streaming modes, reasoning summary extraction, input/output token usage,
+  message-to-input conversion with vision support, and strict `json_schema`
+  structured output via `text.format`.
+- **Structured output capability declaration**: new
+  `ProviderCapabilities.structuredOutput` field (`'json_object' | 'json_schema'`)
+  and a `json_schema` variant added to the `ResponseFormat` union.
+  - `BaseAgent` uses a single call with a strict JSON Schema built from Zod for
+    `json_schema`-capable providers (no retries / local validation — trusted to
+    the API), while `json_object` providers keep the Zod validation +
+    repair-retry loop. Warns when the declared schema guarantee is not honored.
+- **Generated endpoint host table**: new dev-time codegen script
+  (`scripts/generate-endpoint-hosts.ts`) fetches the models.dev catalog and emits
+  `src/providers/endpoint-hosts.ts` (committed — build/test/publish never require
+  network). `detectEndpointBehavior` now matches against the generated
+  `ENDPOINT_HOSTS` table with first-match-wins and `'openai'` fallback; the
+  `EndpointBehavior` type is exported.
+
+### Fixed
+
+- Endpoint hosts previously falling back to `'openai'` behavior are now detected
+  correctly: `dashscope-intl.aliyuncs.com`, `token-plan.*.maas.aliyuncs.com`,
+  `api.moonshot.ai`, `api.kimi.com`, `api.stepfun.ai`.
+
+### Changed
+
+- **openai-chat `json_schema` downgrade**: `createOpenAIChatProvider` downgrades a
+  `json_schema` response format to `json_object` with a warning log (schema
+  pass-through for verified endpoints may come in a future version).
+- Shared OpenAI error classification extracted into
+  `providers/openai-errors.ts` (`classifyOpenAIError`), reused by both
+  openai-chat and openai-responses providers.
+- Dependency bumps: `openai` ^7.0.0, `hono` ^4.12.32, `@anthropic-ai/sdk`
+  ^0.115.0, `@google/genai` ^2.13.0, plus dev tooling updates.
+- Node.js requirement raised to `>=22.0.0`.
+
 ## [0.10.0] - 2026-06-20
 
 ### Added
