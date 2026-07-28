@@ -12,8 +12,56 @@ import { VenusError, ValidationError } from '../utils/errors.js';
 
 const EvaluationContextOptionalSchema = EvaluationContextSchema.optional();
 
+// ============================================================
+// imageUrl SSRF 防护
+// ============================================================
+
+/** 判断主机名是否指向私有/保留地址（loopback、RFC 1918、link-local、云元数据等） */
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal')
+  ) {
+    return true;
+  }
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const a = Number(ipv4[1]);
+    const b = Number(ipv4[2]);
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    return false;
+  }
+  // IPv6 loopback / unspecified / link-local / unique-local
+  if (host === '::' || host === '::1') return true;
+  if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true;
+  return false;
+}
+
+/**
+ * imageUrl 校验：仅对 http/https 拦截私有/保留主机（SSRF 防护）；
+ * 其他协议（data:、oss:、gs:、cos: 等厂商私有协议）由提供者自行解析，直接放行
+ */
+export function isAllowedImageUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+  return !isPrivateHost(url.hostname);
+}
+
 export const evaluateRequestSchema = z.object({
-  imageUrl: z.url(),
+  imageUrl: z.url().refine(isAllowedImageUrl, {
+    message: 'imageUrl must not target a private or reserved host',
+  }),
   genre: GenreEnum.optional(),
   context: EvaluationContextOptionalSchema,
   mode: z.enum(['values', 'updates']).optional(),
