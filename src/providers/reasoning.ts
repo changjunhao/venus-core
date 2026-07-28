@@ -39,11 +39,13 @@ export type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 
  */
 export function getDefaultBudget(effort: ReasoningEffort): number {
   const budgets: Record<ReasoningEffort, number> = {
+    none: 0,
     minimal: 512,
     low: 2048,
     medium: 8192,
     high: 32768,
     max: 65536,
+    xhigh: 65536,
   };
   return budgets[effort];
 }

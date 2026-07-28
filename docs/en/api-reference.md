@@ -181,9 +181,36 @@ const provider = createOpenAIChatProvider({
 | `defaultExtra` | `Record<string, unknown>` | — | Vendor-specific extra parameters |
 | `includeUsage` | `boolean` | `true` | Whether to request token usage in streaming mode via `stream_options.include_usage`. Set to `false` for endpoints that do not support this parameter. |
 
+> **Note on structured output**: this provider declares `structuredOutput: 'json_object'`. Any
+> `response_format` of type `json_schema` passed to it is **downgraded to `json_object`**
+> (the schema is not sent to the endpoint) and a warning is logged. Schema enforcement is
+> intentionally not applied for now; a future version may pass `json_schema` through for
+> endpoints verified to support it. Use `createOpenAIResponsesProvider` if you need strict
+> schema enforcement.
+
 ### `createOpenAIResponsesProvider(options: OpenAIResponsesProviderOptions): LLMProvider`
 
-Create a provider using the OpenAI Responses API. See source for full options.
+Create a provider using the OpenAI Responses API (`/v1/responses`), for reasoning-capable models (o-series, GPT-5). Declares `structuredOutput: 'json_schema'` and honors strict JSON Schema output via `text.format`.
+
+```ts
+import { createOpenAIResponsesProvider } from '@theogony/venus-core';
+
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_KEY!,
+  defaultModel: 'gpt-5',
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `baseURL` | `string` | *required* | OpenAI API base URL |
+| `apiKey` | `string` | *required* | API key |
+| `defaultModel` | `string` | — | Default model identifier |
+| `headers` | `Record<string, string>` | — | Extra HTTP headers |
+| `timeout` | `number` | 60000 | Request timeout in milliseconds |
+| `defaultExtra` | `Record<string, unknown>` | — | Provider-specific default extra parameters |
+| `includeUsage` | `boolean` | `true` | Whether to request token usage in streaming mode |
 
 ### `createAnthropicProvider(options: AnthropicProviderOptions): LLMProvider`
 
@@ -212,8 +239,29 @@ interface ProviderCapabilities {
   reasoningBudget: boolean; // Supports explicit token budget
   vision: boolean;          // Supports image inputs
   streaming: boolean;       // Supports streaming
+  structuredOutput?: 'json_object' | 'json_schema'; // Structured output support (see below)
 }
 ```
+
+#### `structuredOutput` semantics
+
+The `structuredOutput` capability controls how agents request and validate JSON output:
+
+| Value | Agent behavior |
+|-------|----------------|
+| `'json_object'` or omitted | Requests `response_format: { type: 'json_object' }`. The agent parses JSON, validates it against the Zod schema, and retries up to `maxRetries` times with repair prompts. Failure after all attempts throws `SchemaError`. |
+| `'json_schema'` | The agent builds a strict JSON Schema from the Zod schema and sends `response_format: { type: 'json_schema', ... }` in a **single call — no retries and no local Zod validation** (`maxRetries` does not apply). Schema compliance is trusted to the provider/API. If the response is not valid JSON, a `ProviderError` with `errorCode: 'parse_error'` is thrown immediately. |
+
+> **Warning**: only declare `structuredOutput: 'json_schema'` on a custom provider if the
+> underlying API actually guarantees schema-compliant output (e.g. OpenAI Responses API).
+> Declaring it disables the agent-side validation/repair loop entirely.
+
+Built-in provider support:
+
+| Provider | `structuredOutput` | Notes |
+|----------|--------------------|-------|
+| `createOpenAIChatProvider` | `'json_object'` | `json_schema` response_format is downgraded to `json_object` with a warning |
+| `createOpenAIResponsesProvider` | `'json_schema'` | Strict schema via `text.format` |
 
 ```ts
 import { createVenusEngine, defineProvider, createOpenAIChatProvider } from '@theogony/venus-core';
@@ -272,6 +320,10 @@ All errors extend `VenusError` with a `code` property:
 - `provider: string` — Name of the failing provider
 - `errorCode: ProviderErrorCode` — One of `'network' | 'api_error' | 'parse_error' | 'timeout' | 'auth_error' | 'unknown'`
 - `statusCode?: number` — HTTP status code if applicable
+
+Errors thrown by the OpenAI SDK (Chat Completions and Responses providers) are classified
+centrally and consistently: HTTP 401/403 → `auth_error`, connection timeouts → `timeout`,
+DNS/connection failures → `network`, other HTTP ≥ 400 → `api_error`, anything else → `unknown`.
 
 ```ts
 import { ProviderError, ValidationError } from '@theogony/venus-core';

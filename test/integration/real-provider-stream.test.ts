@@ -31,7 +31,7 @@ function createTestEngine() {
       baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       apiKey: API_KEY!,
     }),
-    defaultModel: 'qwen3.6-plus',
+    defaultModel: 'qwen3.7-plus',
     reasoning: {
       effort: 'medium',
       agents: {

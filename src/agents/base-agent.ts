@@ -9,8 +9,9 @@ import type {
   ChatContentPart,
   ChatMessage,
   StreamChunk,
+  ResponseFormat,
 } from '../types.js';
-import { z, type ZodType } from 'zod';
+import { z, toJSONSchema, type ZodType } from 'zod';
 import { ProviderError, SchemaError } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -58,6 +59,21 @@ export class BaseAgent {
   #formatReasoningLog(reasoning: AgentConfig['reasoning']): string {
     if (!reasoning) return 'standard';
     return `effort=${reasoning.effort}${reasoning.budgetTokens ? `, budget=${reasoning.budgetTokens}` : ''}`;
+  }
+
+  /** Build response format based on provider capabilities */
+  #buildResponseFormat(schema: ZodType): ResponseFormat {
+    if (this.provider.capabilities.structuredOutput === 'json_schema') {
+      const jsonSchema = toJSONSchema(schema);
+      const { $schema: _$schema, ...schemaBody } = jsonSchema as Record<string, unknown>;
+      return {
+        type: 'json_schema',
+        name: this.name.replace(/[^a-zA-Z0-9_-]/g, '_'),
+        schema: schemaBody,
+        strict: true,
+      };
+    }
+    return { type: 'json_object' };
   }
 
   /** Parse JSON content and validate with Zod schema */
@@ -109,10 +125,43 @@ export class BaseAgent {
     schema: ZodType,
     callConfig?: CallConfig,
   ): Promise<AgentCallResult<T>> {
+    const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
+    const responseFormat = this.#buildResponseFormat(schema);
+    const useJsonSchema = responseFormat.type === 'json_schema';
+
+    if (useJsonSchema) {
+      // json_schema mode: single call, API guarantees schema compliance
+      const requestMessages = this.#buildMessages(systemPrompt, userPrompt, imageUrl);
+
+      this.logger.info('调用中...');
+      this.logger.debug(
+        `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, mode=json_schema`,
+      );
+
+      const response = await this.provider.chat({
+        model: callConfig?.model ?? this.config.model,
+        messages: requestMessages,
+        temperature: this.config.temperature ?? 0.3,
+        response_format: responseFormat,
+        reasoning: reasoningParams,
+      });
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(response.content);
+      } catch (e) {
+        this.logger.warn('json_schema 模式解析失败：provider 声明的 schema 保证未兑现，不会重试');
+        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, this.provider.name, 'parse_error');
+      }
+
+      this.logger.info('调用完成');
+      return { result: parsed as T, reasoning: response.reasoning ?? null };
+    }
+
+    // json_object mode: retain existing Zod validation + retry logic
     let lastError: Error | null = null;
     let reasoning: string | null = null;
     const history: ChatMessage[] = [];
-    const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
 
     for (let attempt = 0; attempt < this.#maxRetries; attempt++) {
       try {
@@ -127,7 +176,7 @@ export class BaseAgent {
           model: callConfig?.model ?? this.config.model,
           messages: requestMessages,
           temperature: this.config.temperature ?? 0.3,
-          response_format: { type: 'json_object' },
+          response_format: responseFormat,
           reasoning: reasoningParams,
         });
 
@@ -137,7 +186,6 @@ export class BaseAgent {
         lastError = error as Error;
         this.logger.warn(`第 ${attempt + 1} 次尝试失败: ${lastError.message}${reasoning ? ' (有推理链)' : ''}`);
 
-        // 如果不是最后一次尝试，将错误信息加入对话历史让模型自我修正
         if (attempt < this.#maxRetries - 1) {
           this.#pushErrorHistory(history, userPrompt, imageUrl, lastError.message);
         }
@@ -149,7 +197,7 @@ export class BaseAgent {
 
   /**
    * 流式调用方法：使用 provider.chatStream 逐 chunk 产出，最终返回解析结果。
-   * 与 call() 共享相同的消息构建逻辑，但不含重试（流式重试由调用方决定）。
+   * json_schema 模式下单次调用无重试，json_object 模式保留重试。
    *
    * @returns AsyncGenerator yielding StreamChunk, returning AgentCallResult<T>
    */
@@ -166,6 +214,46 @@ export class BaseAgent {
     }
 
     const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
+    const responseFormat = this.#buildResponseFormat(schema);
+    const useJsonSchema = responseFormat.type === 'json_schema';
+
+    if (useJsonSchema) {
+      // json_schema mode: single stream call, API guarantees schema compliance
+      const requestMessages = this.#buildMessages(systemPrompt, userPrompt, imageUrl);
+
+      this.logger.info('流式调用中...');
+      this.logger.debug(
+        `Calling provider (stream): role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, mode=json_schema`,
+      );
+
+      let reasoning = '';
+      let finalContent = '';
+
+      for await (const chunk of this.provider.chatStream({
+        model: callConfig?.model ?? this.config.model,
+        messages: requestMessages,
+        temperature: this.config.temperature ?? 0.3,
+        response_format: responseFormat,
+        reasoning: reasoningParams,
+      })) {
+        if (chunk.reasoning) reasoning += chunk.reasoning;
+        if (chunk.content) finalContent += chunk.content;
+        yield chunk;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(finalContent);
+      } catch (e) {
+        this.logger.warn('json_schema 模式流式解析失败：provider 声明的 schema 保证未兑现，不会重试');
+        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, this.provider.name, 'parse_error');
+      }
+
+      this.logger.info('流式调用完成');
+      return { result: parsed as T, reasoning: reasoning || null };
+    }
+
+    // json_object mode: retain existing Zod validation + retry logic
     let lastError: Error | null = null;
     const history: ChatMessage[] = [];
 
@@ -189,7 +277,7 @@ export class BaseAgent {
         model: callConfig?.model ?? this.config.model,
         messages: requestMessages,
         temperature: this.config.temperature ?? 0.3,
-        response_format: { type: 'json_object' },
+        response_format: responseFormat,
         reasoning: reasoningParams,
       })) {
         if (chunk.reasoning) reasoning += chunk.reasoning;

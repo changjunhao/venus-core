@@ -42,6 +42,8 @@ graph LR
 - **8 大摄影门类** — 人像、风光、纪实、艺术、商业、建筑、自然、体育
 - **多模型路由** — 支持按智能体选择模型和自定义 LLM 提供商
 - **多提供商推理适配** — 自动适配 Qwen（通义千问）、Kimi（月之暗面）、小米 MiMo、阶跃星辰（StepFun）、MiniMax、豆包（火山方舟）、百度千帆（ERNIE）、智谱（BigModel）、Grok（xAI）、Gemini、DeepSeek 和 OpenRouter 的推理参数
+- **OpenAI Responses API** — 原生 `/v1/responses` 提供商，适用于推理型模型（o 系列、GPT-5），支持严格 JSON Schema 结构化输出
+- **结构化输出双模式** — `json_schema` 提供商单次调用即获得 schema 保证的输出；`json_object` 提供商保留 Zod 校验与自动修复重试
 - **双模式评估 API** — `evaluate()` 同步返回结果，`evaluateStream()` 支持 SSE 流式输出
 - **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时推理 + JSON 增量）
 - **上下文扩展** — 丰富的 `EvaluationContext`，支持 EXIF 元数据、用户备注和自定义数据，按门类智能注入

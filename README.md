@@ -42,6 +42,8 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **8 Photography Genres** — Portrait, Landscape, Documentary, Fine Art, Commercial, Architecture, Nature, Sports
 - **Multi-Model Routing** — Per-agent model selection and per-agent custom LLM providers
 - **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope), Kimi (Moonshot), Xiaomi MIMO, StepFun, MiniMax, Doubao (Volcano Ark), Baidu Qianfan (ERNIE), Zhipu (BigModel), Grok (xAI), Gemini, DeepSeek, and OpenRouter
+- **OpenAI Responses API** — First-class `/v1/responses` provider for reasoning models (o-series, GPT-5) with strict JSON Schema structured output
+- **Structured Output Modes** — `json_schema` providers get single-call schema-guaranteed output; `json_object` providers keep Zod validation with automatic repair retries
 - **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth

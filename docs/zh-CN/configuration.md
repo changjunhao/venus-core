@@ -15,7 +15,7 @@
 | `models` | `ModelConfig` | — | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`） |
 | `providers` | `ProviderConfig` | — | 按智能体自定义提供商实例，未设置时回退到 `provider` |
 | `reasoning` | `ReasoningConfig` | — | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖 |
-| `maxRetries` | `number` | — | 每次智能体 LLM 调用的最大重试次数 |
+| `maxRetries` | `number` | — | 每次智能体 LLM 调用的最大重试次数。仅适用于 `json_object` 结构化输出模式的提供商；声明 `structuredOutput: 'json_schema'` 的提供商单次调用不重试（参见 [API 参考](./api-reference.md#structuredoutput-语义)） |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | 用于可观测性的事件回调 |
 
 ## 推理配置

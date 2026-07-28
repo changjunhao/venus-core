@@ -15,7 +15,7 @@
 | `models` | `ModelConfig` | — | Per-agent model overrides (`genreDetector`, `proposer`, `critic`, `arbiter`, `revision`) |
 | `providers` | `ProviderConfig` | — | Per-agent custom provider instances, falls back to `provider` if not set |
 | `reasoning` | `ReasoningConfig` | — | Reasoning config with global `enabled`/`effort`/`budgetTokens` and per-agent `agents` overrides |
-| `maxRetries` | `number` | — | Max retry attempts per agent LLM call |
+| `maxRetries` | `number` | — | Max retry attempts per agent LLM call. Only applies to providers in `json_object` structured output mode; providers declaring `structuredOutput: 'json_schema'` use a single call without retries (see [API Reference](./api-reference.md#structuredoutput-semantics)) |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | Event callback for observability |
 
 ## Reasoning Configuration

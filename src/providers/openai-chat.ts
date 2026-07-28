@@ -16,7 +16,8 @@
 import OpenAI from 'openai';
 import type { LLMProvider, ChatParams, ChatResponse, StreamChunk } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
-import type { ProviderErrorCode } from '../utils/errors.js';
+import { classifyOpenAIError } from './openai-errors.js';
+import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
 import {
@@ -27,6 +28,8 @@ import {
   extractMiniMaxStreamReasoning,
   extractTokenUsage,
 } from './reasoning.js';
+
+const logger = createLogger('provider:openai-chat');
 
 /** Options for creating an OpenAI Chat provider */
 export interface OpenAIChatProviderOptions {
@@ -81,12 +84,22 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     // and will reject any other value. MIMO also uses its own internal temperature.
     // OpenAI/DeepSeek reasoning models also ignore temperature.
     const skipTemperature =
-      behavior === 'kimi' || behavior === 'mimo' || (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek' || behavior === 'gemini'));
+      behavior === 'kimi' ||
+      behavior === 'mimo' ||
+      (params.reasoning !== undefined && (behavior === 'openai' || behavior === 'deepseek' || behavior === 'gemini'));
     if (params.temperature !== undefined && !skipTemperature) {
       body.temperature = params.temperature;
     }
 
-    if (params.response_format) body.response_format = params.response_format;
+    // Chat Completions: json_schema degrades to json_object.
+    // Schema enforcement is intentionally not applied for now; a future version
+    // may pass json_schema through for endpoints verified to support it.
+    if (params.response_format) {
+      if (params.response_format.type === 'json_schema') {
+        logger.warn(`response_format json_schema 未被 Chat Completions provider 强制执行，已降级为 json_object（schema "${params.response_format.name}" 被忽略）`);
+      }
+      body.response_format = { type: 'json_object' };
+    }
 
     // Adapt reasoning params into endpoint-specific request fields.
     // adaptReasoningParams handles both enable (reasoning configured) and
@@ -115,6 +128,7 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
       reasoning: true,
       reasoningBudget: behavior === 'dashscope' || behavior === 'openrouter',
       streaming: true,
+      structuredOutput: 'json_object',
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
@@ -142,45 +156,7 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
-        if (error instanceof ProviderError) throw error;
-
-        const message = error instanceof Error ? error.message : String(error);
-        const oaiError = error as { status?: number; code?: string; cause?: Error & { code?: string } };
-
-        // Also inspect the cause chain (OpenAI SDK wraps fetch errors in APIConnectionError)
-        const cause = oaiError.cause;
-        const causeCode = cause?.code;
-        const causeMessage = cause?.message ?? '';
-
-        let errorCode: ProviderErrorCode = 'unknown';
-        if (oaiError.status === 401 || oaiError.status === 403) {
-          errorCode = 'auth_error';
-        } else if (
-          oaiError.code === 'ETIMEDOUT' ||
-          oaiError.code === 'ESOCKETTIMEDOUT' ||
-          causeCode === 'ETIMEDOUT' ||
-          causeCode === 'ESOCKETTIMEDOUT' ||
-          message.includes('timeout') ||
-          message.includes('timed out') ||
-          causeMessage.includes('timeout') ||
-          causeMessage.includes('timed out')
-        ) {
-          errorCode = 'timeout';
-        } else if (
-          oaiError.code === 'ECONNREFUSED' ||
-          oaiError.code === 'ENOTFOUND' ||
-          causeCode === 'ECONNREFUSED' ||
-          causeCode === 'ENOTFOUND' ||
-          message.includes('fetch failed') ||
-          causeMessage.includes('fetch failed') ||
-          message.includes('Connection error')
-        ) {
-          errorCode = 'network';
-        } else if (oaiError.status && oaiError.status >= 400) {
-          errorCode = 'api_error';
-        }
-
-        throw new ProviderError(`LLM call failed: ${message}`, provider.name, errorCode, oaiError.status);
+        throw classifyOpenAIError(error, provider.name);
       }
     },
 

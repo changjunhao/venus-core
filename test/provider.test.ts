@@ -460,4 +460,86 @@ describe('Provider Layer', () => {
       expect(capturedBody.thinking_budget).toBeUndefined();
     });
   });
+
+  // ── response_format downgrade (openai-chat: json_schema → json_object) ──
+  describe('response_format downgrade (openai-chat)', () => {
+    afterEach(() => restoreFetch());
+
+    it('should downgrade json_schema to json_object', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: '{"result": true}' });
+      });
+      const provider = createOpenAIChatProvider({
+        baseURL: 'https://mock-format.test/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+        response_format: {
+          type: 'json_schema',
+          name: 'test_schema',
+          schema: { type: 'object', properties: { result: { type: 'boolean' } } },
+          strict: true,
+        },
+      });
+
+      // openai-chat always sends json_object regardless of input type
+      expect(capturedBody.response_format).toEqual({ type: 'json_object' });
+    });
+
+    it('should pass json_object as-is', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: '{"result": true}' });
+      });
+      const provider = createOpenAIChatProvider({
+        baseURL: 'https://mock-format.test/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+        response_format: { type: 'json_object' },
+      });
+
+      expect(capturedBody.response_format).toEqual({ type: 'json_object' });
+    });
+
+    it('should not include response_format when none provided', async () => {
+      let capturedBody: any = null;
+
+      mockFetch(async (_input, init) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return makeChatCompletion({ content: 'ok' });
+      });
+      const provider = createOpenAIChatProvider({
+        baseURL: 'https://mock-format.test/v1',
+        apiKey: 'test-key',
+      });
+
+      await provider.chat({
+        model: 'test',
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+
+      expect(capturedBody.response_format).toBeUndefined();
+    });
+
+    it('should expose structuredOutput=json_object in capabilities', () => {
+      const provider = createOpenAIChatProvider({
+        baseURL: 'https://mock-format.test/v1',
+        apiKey: 'test-key',
+      });
+
+      expect(provider.capabilities.structuredOutput).toBe('json_object');
+    });
+  });
 });

@@ -4,7 +4,7 @@ import { defineProvider } from '../../src/providers/index.js';
 import { createMockProvider } from '../helpers/mock-provider.js';
 import { SchemaError } from '../../src/utils/errors.js';
 import { z } from 'zod';
-import type { LLMProvider } from '../../src/types.js';
+import type { LLMProvider, ChatParams } from '../../src/types.js';
 
 // ── Helpers ──
 
@@ -243,6 +243,221 @@ describe('BaseAgent', () => {
       }
 
       expect(callCount).toBe(3);
+    });
+  });
+
+  // ── json_schema 模式（双模式）──
+  describe('Structured output: json_schema mode', () => {
+    it('should call provider once without retry when structuredOutput is json_schema', async () => {
+      let callCount = 0;
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-provider',
+        capabilities: { vision: true, structuredOutput: 'json_schema' },
+        chat: async () => {
+          callCount++;
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
+
+      const { result } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(callCount).toBe(1);
+      expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
+    });
+
+    it('should pass response_format with json_schema type, name, schema, and strict:true', async () => {
+      let capturedParams: ChatParams | null = null;
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-provider',
+        capabilities: { vision: true, structuredOutput: 'json_schema' },
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('my-agent', jsonSchemaProvider, { model: 'test' });
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(capturedParams).not.toBeNull();
+      expect(capturedParams!.response_format).toBeDefined();
+      expect(capturedParams!.response_format!.type).toBe('json_schema');
+      // Verify json_schema fields
+      const fmt = capturedParams!.response_format as { type: string; name: string; schema: unknown; strict: boolean };
+      expect(fmt.name).toBe('my-agent'); // hyphens preserved by regex
+      expect(fmt.strict).toBe(true);
+      expect(typeof fmt.schema).toBe('object');
+    });
+
+    it('should NOT apply Zod validation in json_schema mode (schema-invalid JSON passes)', async () => {
+      // Return JSON that is parseable but does NOT match testSchema (score is string, comment is number)
+      const invalidSchemaJSON = JSON.stringify({ score: 'not-a-number', comment: 123 });
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-provider',
+        capabilities: { vision: true, structuredOutput: 'json_schema' },
+        chat: async () => {
+          return { content: invalidSchemaJSON, reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
+
+      // In json_schema mode, Zod validation is skipped — so this should NOT throw
+      const { result } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+      expect(result).toEqual({ score: 'not-a-number', comment: 123 });
+    });
+
+    it('should still throw on unparseable JSON in json_schema mode (no retry)', async () => {
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-provider',
+        capabilities: { vision: true, structuredOutput: 'json_schema' },
+        chat: async () => {
+          return { content: 'not valid json', reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
+
+      await expect(agent.call('system', 'user', IMAGE_URL, testSchema)).rejects.toThrow('JSON parse failed');
+    });
+
+    it('callStream should use single stream call without retry in json_schema mode', async () => {
+      let callCount = 0;
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-stream',
+        capabilities: { vision: true, streaming: true, structuredOutput: 'json_schema' },
+        chatStream: async function* (_params) {
+          callCount++;
+          yield { content: '{"score":' };
+          yield { content: '8.5,"comment":"Great shot"}' };
+        },
+        chat: async () => ({ content: VALID_JSON, reasoning: null }),
+      });
+      const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
+
+      const chunks: unknown[] = [];
+      let finalResult: unknown;
+      const gen = agent.callStream('system', 'user', IMAGE_URL, testSchema);
+      while (true) {
+        const { value, done } = await gen.next();
+        if (done) {
+          finalResult = value;
+          break;
+        }
+        chunks.push(value);
+      }
+
+      expect(callCount).toBe(1);
+      expect(chunks.length).toBe(2);
+      expect((finalResult as any).result).toEqual({ score: 8.5, comment: 'Great shot' });
+    });
+
+    it('callStream should pass json_schema response_format to provider', async () => {
+      let capturedParams: ChatParams | null = null;
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-stream',
+        capabilities: { vision: true, streaming: true, structuredOutput: 'json_schema' },
+        chatStream: async function* (params) {
+          capturedParams = params;
+          yield { content: VALID_JSON };
+        },
+        chat: async () => ({ content: VALID_JSON, reasoning: null }),
+      });
+      const agent = new BaseAgent('test-agent', jsonSchemaProvider, { model: 'test' });
+
+      for await (const _ of agent.callStream('system', 'user', IMAGE_URL, testSchema)) {
+        /* drain */
+      }
+
+      expect(capturedParams).not.toBeNull();
+      expect(capturedParams!.response_format!.type).toBe('json_schema');
+      const fmt = capturedParams!.response_format as { type: string; name: string; strict: boolean };
+      expect(fmt.name).toBe('test-agent');
+      expect(fmt.strict).toBe(true);
+    });
+
+    it('callStream should NOT apply Zod validation in json_schema mode', async () => {
+      const invalidSchemaJSON = JSON.stringify({ score: 'wrong', comment: 999 });
+      const jsonSchemaProvider = defineProvider({
+        name: 'json-schema-stream',
+        capabilities: { vision: true, streaming: true, structuredOutput: 'json_schema' },
+        chatStream: async function* () {
+          yield { content: invalidSchemaJSON };
+        },
+        chat: async () => ({ content: VALID_JSON, reasoning: null }),
+      });
+      const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
+
+      let finalResult: unknown;
+      const gen = agent.callStream('system', 'user', IMAGE_URL, testSchema);
+      while (true) {
+        const { value, done } = await gen.next();
+        if (done) {
+          finalResult = value;
+          break;
+        }
+      }
+
+      // Schema-invalid result passes through without Zod throwing
+      expect((finalResult as any).result).toEqual({ score: 'wrong', comment: 999 });
+    });
+  });
+
+  // ── json_object 模式（默认行为确认）──
+  describe('Structured output: json_object mode (default)', () => {
+    it('should pass response_format json_object when structuredOutput is not json_schema', async () => {
+      let capturedParams: ChatParams | null = null;
+      const provider = defineProvider({
+        name: 'json-object-provider',
+        capabilities: { vision: true, structuredOutput: 'json_object' },
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('test', provider, { model: 'test' });
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(capturedParams!.response_format).toEqual({ type: 'json_object' });
+    });
+
+    it('should pass response_format json_object when structuredOutput is undefined', async () => {
+      let capturedParams: ChatParams | null = null;
+      const provider = defineProvider({
+        name: 'default-provider',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('test', provider, { model: 'test' });
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(capturedParams!.response_format).toEqual({ type: 'json_object' });
+    });
+
+    it('should apply Zod validation and retry in json_object mode', async () => {
+      let callCount = 0;
+      const provider = defineProvider({
+        name: 'json-object-provider',
+        capabilities: { vision: true, structuredOutput: 'json_object' },
+        chat: async () => {
+          callCount++;
+          if (callCount === 1) {
+            // Return schema-invalid JSON
+            return { content: JSON.stringify({ score: 'bad', comment: 123 }), reasoning: null };
+          }
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      const agent = new BaseAgent('test', provider, { model: 'test', maxRetries: 3 });
+
+      const { result } = await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      expect(callCount).toBe(2);
+      expect(result).toEqual({ score: 8.5, comment: 'Great shot' });
     });
   });
 

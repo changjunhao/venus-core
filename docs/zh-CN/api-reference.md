@@ -181,9 +181,35 @@ const provider = createOpenAIChatProvider({
 | `defaultExtra` | `Record<string, unknown>` | — | 厂商特定额外参数 |
 | `includeUsage` | `boolean` | `true` | 是否在流式模式下通过 `stream_options.include_usage` 请求 token 用量统计。对于不支持此参数的端点，设置为 `false`。 |
 
+> **关于结构化输出**：此提供商声明 `structuredOutput: 'json_object'`。传入的任何
+> `json_schema` 类型的 `response_format` 都会**降级为 `json_object`**（schema 不会发送
+> 到端点）并输出警告日志。当前有意不做 schema 强制执行；后续版本可能对已验证支持
+> 的端点透传 `json_schema`。如需严格 schema 强制执行，请使用
+> `createOpenAIResponsesProvider`。
+
 ### `createOpenAIResponsesProvider(options: OpenAIResponsesProviderOptions): LLMProvider`
 
-使用 OpenAI Responses API 创建提供商。完整选项参见源码。
+使用 OpenAI Responses API（`/v1/responses`）创建提供商，适用于推理型模型（o 系列、GPT-5）。声明 `structuredOutput: 'json_schema'`，通过 `text.format` 支持严格 JSON Schema 输出。
+
+```ts
+import { createOpenAIResponsesProvider } from '@theogony/venus-core';
+
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_KEY!,
+  defaultModel: 'gpt-5',
+});
+```
+
+| 选项 | 类型 | 默认值 | 说明 |
+|--------|------|---------|-------------|
+| `baseURL` | `string` | *必填* | OpenAI API 基础 URL |
+| `apiKey` | `string` | *必填* | API 密钥 |
+| `defaultModel` | `string` | — | 默认模型标识 |
+| `headers` | `Record<string, string>` | — | 额外 HTTP 头 |
+| `timeout` | `number` | 60000 | 请求超时（毫秒） |
+| `defaultExtra` | `Record<string, unknown>` | — | 提供商特定的默认额外参数 |
+| `includeUsage` | `boolean` | `true` | 是否在流式模式下请求 token 用量统计 |
 
 ### `createAnthropicProvider(options: AnthropicProviderOptions): LLMProvider`
 
@@ -212,8 +238,29 @@ interface ProviderCapabilities {
   reasoningBudget: boolean; // 支持显式 token 预算
   vision: boolean;          // 支持图像输入
   streaming: boolean;       // 支持流式
+  structuredOutput?: 'json_object' | 'json_schema'; // 结构化输出支持（见下文）
 }
 ```
+
+#### `structuredOutput` 语义
+
+`structuredOutput` 能力决定智能体如何请求和校验 JSON 输出：
+
+| 取值 | 智能体行为 |
+|------|-----------|
+| `'json_object'` 或省略 | 请求 `response_format: { type: 'json_object' }`。智能体解析 JSON、用 Zod schema 校验，并在失败时携带修复提示重试最多 `maxRetries` 次；全部失败后抛出 `SchemaError`。 |
+| `'json_schema'` | 智能体从 Zod schema 构建严格 JSON Schema，发送 `response_format: { type: 'json_schema', ... }`，**单次调用 — 不重试、不做本地 Zod 校验**（`maxRetries` 不适用）。schema 合规性完全信任提供商/API。若响应不是合法 JSON，立即抛出 `errorCode: 'parse_error'` 的 `ProviderError`。 |
+
+> **警告**：仅当底层 API 确实保证 schema 合规输出时（如 OpenAI Responses API），才应在
+> 自定义提供商上声明 `structuredOutput: 'json_schema'`。声明后会完全禁用智能体侧的
+> 校验/修复循环。
+
+内置提供商支持情况：
+
+| 提供商 | `structuredOutput` | 说明 |
+|--------|--------------------|------|
+| `createOpenAIChatProvider` | `'json_object'` | `json_schema` response_format 会降级为 `json_object` 并输出警告 |
+| `createOpenAIResponsesProvider` | `'json_schema'` | 通过 `text.format` 支持严格 schema |
 
 ```ts
 import { createVenusEngine, defineProvider, createOpenAIChatProvider } from '@theogony/venus-core';
@@ -272,6 +319,10 @@ const engine = createVenusEngine({
 - `provider: string` — 失败提供商的名称
 - `errorCode: ProviderErrorCode` — 以下之一：`'network' | 'api_error' | 'parse_error' | 'timeout' | 'auth_error' | 'unknown'`
 - `statusCode?: number` — HTTP 状态码（如适用）
+
+OpenAI SDK 抛出的错误（Chat Completions 与 Responses 提供商）现已统一集中分类：
+HTTP 401/403 → `auth_error`，连接超时 → `timeout`，DNS/连接失败 → `network`，
+其他 HTTP ≥ 400 → `api_error`，其余 → `unknown`。
 
 ```ts
 import { ProviderError, ValidationError } from '@theogony/venus-core';

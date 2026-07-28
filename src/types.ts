@@ -41,8 +41,8 @@ export type AgentRole = 'genreDetector' | 'proposer' | 'critic' | 'arbiter' | 'r
 
 // ─── Reasoning Types ─────────────────────────────────────
 
-/** Reasoning effort level (aligned with OpenAI Reasoning API, extended for Volcano Ark) */
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max';
+/** Reasoning effort level (superset of OpenAI Responses API and Chat Completions values) */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 
 /** Per-agent reasoning configuration */
 export interface AgentReasoningConfig {
@@ -66,6 +66,8 @@ export interface ReasoningConfig {
 export interface ChatReasoningParams {
   effort: ReasoningEffort;
   budgetTokens?: number;
+  /** Reasoning summary mode (Responses API only) */
+  summary?: 'auto' | 'concise' | 'detailed';
 }
 
 /** Provider feature capabilities */
@@ -78,6 +80,8 @@ export interface ProviderCapabilities {
   vision: boolean;
   /** Whether the provider supports streaming */
   streaming: boolean;
+  /** Structured output support: 'json_schema' (strict) or 'json_object' (basic) */
+  structuredOutput?: 'json_object' | 'json_schema';
 }
 
 /** Token usage statistics from an LLM call */
@@ -86,6 +90,13 @@ export interface TokenUsage {
   outputTokens: number;
   reasoningTokens?: number;
 }
+
+// ─── Structured Output Types ─────────────────────────────
+
+/** Structured output format specification */
+export type ResponseFormat =
+  | { type: 'json_object' }
+  | { type: 'json_schema'; name: string; schema: Record<string, unknown>; description?: string; strict?: boolean };
 
 // ─── LLM Provider Types ──────────────────────────────────
 
@@ -105,7 +116,7 @@ export interface ChatParams {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
-  response_format?: { type: 'json_object' };
+  response_format?: ResponseFormat;
   /** Reasoning configuration for this call */
   reasoning?: ChatReasoningParams;
   /** Provider-specific extra parameters */
