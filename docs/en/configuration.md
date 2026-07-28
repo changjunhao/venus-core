@@ -65,7 +65,7 @@ The engine automatically adapts reasoning parameters to different provider APIs:
 - **OpenAI**: Uses `reasoning_effort` (minimal/low/medium/high/max)
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
-- **Xiaomi MIMO**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
+- **Xiaomi MiMo**: Chat Completions uses `thinking: { type: "enabled" }` (same format as Kimi); the Responses API endpoint (`https://api.xiaomimimo.com/v1` via `createOpenAIResponsesProvider`) uses nested `reasoning: { effort }` only (`none` disables thinking, minimal→none, max/xhigh→high; `reasoning.summary` is never sent and temperature is managed internally by the model)
 - **Zhipu (BigModel)**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
 - **StepFun**: Uses `reasoning_effort: "low" | "medium" | "high"` (5-level mapped to 3-level: minimal→low, max→high)
 - **MiniMax**: Uses `thinking: { type: "adaptive" }` with `reasoning_split: true`
@@ -90,6 +90,26 @@ const provider = createOpenAIResponsesProvider({
 ```
 
 Ark-specific optional parameters (e.g. `caching`, `service_tier`, `expire_at`) can be passed through via `defaultExtra` (per-provider) or `extra` (per-call). Note that `text.format` structured output (`json_schema`/`json_object`) is currently in beta on Volcano Ark.
+
+### Xiaomi MiMo Responses API
+
+The Responses provider also works with Xiaomi MiMo models (e.g. `mimo-v2.5-pro`) out of the box — endpoint behavior is auto-detected from `baseURL`:
+
+```ts
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://api.xiaomimimo.com/v1',
+  apiKey: process.env.MIMO_API_KEY!,
+});
+```
+
+MiMo specifics handled automatically:
+
+- Thinking is controlled via nested `reasoning: { effort }` (`none`/`low`/`medium`/`high`); `effort: 'none'` is always sent explicitly when reasoning is not configured, so the model never falls back to its thinking-enabled default
+- `temperature` is never sent (MiMo manages it internally), and `reasoning.summary` is never sent (not a documented request parameter)
+- Structured output only supports `json_object` — `json_schema` response formats are automatically degraded to `json_object` with a warning (schema enforcement falls back to the engine-side validation)
+- Streaming reasoning arrives via `response.reasoning_text.delta` events and is surfaced as regular `reasoning` chunks
+
+MiMo also accepts the `api-key` header as an alternative to `Authorization: Bearer`; the SDK's default Bearer auth works as-is, but you can switch via the `headers` option if needed.
 
 ## See Also
 

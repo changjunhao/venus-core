@@ -306,6 +306,48 @@ describe('reasoning', () => {
       });
     });
 
+    describe('mimo behavior', () => {
+      it('returns reasoning effort none when reasoning is undefined (explicit disable)', () => {
+        expect(adaptResponsesReasoningParams(undefined, 'mimo')).toEqual({ reasoning: { effort: 'none' } });
+      });
+
+      it('returns reasoning effort none for none effort', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'none' }, 'mimo')).toEqual({ reasoning: { effort: 'none' } });
+      });
+
+      it('maps minimal effort to none (MiMo 4-level: none/low/medium/high)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'minimal' }, 'mimo')).toEqual({
+          reasoning: { effort: 'none' },
+        });
+      });
+
+      it('passes low/medium/high effort through', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'low' }, 'mimo')).toEqual({ reasoning: { effort: 'low' } });
+        expect(adaptResponsesReasoningParams({ effort: 'medium' }, 'mimo')).toEqual({
+          reasoning: { effort: 'medium' },
+        });
+        expect(adaptResponsesReasoningParams({ effort: 'high' }, 'mimo')).toEqual({ reasoning: { effort: 'high' } });
+      });
+
+      it('maps max effort to high', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'max' }, 'mimo')).toEqual({ reasoning: { effort: 'high' } });
+      });
+
+      it('maps xhigh effort to high', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'xhigh' }, 'mimo')).toEqual({ reasoning: { effort: 'high' } });
+      });
+
+      it('never includes summary (not a documented MiMo request parameter)', () => {
+        const result = adaptResponsesReasoningParams({ effort: 'medium', summary: 'detailed' }, 'mimo');
+        expect(result).toEqual({ reasoning: { effort: 'medium' } });
+      });
+
+      it('never includes the thinking toggle (MiMo uses reasoning.effort only)', () => {
+        expect(adaptResponsesReasoningParams(undefined, 'mimo')).not.toHaveProperty('thinking');
+        expect(adaptResponsesReasoningParams({ effort: 'high' }, 'mimo')).not.toHaveProperty('thinking');
+      });
+    });
+
     describe('openai behavior (default Responses shape)', () => {
       it('returns empty object when reasoning is undefined', () => {
         expect(adaptResponsesReasoningParams(undefined, 'openai')).toEqual({});

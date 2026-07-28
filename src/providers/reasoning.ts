@@ -174,7 +174,7 @@ export function adaptReasoningParams(
  *
  * Unlike `adaptReasoningParams` (Chat Completions field shapes, e.g. top-level
  * `reasoning_effort`), the Responses API nests effort under `reasoning: { effort }`.
- * Currently only Volcano Ark (Doubao) needs endpoint-specific handling; every
+ * Volcano Ark (Doubao) and Xiaomi MiMo need endpoint-specific handling; every
  * other endpoint uses the OpenAI Responses shape.
  *
  * The returned object should be merged into the request body via `Object.assign`.
@@ -193,6 +193,21 @@ export function adaptResponsesReasoningParams(
     return {
       thinking: { type: 'enabled' as const },
       reasoning: { effort: reasoning.effort === 'xhigh' ? 'max' : reasoning.effort },
+    };
+  }
+
+  if (behavior === 'mimo') {
+    // Xiaomi MiMo controls thinking solely via nested `reasoning.effort`
+    // (none/low/medium/high; low/medium/high are currently equivalent).
+    // `effort: 'none'` is always sent explicitly to disable thinking, and
+    // `reasoning.summary` is not a documented request parameter.
+    if (!reasoning || reasoning.effort === 'none' || reasoning.effort === 'minimal') {
+      return { reasoning: { effort: 'none' } };
+    }
+    return {
+      reasoning: {
+        effort: reasoning.effort === 'max' || reasoning.effort === 'xhigh' ? 'high' : reasoning.effort,
+      },
     };
   }
 

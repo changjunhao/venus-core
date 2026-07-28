@@ -7,9 +7,9 @@
  * Uses OpenAI's `/v1/responses` API with `text.format` json_schema
  * for structured output. Supports reasoning-capable models (o-series).
  *
- * Also works with Responses-compatible endpoints such as Volcano Ark (Doubao).
- * Endpoint behavior (reasoning parameter shape) is auto-detected from `baseURL`
- * at construction time via internal `detectEndpointBehavior`.
+ * Also works with Responses-compatible endpoints such as Volcano Ark (Doubao)
+ * and Xiaomi MiMo. Endpoint behavior (reasoning parameter shape) is auto-detected
+ * from `baseURL` at construction time via internal `detectEndpointBehavior`.
  */
 
 import OpenAI from 'openai';
@@ -24,9 +24,12 @@ import type {
 } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
 import { classifyOpenAIError } from './openai-errors.js';
+import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
 import { adaptResponsesReasoningParams, detectEndpointBehavior } from './reasoning.js';
+
+const logger = createLogger('provider:openai-responses');
 
 /** Options for creating an OpenAI Responses provider */
 export interface OpenAIResponsesProviderOptions {
@@ -82,7 +85,7 @@ export function extractResponsesTokenUsage(response: unknown): TokenUsage | unde
  * Extract reasoning text from Responses API output items.
  * Reasoning items have `type: "reasoning"` with a `summary` array
  * (OpenAI; also Volcano Ark digest) and/or a `content` array of
- * `reasoning_text` items (Volcano Ark raw chain-of-thought).
+ * `reasoning_text` items (Volcano Ark / Xiaomi MiMo raw chain-of-thought).
  */
 export function extractResponsesReasoning(output: unknown[]): string | null {
   if (!Array.isArray(output)) return null;
@@ -205,25 +208,32 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
     // Temperature — reasoning models (o-series / GPT-5) reject it on the
     // Responses API, so skip it whenever reasoning is configured. Volcano Ark
     // accepts temperature alongside thinking (models ignore it instead of rejecting).
-    const skipTemperature = params.reasoning !== undefined && behavior !== 'volcanoark';
+    // MIMO always uses its own internal temperature (same as the Chat provider).
+    const skipTemperature = behavior === 'mimo' || (params.reasoning !== undefined && behavior !== 'volcanoark');
     if (params.temperature !== undefined && !skipTemperature) {
       body.temperature = params.temperature;
     }
 
-    // Structured output via text.format
+    // Structured output via text.format.
+    // MiMo only supports json_object; json_schema degrades with a warning
+    // (schema enforcement falls back to the engine-side zod validation).
     if (params.response_format) {
-      if (params.response_format.type === 'json_schema') {
+      if (params.response_format.type === 'json_schema' && behavior !== 'mimo') {
         const { name, schema, description, strict } = params.response_format;
         const format: Record<string, unknown> = { type: 'json_schema', name, schema, strict: strict ?? true };
         if (description) format.description = description;
         body.text = { format };
       } else {
+        if (params.response_format.type === 'json_schema') {
+          logger.warn(`response_format json_schema 未被 MiMo Responses API 支持，已降级为 json_object（schema "${params.response_format.name}" 被忽略）`);
+        }
         body.text = { format: { type: 'json_object' } };
       }
     }
 
     // Reasoning configuration — endpoint-specific Responses API shape
-    // (OpenAI: reasoning.effort/summary; Volcano Ark: thinking.type + reasoning.effort)
+    // (OpenAI: reasoning.effort/summary; Volcano Ark: thinking.type + reasoning.effort;
+    // MiMo: reasoning.effort only, 'none' disables thinking)
     Object.assign(body, adaptResponsesReasoningParams(params.reasoning, behavior));
 
     // Merge defaultExtra and per-call extra (per-call takes priority)
@@ -242,7 +252,8 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
       reasoning: true,
       reasoningBudget: false,
       streaming: true,
-      structuredOutput: 'json_schema',
+      // MiMo's text.format only supports json_object (no json_schema enforcement)
+      structuredOutput: behavior === 'mimo' ? 'json_object' : 'json_schema',
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
@@ -325,6 +336,12 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
             }
           } else if (eventType === 'response.reasoning_summary_text.delta') {
             // Reasoning summary delta (streamed reasoning)
+            const delta = typeof evt.delta === 'string' ? evt.delta : '';
+            if (delta) {
+              yield { reasoning: delta };
+            }
+          } else if (eventType === 'response.reasoning_text.delta') {
+            // Raw chain-of-thought delta (Xiaomi MiMo; OpenAI gpt-oss variants)
             const delta = typeof evt.delta === 'string' ? evt.delta : '';
             if (delta) {
               yield { reasoning: delta };

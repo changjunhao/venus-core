@@ -65,7 +65,7 @@ const engine = createVenusEngine({
 - **OpenAI**：使用 `reasoning_effort`（minimal/low/medium/high/max）
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
-- **小米 MiMo**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
+- **小米 MiMo**：Chat Completions 使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）；Responses API 端点（通过 `createOpenAIResponsesProvider` 配合 `https://api.xiaomimimo.com/v1`）仅使用嵌套 `reasoning: { effort }`（`none` 关闭思考，minimal→none，max/xhigh→high；不会发送 `reasoning.summary`，temperature 由模型内部管理）
 - **智谱（BigModel）**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
 - **阶跃星辰（StepFun）**：使用 `reasoning_effort: "low" | "medium" | "high"`（五级映射为三级：minimal→low，max→high）
 - **MiniMax**：使用 `thinking: { type: "adaptive" }` 并强制 `reasoning_split: true`
@@ -90,6 +90,26 @@ const provider = createOpenAIResponsesProvider({
 ```
 
 火山特有的可选参数（如 `caching`、`service_tier`、`expire_at`）可通过 `defaultExtra`（provider 级）或 `extra`（单次调用级）透传。注意：火山方舟的 `text.format` 结构化输出（`json_schema`/`json_object`）目前处于 beta 阶段。
+
+### 小米 MiMo Responses API
+
+Responses provider 同样可直接对接小米 MiMo 模型（如 `mimo-v2.5-pro`）——端点行为从 `baseURL` 自动检测：
+
+```ts
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://api.xiaomimimo.com/v1',
+  apiKey: process.env.MIMO_API_KEY!,
+});
+```
+
+自动处理的 MiMo 特性：
+
+- 思考通过嵌套 `reasoning: { effort }` 控制（`none`/`low`/`medium`/`high`）；未配置推理时始终显式发送 `effort: 'none'`，避免模型回退到默认开启思考
+- 不会发送 `temperature`（MiMo 由模型内部管理），也不会发送 `reasoning.summary`（非文档化请求参数）
+- 结构化输出仅支持 `json_object` —— `json_schema` 响应格式会自动降级为 `json_object` 并输出警告（schema 约束回退到引擎侧校验）
+- 流式推理通过 `response.reasoning_text.delta` 事件输出，会作为常规 `reasoning` 块透出
+
+MiMo 还支持 `api-key` 请求头作为 `Authorization: Bearer` 的替代认证方式；SDK 默认的 Bearer 认证开箱即用，如有需要可通过 `headers` 选项切换。
 
 ## 参见
 

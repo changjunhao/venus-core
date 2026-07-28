@@ -566,6 +566,175 @@ describe('OpenAI Responses Provider', () => {
     });
   });
 
+  // ═════════════════════════════════════════════════════════════════════
+  // Xiaomi MiMo endpoint behavior
+  // ═════════════════════════════════════════════════════════════════════
+  describe('Xiaomi MiMo (mimo) behavior', () => {
+    function makeMimoProvider(overrides: Record<string, unknown> = {}) {
+      return createOpenAIResponsesProvider({
+        baseURL: 'https://api.xiaomimimo.com/v1',
+        apiKey: 'test-key',
+        ...overrides,
+      });
+    }
+
+    it('sends nested reasoning.effort without summary or thinking toggle when reasoning is configured', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'medium', summary: 'detailed' },
+      });
+
+      const body = lastRequestBody();
+      expect(body.reasoning).toEqual({ effort: 'medium' });
+      expect(body.thinking).toBeUndefined();
+    });
+
+    it('sends reasoning effort none when reasoning is not configured (explicit disable)', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({ model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'hi' }] });
+
+      const body = lastRequestBody();
+      expect(body.reasoning).toEqual({ effort: 'none' });
+      expect(body.thinking).toBeUndefined();
+    });
+
+    it('maps minimal effort to none', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'minimal' },
+      });
+
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'none' });
+    });
+
+    it('maps max and xhigh effort to high', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'xhigh' },
+      });
+
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'high' });
+    });
+
+    it('never sends temperature even without reasoning (MiMo manages temperature internally)', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.3,
+      });
+
+      expect(lastRequestBody().temperature).toBeUndefined();
+    });
+
+    it('never sends temperature when reasoning is configured', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.3,
+        reasoning: { effort: 'medium' },
+      });
+
+      expect(lastRequestBody().temperature).toBeUndefined();
+    });
+
+    it('degrades json_schema response_format to json_object', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        response_format: {
+          type: 'json_schema',
+          name: 'score',
+          schema: { type: 'object' },
+          strict: true,
+        },
+      });
+
+      expect(lastRequestBody().text).toEqual({ format: { type: 'json_object' } });
+    });
+
+    it('passes json_object response_format through', async () => {
+      const provider = makeMimoProvider();
+      await provider.chat({
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user', content: 'hi' }],
+        response_format: { type: 'json_object' },
+      });
+
+      expect(lastRequestBody().text).toEqual({ format: { type: 'json_object' } });
+    });
+
+    it('reports json_object structured output capability (json_schema elsewhere)', () => {
+      expect(makeMimoProvider().capabilities.structuredOutput).toBe('json_object');
+      expect(makeProvider().capabilities.structuredOutput).toBe('json_schema');
+    });
+
+    it('extracts reasoning from reasoning_text content items in non-stream responses', async () => {
+      mockFetch(async () =>
+        makeNonStreamResponse('{"score":9}', {
+          output: [
+            { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'mimo chain of thought' }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '{"score":9}' }] },
+          ],
+        }),
+      );
+
+      const provider = makeMimoProvider();
+      const result = await provider.chat({ model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'hi' }] });
+
+      expect(result.content).toBe('{"score":9}');
+      expect(result.reasoning).toBe('mimo chain of thought');
+    });
+
+    it('parses MiMo streaming events (reasoning_text delta, text delta, completed usage)', async () => {
+      mockParserInstance.getValue.mockReturnValue(undefined);
+
+      // Event shapes taken from the official MiMo Responses streaming events doc
+      mockFetch(async () =>
+        makeSSEResponse([
+          { type: 'response.created', response: { id: 'resp_1', object: 'response' }, sequence_number: 0 },
+          { type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning' }, sequence_number: 1 },
+          { type: 'response.reasoning_text.delta', delta: 'thinking...', content_index: 0, sequence_number: 2 },
+          { type: 'response.reasoning_text.done', text: 'thinking...', content_index: 0, sequence_number: 3 },
+          { type: 'response.output_text.delta', delta: '{"score":9}', content_index: 0, sequence_number: 4 },
+          {
+            type: 'response.completed',
+            response: {
+              usage: {
+                input_tokens: 57,
+                output_tokens: 46,
+                total_tokens: 103,
+                output_tokens_details: { reasoning_tokens: 12 },
+              },
+            },
+            sequence_number: 5,
+          },
+        ]),
+      );
+
+      const provider = makeMimoProvider();
+      const result = await collectStream(provider, {
+        model: 'mimo-v2.5-pro',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        reasoning: { effort: 'medium' },
+      });
+
+      expect(result).toEqual([
+        { reasoning: 'thinking...' },
+        { content: '{"score":9}' },
+        { usage: { inputTokens: 57, outputTokens: 46, reasoningTokens: 12 } },
+      ]);
+    });
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // classifyError
   // ═══════════════════════════════════════════════════════════════════════════
@@ -791,6 +960,20 @@ describe('OpenAI Responses Provider', () => {
       const result = await collectStream(provider);
 
       expect(result).toEqual([{ reasoning: 'thinking...' }, { reasoning: 'done' }]);
+    });
+
+    it('yields { reasoning } for reasoning_text.delta events (raw chain-of-thought)', async () => {
+      mockFetch(async () =>
+        makeSSEResponse([
+          { type: 'response.reasoning_text.delta', delta: 'raw thought ' },
+          { type: 'response.reasoning_text.delta', delta: 'continues' },
+        ]),
+      );
+
+      const provider = makeProvider();
+      const result = await collectStream(provider);
+
+      expect(result).toEqual([{ reasoning: 'raw thought ' }, { reasoning: 'continues' }]);
     });
 
     it('throws ProviderError on response.error event and calls destroy', async () => {
