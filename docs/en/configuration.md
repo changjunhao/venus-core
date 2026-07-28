@@ -72,7 +72,7 @@ The engine automatically adapts reasoning parameters to different provider APIs:
 - **Doubao (Volcano Ark)**: Chat Completions uses `thinking.type` toggle + `reasoning_effort`; the Responses API endpoint (`https://ark.cn-beijing.volces.com/api/v3` via `createOpenAIResponsesProvider`) uses `thinking.type` + nested `reasoning: { effort }` (minimal→thinking disabled, xhigh→max; `reasoning.summary` is never sent)
 - **Baidu Qianfan (ERNIE)**: Uses `enable_thinking: true`
 - **Grok (xAI)**: Uses `reasoning_effort` (none/low/medium/high; 5-level mapped: minimal→none, max→high)
-- **Gemini**: Uses `reasoning_effort` (same as OpenAI, internally mapped to thinking_level/thinking_budget)
+- **Gemini**: OpenAI-compatible endpoint uses `reasoning_effort` (same as OpenAI, internally mapped to thinking_level/thinking_budget); the native `createGeminiProvider` (Interactions API) maps effort directly to `generation_config.thinking_level` (none/minimal→minimal, high/max/xhigh→high) with `thinking_summaries: "auto"`
 - **DeepSeek**: Uses `reasoning_effort` + `thinking: { type: "enabled" }`
 - **OpenRouter**: Uses `reasoning: { effort, max_tokens, enabled: true }`
 

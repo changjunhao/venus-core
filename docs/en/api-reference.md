@@ -218,7 +218,27 @@ Create a provider for Anthropic's Claude models via the Messages API.
 
 ### `createGeminiProvider(options: GeminiProviderOptions): LLMProvider`
 
-Create a provider for Google's Gemini models via the Generative Language API.
+Create a provider for Google's Gemini models backed by the `@google/genai` Interactions API. Declares `structuredOutput: 'json_schema'` and enforces strict JSON Schema output via `response_format`. Requires Gemini 2.5+ / 3.x series models.
+
+Public image URLs are passed to the API directly as `{ type: 'image', uri }` blocks (no client-side download); `data:` URLs are converted to inline base64 image blocks. Reasoning effort maps to `generation_config.thinking_level` (`none`/`minimal` → `minimal`, `high`/`max`/`xhigh` → `high`) with thought summaries surfaced as reasoning content; `budgetTokens` is not supported by the Interactions API and is ignored.
+
+```ts
+import { createGeminiProvider } from '@theogony/venus-core';
+
+const provider = createGeminiProvider({
+  apiKey: process.env.GEMINI_API_KEY!,
+  defaultModel: 'gemini-3-flash-preview',
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `apiKey` | `string` | *required* | Gemini API key |
+| `defaultModel` | `string` | — | Default model identifier |
+| `baseURL` | `string` | `https://generativelanguage.googleapis.com` | API base URL override |
+| `timeout` | `number` | 60000 | Request timeout in milliseconds |
+| `headers` | `Record<string, string>` | — | Extra HTTP headers |
+| `defaultExtra` | `Record<string, unknown>` | — | Provider-specific default extra parameters |
 
 ### `defineProvider(options: DefineProviderOptions): LLMProvider`
 

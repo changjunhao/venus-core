@@ -64,14 +64,14 @@
   },
   "dependencies": {
     "openai": "^7.0.0",
+    "@google/genai": "^2.13.0",
     "zod": "^4.4.3",
     "vectorjson": "^0.5.1"
   },
   "peerDependencies": {
     "hono": "^4.12.32",
     "express": "^5.2.1",
-    "@anthropic-ai/sdk": "^0.115.0",
-    "@google/genai": "^2.13.0"
+    "@anthropic-ai/sdk": "^0.115.0"
   },
   "peerDependenciesMeta": {
     "hono": {
@@ -81,9 +81,6 @@
       "optional": true
     },
     "@anthropic-ai/sdk": {
-      "optional": true
-    },
-    "@google/genai": {
       "optional": true
     }
   },

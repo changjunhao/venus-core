@@ -217,7 +217,27 @@ const provider = createOpenAIResponsesProvider({
 
 ### `createGeminiProvider(options: GeminiProviderOptions): LLMProvider`
 
-为 Google Gemini 模型创建提供商，通过 Generative Language API 调用。
+为 Google Gemini 模型创建提供商，基于 `@google/genai` 的 Interactions API 实现。声明 `structuredOutput: 'json_schema'`，通过 `response_format` 强制执行严格 JSON Schema 输出。需使用 Gemini 2.5+ / 3.x 系列模型。
+
+公网图片 URL 会以 `{ type: 'image', uri }` 块直接透传给 API（无需客户端下载）；`data:` URL 会转换为内联 base64 图片块。推理努力级别映射到 `generation_config.thinking_level`（`none`/`minimal` → `minimal`，`high`/`max`/`xhigh` → `high`），思考摘要作为推理内容返回；`budgetTokens` 不被 Interactions API 支持，会被忽略。
+
+```ts
+import { createGeminiProvider } from '@theogony/venus-core';
+
+const provider = createGeminiProvider({
+  apiKey: process.env.GEMINI_API_KEY!,
+  defaultModel: 'gemini-3-flash-preview',
+});
+```
+
+| 选项 | 类型 | 默认值 | 说明 |
+|--------|------|---------|-------------|
+| `apiKey` | `string` | *必填* | Gemini API 密钥 |
+| `defaultModel` | `string` | — | 默认模型标识符 |
+| `baseURL` | `string` | `https://generativelanguage.googleapis.com` | API 基础 URL 覆盖 |
+| `timeout` | `number` | 60000 | 请求超时（毫秒） |
+| `headers` | `Record<string, string>` | — | 额外 HTTP 请求头 |
+| `defaultExtra` | `Record<string, unknown>` | — | 提供商特定的默认额外参数 |
 
 ### `defineProvider(options: DefineProviderOptions): LLMProvider`
 

@@ -72,7 +72,7 @@ const engine = createVenusEngine({
 - **豆包（火山方舟）**：Chat Completions 使用 `thinking.type` 开关 + `reasoning_effort`；Responses API 端点（通过 `createOpenAIResponsesProvider` 配合 `https://ark.cn-beijing.volces.com/api/v3`）使用 `thinking.type` + 嵌套 `reasoning: { effort }`（minimal→关闭思考，xhigh→max；不会发送 `reasoning.summary`）
 - **百度千帆（ERNIE）**：使用 `enable_thinking: true`
 - **Grok（xAI）**：使用 `reasoning_effort`（none/low/medium/high；五级映射：minimal→none，max→high）
-- **Gemini**：使用 `reasoning_effort`（与 OpenAI 相同，内部映射为 thinking_level/thinking_budget）
+- **Gemini**：OpenAI 兼容端点使用 `reasoning_effort`（与 OpenAI 相同，内部映射为 thinking_level/thinking_budget）；原生 `createGeminiProvider`（Interactions API）将努力级别直接映射为 `generation_config.thinking_level`（none/minimal→minimal，high/max/xhigh→high）并设置 `thinking_summaries: "auto"`
 - **DeepSeek**：使用 `reasoning_effort` + `thinking: { type: "enabled" }`
 - **OpenRouter**：使用 `reasoning: { effort, max_tokens, enabled: true }`
 
