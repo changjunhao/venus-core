@@ -33,9 +33,6 @@
  * - Zhipu GLM models default to thinking ENABLED as well, so `thinking: { type: 'disabled' }`
  *   is sent explicitly when reasoning is not configured; when configured, thinking is
  *   enabled WITHOUT `budget_tokens` (GLM has no tunable thinking budget).
- * - Zhipu does not document `output_config.format`, so json_schema degrades to
- *   prompt-driven JSON (capability reported as 'json_object' — the engine keeps
- *   its zod validation + retry safety net).
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -51,13 +48,10 @@ import type {
 } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
 import type { ProviderErrorCode } from '../utils/errors.js';
-import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
 import { detectEndpointBehavior, getDefaultBudget } from './reasoning.js';
 import type { EndpointBehavior } from './reasoning.js';
-
-const logger = createLogger('provider:anthropic');
 
 const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 const DEFAULT_MAX_TOKENS = 4096;
@@ -155,14 +149,12 @@ const DASHSCOPE_UNSUPPORTED_SCHEMA_KEYWORDS = new Set(['multipleOf']);
  * still enforces the stripped constraints.
  */
 export function sanitizeDashScopeSchema(schema: Record<string, unknown>): Record<string, unknown> {
-  let removed = 0;
   const walk = (node: unknown, isNameMap: boolean): unknown => {
     if (Array.isArray(node)) return node.map((item) => walk(item, false));
     if (node === null || typeof node !== 'object') return node;
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node)) {
       if (!isNameMap && DASHSCOPE_UNSUPPORTED_SCHEMA_KEYWORDS.has(key)) {
-        removed++;
         continue;
       }
       // Values under these keywords map property/definition names to sub-schemas;
@@ -173,11 +165,7 @@ export function sanitizeDashScopeSchema(schema: Record<string, unknown>): Record
     }
     return result;
   };
-  const sanitized = walk(schema, false) as Record<string, unknown>;
-  if (removed > 0) {
-    logger.debug(`已从 json_schema 中移除 ${removed} 个 DashScope 不支持的关键字（multipleOf），约束仍由引擎侧 zod 校验兜底`);
-  }
-  return sanitized;
+  return walk(schema, false) as Record<string, unknown>;
 }
 
 /**
@@ -360,21 +348,16 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
       body.temperature = params.temperature;
     }
 
-    // Structured output via output_config.format (strict JSON schema, server-enforced).
-    // All Anthropic-compatible endpoints (official, DashScope, Zhipu) use the same
-    // json_schema format; json_object degrades to prompt-driven JSON (no format sent).
-    // DashScope validates the schema against a narrower JSON Schema subset, so
-    // unsupported keywords are stripped before sending.
-    if (params.response_format) {
-      if (params.response_format.type === 'json_schema') {
-        const schema =
-          behavior === 'dashscope'
-            ? sanitizeDashScopeSchema(params.response_format.schema)
-            : params.response_format.schema;
-        body.output_config = { format: { type: 'json_schema', schema } };
-      } else {
-        logger.debug('response_format json_object 无对应 Messages API format，已降级为提示词驱动 JSON');
-      }
+    // Structured output via output_config.format (strict JSON schema, server-enforced);
+    // json_object degrades to prompt-driven JSON (no format sent). DashScope validates
+    // the schema against a narrower JSON Schema subset, so unsupported keywords are
+    // stripped before sending.
+    if (params.response_format?.type === 'json_schema') {
+      const schema =
+        behavior === 'dashscope'
+          ? sanitizeDashScopeSchema(params.response_format.schema)
+          : params.response_format.schema;
+      body.output_config = { format: { type: 'json_schema', schema } };
     }
 
     if (stream) {

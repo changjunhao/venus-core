@@ -266,13 +266,8 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
 
         const resp = response as unknown as Record<string, unknown>;
 
-        // Extract content: use output_text convenience field
         const content = typeof resp.output_text === 'string' ? resp.output_text : '';
-
-        // Extract reasoning from output items
         const reasoning = extractResponsesReasoning(resp.output as unknown[]);
-
-        // Extract token usage
         const usage = extractResponsesTokenUsage(response);
 
         const result: ChatResponse = {

@@ -184,7 +184,6 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
 
           const message = delta as unknown as Record<string, unknown>;
 
-          // Yield reasoning chunks
           if (behavior === 'minimax') {
             // MiniMax uses cumulative reasoning_details; compute delta
             const mmReasoning = extractMiniMaxStreamReasoning(message, miniMaxReasoningLen);

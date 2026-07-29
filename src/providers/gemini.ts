@@ -20,11 +20,8 @@ import { GoogleGenAI, type Interactions } from '@google/genai';
 import type { LLMProvider, ChatParams, ChatResponse, StreamChunk, ChatMessage, ReasoningEffort, TokenUsage } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
 import type { ProviderErrorCode } from '../utils/errors.js';
-import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
-
-const logger = createLogger('provider:gemini');
 
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com';
 
@@ -273,9 +270,6 @@ export function createGeminiProvider(options: GeminiProviderOptions): LLMProvide
     if (params.reasoning) {
       generationConfig.thinking_level = mapThinkingLevel(params.reasoning.effort);
       generationConfig.thinking_summaries = 'auto';
-      if (params.reasoning.budgetTokens) {
-        logger.debug('budgetTokens 不被 Interactions API 支持（仅 thinking_level），已忽略');
-      }
     }
     if (Object.keys(generationConfig).length > 0) {
       body.generation_config = generationConfig;

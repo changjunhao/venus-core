@@ -5,7 +5,7 @@
  * Venus Core - Providers
  */
 
-// ─── New provider factories ─────────────────────────────────
+// ─── Provider factories ─────────────────────────────────────
 export { createOpenAIChatProvider } from './openai-chat.js';
 export type { OpenAIChatProviderOptions } from './openai-chat.js';
 
