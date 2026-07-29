@@ -266,6 +266,75 @@ describe('OpenAI-Chat chatStream()', () => {
     expect(mockParserInstance.destroy).toHaveBeenCalledTimes(1);
   });
 
+  // ─── Test 10b: parser.destroy() is called even when the stream errors mid-way ───
+  it('should call parser.destroy() when the stream errors mid-way', async () => {
+    const streamError = new Error('connection reset');
+    mockParserInstance.getValue.mockReturnValue(undefined);
+    mockCreate.mockResolvedValueOnce(asyncIterableWithError([makeStreamChunk({ content: 'partial' })], streamError));
+
+    const provider = makeProvider();
+
+    await expect(collectStream(provider)).rejects.toBeInstanceOf(ProviderError);
+    expect(mockParserInstance.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Test 10c: parser.destroy() is called when the consumer stops early ───
+  it('should call parser.destroy() when the consumer terminates the stream early', async () => {
+    const streamChunks = [makeStreamChunk({ content: 'a' }), makeStreamChunk({ content: 'b' })];
+    mockParserInstance.getValue.mockReturnValue(undefined);
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
+
+    const provider = makeProvider();
+    const stream = provider.chatStream!({
+      model: 'test-model',
+      messages: [{ role: 'user' as const, content: 'hi' }],
+    });
+    const iterator = stream[Symbol.asyncIterator]();
+    await iterator.next(); // consume the first chunk only
+    await iterator.return?.(undefined); // early termination (e.g. client disconnect)
+
+    expect(mockParserInstance.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── Test 10d: initial request failure is classified like chat() ───
+  it('should classify initial request auth failure as auth_error with LLM call failed prefix', async () => {
+    const authError = Object.assign(new Error('Incorrect API key provided'), { status: 401 });
+    mockCreate.mockRejectedValueOnce(authError);
+
+    const provider = makeProvider();
+
+    try {
+      await collectStream(provider);
+      expect(true).toBe(false); // should not reach here
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProviderError);
+      const pe = err as ProviderError;
+      expect(pe.message).toContain('LLM call failed');
+      expect(pe.errorCode).toBe('auth_error');
+      expect(pe.statusCode).toBe(401);
+    }
+  });
+
+  // ─── Test 10e: initial request network failure is classified as network ───
+  it('should classify initial request network failure as network error', async () => {
+    const networkError = Object.assign(new Error('Connection error.'), {
+      cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+    });
+    mockCreate.mockRejectedValueOnce(networkError);
+
+    const provider = makeProvider();
+
+    try {
+      await collectStream(provider);
+      expect(true).toBe(false); // should not reach here
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProviderError);
+      const pe = err as ProviderError;
+      expect(pe.message).toContain('LLM call failed');
+      expect(pe.errorCode).toBe('network');
+    }
+  });
+
   // ─── Test 11: stream_options.include_usage is passed in streaming request ───
   it('should include stream_options with include_usage in the request body', async () => {
     const streamChunks = [makeStreamChunk({ content: 'hello' })];

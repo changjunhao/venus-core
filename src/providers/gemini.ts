@@ -19,9 +19,10 @@
 import { GoogleGenAI, type Interactions } from '@google/genai';
 import type { LLMProvider, ChatParams, ChatResponse, StreamChunk, ChatMessage, ReasoningEffort, TokenUsage } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
-import type { ProviderErrorCode } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
+import { classifyProviderError } from './provider-errors.js';
+import { makeContentChunk } from './stream-utils.js';
 
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com';
 
@@ -176,48 +177,6 @@ function extractModelOutputText(steps: unknown): string {
   return parts.join('');
 }
 
-/** Classify a `@google/genai` SDK error into a ProviderError with a fine-grained error code */
-function classifyGeminiError(error: unknown, providerName: string): ProviderError {
-  if (error instanceof ProviderError) return error;
-
-  const message = error instanceof Error ? error.message : String(error);
-  const apiError = error as { status?: number; code?: string; cause?: Error & { code?: string } };
-
-  const cause = apiError.cause;
-  const causeCode = cause?.code;
-  const causeMessage = cause?.message ?? '';
-
-  let errorCode: ProviderErrorCode = 'unknown';
-  if (apiError.status === 401 || apiError.status === 403) {
-    errorCode = 'auth_error';
-  } else if (
-    apiError.code === 'ETIMEDOUT' ||
-    apiError.code === 'ESOCKETTIMEDOUT' ||
-    causeCode === 'ETIMEDOUT' ||
-    causeCode === 'ESOCKETTIMEDOUT' ||
-    message.includes('timeout') ||
-    message.includes('timed out') ||
-    causeMessage.includes('timeout') ||
-    causeMessage.includes('timed out')
-  ) {
-    errorCode = 'timeout';
-  } else if (
-    apiError.code === 'ECONNREFUSED' ||
-    apiError.code === 'ENOTFOUND' ||
-    causeCode === 'ECONNREFUSED' ||
-    causeCode === 'ENOTFOUND' ||
-    message.includes('fetch failed') ||
-    causeMessage.includes('fetch failed') ||
-    message.includes('Connection error')
-  ) {
-    errorCode = 'network';
-  } else if (apiError.status && apiError.status >= 400) {
-    errorCode = 'api_error';
-  }
-
-  return new ProviderError(`LLM call failed: ${message}`, providerName, errorCode, apiError.status);
-}
-
 /**
  * Create a Google Gemini provider backed by the `@google/genai` Interactions API.
  *
@@ -284,20 +243,6 @@ export function createGeminiProvider(options: GeminiProviderOptions): LLMProvide
     return body;
   }
 
-  /** Feed a text delta to the incremental JSON parser and build the stream chunk */
-  function makeContentChunk(parser: ReturnType<typeof createParser>, text: string): StreamChunk {
-    parser.feed(text);
-    try {
-      const partial = parser.getValue();
-      if (partial !== undefined) {
-        return { content: text, partial: partial as Record<string, unknown> };
-      }
-      return { content: text };
-    } catch {
-      return { content: text };
-    }
-  }
-
   const provider = defineProvider({
     name: `gemini(${options.baseURL ?? DEFAULT_GEMINI_BASE_URL})`,
     capabilities: {
@@ -341,7 +286,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): LLMProvide
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
-        throw classifyGeminiError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
     },
 
@@ -355,7 +300,7 @@ export function createGeminiProvider(options: GeminiProviderOptions): LLMProvide
           stream: true,
         } as unknown as Interactions.CreateModelInteractionParamsStreaming)) as unknown as AsyncIterable<Interactions.InteractionSSEEvent>;
       } catch (error) {
-        throw classifyGeminiError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
 
       const parser = createParser();

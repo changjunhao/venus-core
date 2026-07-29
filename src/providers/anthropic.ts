@@ -47,9 +47,10 @@ import type {
   TokenUsage,
 } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
-import type { ProviderErrorCode } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
+import { classifyProviderError } from './provider-errors.js';
+import { makeContentChunk } from './stream-utils.js';
 import { detectEndpointBehavior, getDefaultBudget } from './reasoning.js';
 import type { EndpointBehavior } from './reasoning.js';
 
@@ -169,6 +170,14 @@ export function sanitizeDashScopeSchema(schema: Record<string, unknown>): Record
 }
 
 /**
+ * Single source of truth for tunable thinking budget support:
+ * Zhipu GLM has no tunable thinking budget (`budget_tokens` is not accepted).
+ */
+function supportsThinkingBudget(behavior: EndpointBehavior): boolean {
+  return behavior !== 'zhipu';
+}
+
+/**
  * Map Venus reasoning params into an Anthropic extended-thinking config.
  * Returns the `thinking` config (when enabled) plus the resolved token budget.
  * Reasoning is disabled when not configured or effort is 'none': for the official
@@ -193,7 +202,7 @@ export function mapThinking(
   }
   const requested = reasoning.budgetTokens ?? getDefaultBudget(reasoning.effort as ReasoningEffort);
   const budget = Math.max(MIN_THINKING_BUDGET, requested);
-  if (behavior === 'zhipu') {
+  if (!supportsThinkingBudget(behavior)) {
     return { thinking: { type: 'enabled' }, budget };
   }
   return { thinking: { type: 'enabled', budget_tokens: budget }, budget };
@@ -256,48 +265,6 @@ export function extractAnthropicUsage(usage: unknown): TokenUsage | undefined {
   const result: TokenUsage = { inputTokens, outputTokens };
   if (reasoningTokens !== undefined) result.reasoningTokens = reasoningTokens;
   return result;
-}
-
-/** Classify an `@anthropic-ai/sdk` error into a ProviderError with a fine-grained error code */
-function classifyAnthropicError(error: unknown, providerName: string): ProviderError {
-  if (error instanceof ProviderError) return error;
-
-  const message = error instanceof Error ? error.message : String(error);
-  const apiError = error as { status?: number; code?: string; cause?: Error & { code?: string } };
-
-  const cause = apiError.cause;
-  const causeCode = cause?.code;
-  const causeMessage = cause?.message ?? '';
-
-  let errorCode: ProviderErrorCode = 'unknown';
-  if (apiError.status === 401 || apiError.status === 403) {
-    errorCode = 'auth_error';
-  } else if (
-    apiError.code === 'ETIMEDOUT' ||
-    apiError.code === 'ESOCKETTIMEDOUT' ||
-    causeCode === 'ETIMEDOUT' ||
-    causeCode === 'ESOCKETTIMEDOUT' ||
-    message.includes('timeout') ||
-    message.includes('timed out') ||
-    causeMessage.includes('timeout') ||
-    causeMessage.includes('timed out')
-  ) {
-    errorCode = 'timeout';
-  } else if (
-    apiError.code === 'ECONNREFUSED' ||
-    apiError.code === 'ENOTFOUND' ||
-    causeCode === 'ECONNREFUSED' ||
-    causeCode === 'ENOTFOUND' ||
-    message.includes('fetch failed') ||
-    causeMessage.includes('fetch failed') ||
-    message.includes('Connection error')
-  ) {
-    errorCode = 'network';
-  } else if (apiError.status && apiError.status >= 400) {
-    errorCode = 'api_error';
-  }
-
-  return new ProviderError(`LLM call failed: ${message}`, providerName, errorCode, apiError.status);
 }
 
 /**
@@ -375,27 +342,13 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
     return body;
   }
 
-  /** Feed a text delta to the incremental JSON parser and build the stream chunk */
-  function makeContentChunk(parser: ReturnType<typeof createParser>, text: string): StreamChunk {
-    parser.feed(text);
-    try {
-      const partial = parser.getValue();
-      if (partial !== undefined) {
-        return { content: text, partial: partial as Record<string, unknown> };
-      }
-      return { content: text };
-    } catch {
-      return { content: text };
-    }
-  }
-
   const provider = defineProvider({
     name: `anthropic(${options.baseURL ?? DEFAULT_ANTHROPIC_BASE_URL})`,
     capabilities: {
       vision: true,
       reasoning: true,
-      // Extended thinking exposes a tunable token budget (not supported by Zhipu GLM).
-      reasoningBudget: behavior !== 'zhipu',
+      // Extended thinking exposes a tunable token budget (see supportsThinkingBudget).
+      reasoningBudget: supportsThinkingBudget(behavior),
       streaming: true,
       // Strict JSON schema enforced server-side via output_config.format.
       structuredOutput: 'json_schema',
@@ -428,7 +381,7 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
-        throw classifyAnthropicError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
     },
 
@@ -441,7 +394,7 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
           requestBody as unknown as Anthropic.MessageCreateParamsStreaming,
         )) as unknown as AsyncIterable<Anthropic.RawMessageStreamEvent>;
       } catch (error) {
-        throw classifyAnthropicError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
 
       const parser = createParser();

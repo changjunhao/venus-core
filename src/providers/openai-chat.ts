@@ -16,10 +16,11 @@
 import OpenAI from 'openai';
 import type { LLMProvider, ChatParams, ChatResponse, StreamChunk } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
-import { classifyOpenAIError } from './openai-errors.js';
+import { classifyProviderError } from './provider-errors.js';
 import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
+import { makeContentChunk } from './stream-utils.js';
 import {
   adaptReasoningParams,
   detectEndpointBehavior,
@@ -156,22 +157,27 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
-        throw classifyOpenAIError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
     },
 
     async *chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
+      // Classify initial request failures (network / timeout / auth) like chat()
+      let completion: AsyncIterable<OpenAI.ChatCompletionChunk>;
       try {
         const requestBody = buildRequestBody(params, true);
-
-        const completion = await client.chat.completions.create(
+        completion = await client.chat.completions.create(
           requestBody as unknown as OpenAI.ChatCompletionCreateParamsStreaming,
         );
+      } catch (error) {
+        throw classifyProviderError(error, provider.name);
+      }
 
-        const parser = createParser();
-        // MiniMax streaming reasoning: track cumulative text length for delta computation
-        let miniMaxReasoningLen = 0;
+      const parser = createParser();
+      // MiniMax streaming reasoning: track cumulative text length for delta computation
+      let miniMaxReasoningLen = 0;
 
+      try {
         for await (const chunk of completion) {
           // Extract token usage from the final chunk (enabled by stream_options.include_usage)
           const chunkUsage = extractTokenUsage(chunk);
@@ -200,26 +206,16 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
 
           // Yield content and incremental JSON partials
           if (typeof message.content === 'string') {
-            parser.feed(message.content);
-            try {
-              const partial = parser.getValue();
-              if (partial !== undefined) {
-                yield { content: message.content, partial: partial as Record<string, unknown> };
-              } else {
-                yield { content: message.content };
-              }
-            } catch {
-              yield { content: message.content };
-            }
+            yield makeContentChunk(parser, message.content);
           }
         }
-
-        parser.destroy();
       } catch (error) {
         if (error instanceof ProviderError) throw error;
 
         const message = error instanceof Error ? error.message : String(error);
         throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
+      } finally {
+        parser.destroy();
       }
     },
   });

@@ -23,10 +23,11 @@ import type {
   ChatContentPart,
 } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
-import { classifyOpenAIError } from './openai-errors.js';
+import { classifyProviderError } from './provider-errors.js';
 import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
+import { makeContentChunk } from './stream-utils.js';
 import { adaptResponsesReasoningParams, detectEndpointBehavior } from './reasoning.js';
 
 const logger = createLogger('provider:openai-responses');
@@ -187,6 +188,10 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
   // Auto-detect endpoint behavior from baseURL (internal — not exposed to consumers)
   const behavior = detectEndpointBehavior(options.baseURL);
 
+  // Single source of truth for structured output support:
+  // MiMo's text.format only supports json_object (no json_schema enforcement)
+  const structuredOutput = behavior === 'mimo' ? 'json_object' : 'json_schema';
+
   /** Build common request body for Responses API */
   function buildRequestBody(params: ChatParams, stream?: boolean): Record<string, unknown> {
     const { instructions, input } = convertMessages(params.messages);
@@ -215,10 +220,11 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
     }
 
     // Structured output via text.format.
-    // MiMo only supports json_object; json_schema degrades with a warning
-    // (schema enforcement falls back to the engine-side zod validation).
+    // When the endpoint lacks json_schema support (see `structuredOutput` above),
+    // json_schema degrades with a warning (schema enforcement falls back to the
+    // engine-side zod validation).
     if (params.response_format) {
-      if (params.response_format.type === 'json_schema' && behavior !== 'mimo') {
+      if (params.response_format.type === 'json_schema' && structuredOutput === 'json_schema') {
         const { name, schema, description, strict } = params.response_format;
         const format: Record<string, unknown> = { type: 'json_schema', name, schema, strict: strict ?? true };
         if (description) format.description = description;
@@ -252,8 +258,7 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
       reasoning: true,
       reasoningBudget: false,
       streaming: true,
-      // MiMo's text.format only supports json_object (no json_schema enforcement)
-      structuredOutput: behavior === 'mimo' ? 'json_object' : 'json_schema',
+      structuredOutput,
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
@@ -278,21 +283,20 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
-        throw classifyOpenAIError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
     },
 
     async *chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
-      const requestBody = buildRequestBody(params, true);
-
       // Classify initial request failures (network / timeout / auth) like chat()
       let stream: AsyncIterable<unknown>;
       try {
+        const requestBody = buildRequestBody(params, true);
         stream = await client.responses.create(
           requestBody as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
         );
       } catch (error) {
-        throw classifyOpenAIError(error, provider.name);
+        throw classifyProviderError(error, provider.name);
       }
 
       const parser = createParser();
@@ -317,17 +321,7 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
           if (eventType === 'response.output_text.delta') {
             const delta = typeof evt.delta === 'string' ? evt.delta : '';
             if (delta) {
-              parser.feed(delta);
-              try {
-                const partial = parser.getValue();
-                if (partial !== undefined) {
-                  yield { content: delta, partial: partial as Record<string, unknown> };
-                } else {
-                  yield { content: delta };
-                }
-              } catch {
-                yield { content: delta };
-              }
+              yield makeContentChunk(parser, delta);
             }
           } else if (eventType === 'response.reasoning_summary_text.delta') {
             // Reasoning summary delta (streamed reasoning)
