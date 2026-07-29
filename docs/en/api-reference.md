@@ -214,7 +214,28 @@ const provider = createOpenAIResponsesProvider({
 
 ### `createAnthropicProvider(options: AnthropicProviderOptions): LLMProvider`
 
-Create a provider for Anthropic's Claude models via the Messages API.
+Create a provider for Anthropic's Claude models backed by the `@anthropic-ai/sdk` Messages API (`client.messages.create`). Declares `structuredOutput: 'json_schema'` and enforces strict JSON Schema output server-side via `output_config.format`.
+
+The first system/developer message is lifted into the top-level `system` parameter (the Messages API has no `system` role); remaining turns map to `user`/`assistant`. Public image URLs are passed directly as `{ type: 'image', source: { type: 'url' } }` blocks (no client-side download); `data:` URLs become inline base64 image sources. Reasoning effort maps to extended thinking (`thinking: { type: 'enabled', budget_tokens }`, budget clamped to ≥ 1024 and derived from `budgetTokens` or the effort level); thinking blocks are surfaced as `reasoning` content and `usage.output_tokens_details.thinking_tokens` is reported as `reasoningTokens`. When thinking is enabled, `temperature` is omitted (the API requires it to be 1). The Messages API requires `max_tokens`; it is sourced from `extra.max_tokens`, then `defaultMaxTokens`, defaulting to 4096, and automatically raised above the thinking budget.
+
+```ts
+import { createAnthropicProvider } from '@theogony/venus-core';
+
+const provider = createAnthropicProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  defaultModel: 'claude-sonnet-4-5',
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `apiKey` | `string` | *required* | Anthropic API key |
+| `defaultModel` | `string` | — | Default model identifier |
+| `baseURL` | `string` | `https://api.anthropic.com` | API base URL override |
+| `timeout` | `number` | 60000 | Request timeout in milliseconds |
+| `headers` | `Record<string, string>` | — | Extra HTTP headers |
+| `defaultExtra` | `Record<string, unknown>` | — | Provider-specific default extra parameters |
+| `defaultMaxTokens` | `number` | 4096 | Default `max_tokens` when not supplied via `extra.max_tokens` |
 
 ### `createGeminiProvider(options: GeminiProviderOptions): LLMProvider`
 
