@@ -7,43 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-29
+
 ### Added
 
+- **Anthropic provider implemented**: `createAnthropicProvider` is no longer an
+  experimental skeleton — full `messages.create` support with non-streaming and
+  streaming modes, strict `json_schema` structured output via `output_config`,
+  image URL / data-URL blocks, and extended thinking mapped from reasoning
+  effort with thinking blocks surfaced as reasoning content.
+- **Gemini provider implemented**: `createGeminiProvider` is no longer an
+  experimental skeleton — full `interactions.create` support with non-streaming
+  and streaming modes, strict `json_schema` structured output, image URL /
+  data-URL blocks, and `thinking_level` mapping with thought summaries surfaced
+  as reasoning content.
+- **Volcano Ark (Doubao) Responses API support**: new
+  `adaptResponsesReasoningParams` maps reasoning to Ark's `thinking.type` +
+  nested `reasoning.effort` shape (`minimal`/`none` → disabled, `max` → `xhigh`,
+  `summary` never sent); other endpoints keep the OpenAI shape.
+  `createOpenAIResponsesProvider` detects endpoint behavior from `baseURL`,
+  keeps `temperature` for Ark alongside reasoning, and extracts raw
+  chain-of-thought from `reasoning_text` content items in addition to summaries.
+  `adaptReasoningParams` explicitly disables thinking for Ark when reasoning is
+  not configured (Ark defaults to enabled).
+- **Xiaomi MiMo Responses API support**: nested `reasoning.effort` only, with
+  explicit `effort: 'none'` to disable (`minimal`→`none`, `max`/`xhigh`→`high`,
+  `summary` never sent); `temperature` is always skipped (managed internally by
+  the model); `json_schema` is downgraded to `json_object` with a warning and
+  the `structuredOutput` capability reports accordingly; streaming handles
+  `response.reasoning_text.delta` events (raw chain-of-thought).
 - **`CallConfig.provider` per-call provider override**: `providers.revision` in
   `VenusEngineConfig` now actually routes the revision round to its own
   provider. When not configured, the revision round keeps using the proposer's
   provider (unchanged behavior).
-- **Zhipu (BigModel) Anthropic-compatible endpoint support**:
-  `createAnthropicProvider` now branches on the auto-detected `zhipu` behavior
-  (e.g. `https://open.bigmodel.cn/api/anthropic`). GLM models default to
+- **Anthropic-compatible endpoint support (DashScope / Zhipu)**:
+  `createAnthropicProvider` now auto-detects endpoint behavior from `baseURL`
+  (e.g. `https://dashscope.aliyuncs.com/apps/anthropic`,
+  `https://open.bigmodel.cn/api/anthropic`); the official Anthropic request path
+  stays byte-for-byte unchanged. Models on both endpoints may default to
   thinking enabled, so `thinking: { type: 'disabled' }` is sent explicitly when
-  reasoning is not configured (with `temperature` still forwarded); when
-  reasoning is configured, `thinking: { type: 'enabled' }` is sent without
-  `budget_tokens` (GLM has no tunable thinking budget) while `max_tokens` still
-  grows by the resolved budget. Structured output keeps strict `json_schema`
-  via `output_config.format` (enforced server-side by GLM series).
-- **DashScope Anthropic-compatible endpoint support**: `createAnthropicProvider`
-  now auto-detects endpoint behavior from `baseURL` (e.g.
-  `https://dashscope.aliyuncs.com/apps/anthropic`). For DashScope,
-  `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not
-  configured (some qwen models default to thinking enabled), with `temperature`
-  still forwarded; the official Anthropic request path is byte-for-byte
-  unchanged. Structured output keeps the `json_schema` strategy: JSON Schema
-  keywords rejected by DashScope's validator (e.g. `multipleOf`) are stripped
-  client-side via `sanitizeDashScopeSchema` before sending (qwen series
+  reasoning is not configured, with `temperature` still forwarded. Structured
+  output keeps strict `json_schema` via `output_config.format` (qwen series
   guarantees valid JSON server-side; deepseek/glm series enforce the schema
-  strictly).
+  strictly). Endpoint-specific handling:
+  - Zhipu: `thinking: { type: 'enabled' }` is sent without `budget_tokens`
+    (GLM has no tunable thinking budget) while `max_tokens` still grows by the
+    resolved budget.
+  - DashScope: JSON Schema keywords rejected by DashScope's validator (e.g.
+    `multipleOf`) are stripped client-side via `sanitizeDashScopeSchema` before
+    sending.
 - Endpoint host table now recognizes `dashscope-us.aliyuncs.com` and
   workspace-dedicated `{WorkspaceId}.<region>.maas.aliyuncs.com` domains as
   `dashscope` behavior.
 
 ### Changed
 
-- **Shared provider error classification**: the classifier previously in
-  `providers/openai-errors.ts` (`classifyOpenAIError`) moved to
-  `providers/provider-errors.ts` (`classifyProviderError`) and is now applied
-  by all built-in providers (OpenAI Chat / Responses, Anthropic, Gemini) for
-  both `chat()` and the initial request phase of `chatStream()`.
+- **`@anthropic-ai/sdk` and `@google/genai` moved from optional peer
+  dependencies to regular dependencies**, now that the Anthropic and Gemini
+  providers are fully implemented. Installing `@theogony/venus-core` pulls both
+  SDKs in automatically; remove any manual peer installs.
+- **Unified provider error classification**: the shared classifier
+  (`classifyProviderError`, moved out of `providers/openai-errors.ts`) is now
+  applied by all built-in providers — OpenAI Chat / Responses, Anthropic, and
+  Gemini.
 - **`chatStream()` initial request error classification** (behavior change):
   initial request failures (network / timeout / auth) are now classified via
   `ProviderError.errorCode` the same way as `chat()` — HTTP 401/403 →
@@ -60,7 +86,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emits the same observability events as `evaluate()` (`round_start`,
   `agent_call`, `agent_complete`, `round_complete`, `error`) alongside the
   yielded `EvaluationStreamEvent` stream. Previously `onEvent` was only
-  invoked by the non-streaming path.
+  invoked by the non-streaming path. Listener exceptions never break the
+  evaluation pipeline.
+- The incremental JSON parser backing `result_chunk` events is now always
+  released on mid-stream errors and early stream termination.
+
+### Security
+
+- **Prompt-injection hardening for caller-supplied context** (CWE-77):
+  `userNotes`, `custom` metadata, and EXIF string fields are sanitized before
+  prompt injection — control characters stripped, lengths capped, and user
+  content wrapped in `<user_notes>` / `<custom_metadata>` tags preceded by an
+  untrusted-data notice instructing the model to ignore any embedded
+  instructions.
+- **SSRF guard on `imageUrl`** (CWE-918): adapter request validation now
+  rejects `http`/`https` URLs targeting private or reserved hosts (loopback,
+  RFC 1918, link-local, cloud metadata, IPv6 ULA). Vendor-specific schemes
+  (`data:`, `oss:`, `gs:`, `cos:`, …) pass through untouched. Local
+  development setups serving images from `localhost` must now use a
+  publicly-resolvable host or a non-HTTP scheme.
 
 ## [0.11.0] - 2026-07-28
 
