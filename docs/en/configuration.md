@@ -66,7 +66,7 @@ The engine automatically adapts reasoning parameters to different provider APIs:
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
 - **Xiaomi MiMo**: Chat Completions uses `thinking: { type: "enabled" }` (same format as Kimi); the Responses API endpoint (`https://api.xiaomimimo.com/v1` via `createOpenAIResponsesProvider`) uses nested `reasoning: { effort }` only (`none` disables thinking, minimal→none, max/xhigh→high; `reasoning.summary` is never sent and temperature is managed internally by the model)
-- **Zhipu (BigModel)**: Uses `thinking: { type: "enabled" }` (same format as Kimi)
+- **Zhipu (BigModel)**: Uses `thinking: { type: "enabled" }` (same format as Kimi); the Anthropic-compatible endpoint (`https://open.bigmodel.cn/api/anthropic` via `createAnthropicProvider`) is auto-detected as well, and `budget_tokens` is never sent when thinking is enabled (GLM has no tunable thinking budget)
 - **StepFun**: Uses `reasoning_effort: "low" | "medium" | "high"` (5-level mapped to 3-level: minimal→low, max→high)
 - **MiniMax**: Uses `thinking: { type: "adaptive" }` with `reasoning_split: true`
 - **Doubao (Volcano Ark)**: Chat Completions uses `thinking.type` toggle + `reasoning_effort`; the Responses API endpoint (`https://ark.cn-beijing.volces.com/api/v3` via `createOpenAIResponsesProvider`) uses `thinking.type` + nested `reasoning: { effort }` (minimal→thinking disabled, xhigh→max; `reasoning.summary` is never sent)
@@ -128,8 +128,28 @@ Set `baseURL` up to `/apps/anthropic` (do not end with `/v1/`). Besides the Beij
 DashScope specifics handled automatically:
 
 - `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (some qwen models default to thinking enabled), with `temperature` forwarded as usual; when reasoning is configured the behavior matches the official API (`thinking: { type: 'enabled', budget_tokens }`, `temperature` omitted)
-- Structured output is sent via `output_config.format` json_schema as usual. Note that enforcement varies by model: deepseek/glm series enforce the schema strictly server-side; qwen series degrade to plain JSON mode (valid JSON only, and the prompt must contain the word "json" — Venus's built-in agent prompts satisfy this). Prefer deepseek/glm series for schema-sensitive scenarios
+- Structured output degrades to prompt-driven JSON — the provider reports `structuredOutput: 'json_object'`, so schema enforcement falls back to the engine-side zod validation + `maxRetries` retries. DashScope's qwen series `output_config.format` json_schema only guarantees valid JSON (no strict field type enforcement), so the zod+retry path is chosen for reliability. For strict server-side schema enforcement, use deepseek/glm series models (via the official Anthropic provider or the DashScope OpenAI Chat provider with deepseek models)
 - Authentication uses the SDK's default `x-api-key` header (pass your Model Studio API key); streaming events match the official Messages API
+
+### Zhipu (BigModel) Anthropic-Compatible Endpoint
+
+The Anthropic provider also works with Zhipu's Claude-compatible API out of the box — endpoint behavior is auto-detected from `baseURL`:
+
+```ts
+const provider = createAnthropicProvider({
+  baseURL: 'https://open.bigmodel.cn/api/anthropic',
+  apiKey: process.env.ZHIPU_API_KEY!,
+  defaultModel: 'glm-4.6',
+});
+```
+
+Set `baseURL` up to `/api/anthropic` (do not end with `/v1/`).
+
+Zhipu specifics handled automatically:
+
+- `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (GLM models default to thinking enabled, some even force it), with `temperature` forwarded as usual; when reasoning is configured, `thinking: { type: 'enabled' }` is sent without `budget_tokens` (GLM has no tunable thinking budget, `temperature` omitted), and `max_tokens` still grows by the effort's budget to leave room for thinking
+- Structured output degrades to prompt-driven JSON (Zhipu's compatible endpoint does not document `output_config.format`) — the provider reports `structuredOutput: 'json_object'`, so schema enforcement falls back to the engine-side zod validation + `maxRetries` retries
+- Authentication uses the SDK's default `x-api-key` header (pass your Zhipu API key); streaming events match the official Messages API
 
 ## See Also
 

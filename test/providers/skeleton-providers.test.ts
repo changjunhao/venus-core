@@ -477,7 +477,7 @@ describe('Skeleton Providers', () => {
         return makeAnthropicProvider({ baseURL: DASHSCOPE_BASE_URL, defaultModel: 'qwen3.7-plus', ...overrides });
       }
 
-      it('should keep json_schema structured output capability', () => {
+      it('should keep json_schema structured output capability for DashScope', () => {
         const provider = makeDashScopeProvider();
         expect(provider.name).toBe(`anthropic(${DASHSCOPE_BASE_URL})`);
         expect(provider.capabilities.structuredOutput).toBe('json_schema');
@@ -539,7 +539,7 @@ describe('Skeleton Providers', () => {
         expect(capturedBody.temperature).toBeUndefined();
       });
 
-      it('should send output_config.format json_schema unchanged', async () => {
+      it('should send output_config.format json_schema for DashScope (plain JSON mode)', async () => {
         let capturedBody: any = null;
         mockFetch(async (input: any, init: any) => {
           capturedBody = await readRequestBody(input, init);
@@ -561,6 +561,103 @@ describe('Skeleton Providers', () => {
         expect(capturedBody.output_config).toEqual({
           format: { type: 'json_schema', schema: { type: 'object', properties: { score: { type: 'number' } } } },
         });
+      });
+    });
+
+    describe('Zhipu Anthropic-compatible endpoint (behavior=zhipu)', () => {
+      const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/anthropic';
+
+      function makeZhipuProvider(overrides: Record<string, unknown> = {}) {
+        return makeAnthropicProvider({ baseURL: ZHIPU_BASE_URL, defaultModel: 'glm-4.6', ...overrides });
+      }
+
+      it('should degrade structured output capability to json_object and drop reasoningBudget', () => {
+        const provider = makeZhipuProvider();
+        expect(provider.name).toBe(`anthropic(${ZHIPU_BASE_URL})`);
+        expect(provider.capabilities.structuredOutput).toBe('json_object');
+        expect(provider.capabilities.reasoningBudget).toBe(false);
+      });
+
+      it('should send thinking disabled explicitly and forward temperature when reasoning is not configured', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeZhipuProvider();
+        await provider.chat({
+          model: 'glm-4.6',
+          messages: [{ role: 'user', content: 'hi' }],
+          temperature: 0.3,
+        });
+
+        // GLM models default to thinking enabled — disable explicitly
+        expect(capturedBody.thinking).toEqual({ type: 'disabled' });
+        // temperature is compatible with thinking disabled
+        expect(capturedBody.temperature).toBe(0.3);
+      });
+
+      it('should send thinking disabled for effort none', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeZhipuProvider();
+        await provider.chat({
+          model: 'glm-4.6',
+          messages: [{ role: 'user', content: 'hi' }],
+          reasoning: { effort: 'none' },
+        });
+
+        expect(capturedBody.thinking).toEqual({ type: 'disabled' });
+      });
+
+      it('should enable thinking without budget_tokens, grow max_tokens and omit temperature', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeZhipuProvider();
+        await provider.chat({
+          model: 'glm-4.6',
+          messages: [{ role: 'user', content: 'hi' }],
+          temperature: 0.3,
+          reasoning: { effort: 'medium' },
+        });
+
+        // GLM has no tunable thinking budget — only the toggle is sent
+        expect(capturedBody.thinking).toEqual({ type: 'enabled' });
+        expect(capturedBody.thinking.budget_tokens).toBeUndefined();
+        // max_tokens still reserves room for thinking (8192 budget + 4096 reserve)
+        expect(capturedBody.max_tokens).toBe(12288);
+        expect(capturedBody.temperature).toBeUndefined();
+      });
+
+      it('should not send output_config for json_schema (degrades to prompt-driven JSON)', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeZhipuProvider();
+        await provider.chat({
+          model: 'glm-4.6',
+          messages: [{ role: 'user', content: 'Output JSON.' }],
+          response_format: {
+            type: 'json_schema',
+            name: 'test_schema',
+            schema: { type: 'object', properties: { score: { type: 'number' } } },
+            strict: true,
+          },
+        });
+
+        expect(capturedBody.output_config).toBeUndefined();
       });
     });
 
@@ -590,6 +687,28 @@ describe('Skeleton Providers', () => {
       it('clamps dashscope thinking budget to the 1024 minimum', () => {
         expect(mapThinking({ effort: 'minimal' }, 'dashscope')).toEqual({
           thinking: { type: 'enabled', budget_tokens: 1024 },
+          budget: 1024,
+        });
+      });
+
+      it('returns thinking disabled for undefined reasoning on zhipu', () => {
+        expect(mapThinking(undefined, 'zhipu')).toEqual({ thinking: { type: 'disabled' }, budget: 0 });
+      });
+
+      it('returns thinking disabled for effort none on zhipu', () => {
+        expect(mapThinking({ effort: 'none' }, 'zhipu')).toEqual({ thinking: { type: 'disabled' }, budget: 0 });
+      });
+
+      it('returns thinking enabled without budget_tokens on zhipu', () => {
+        expect(mapThinking({ effort: 'medium' }, 'zhipu')).toEqual({
+          thinking: { type: 'enabled' },
+          budget: 8192,
+        });
+      });
+
+      it('clamps zhipu resolved budget to the 1024 minimum (max_tokens sizing only)', () => {
+        expect(mapThinking({ effort: 'minimal' }, 'zhipu')).toEqual({
+          thinking: { type: 'enabled' },
           budget: 1024,
         });
       });

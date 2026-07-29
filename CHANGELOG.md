@@ -9,14 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Zhipu (BigModel) Anthropic-compatible endpoint support**:
+  `createAnthropicProvider` now branches on the auto-detected `zhipu` behavior
+  (e.g. `https://open.bigmodel.cn/api/anthropic`). GLM models default to
+  thinking enabled, so `thinking: { type: 'disabled' }` is sent explicitly when
+  reasoning is not configured (with `temperature` still forwarded); when
+  reasoning is configured, `thinking: { type: 'enabled' }` is sent without
+  `budget_tokens` (GLM has no tunable thinking budget) while `max_tokens` still
+  grows by the resolved budget. Structured output degrades to prompt-driven
+  JSON (`structuredOutput: 'json_object'`, engine-side zod validation +
+  retries) since `output_config.format` is not documented by Zhipu.
 - **DashScope Anthropic-compatible endpoint support**: `createAnthropicProvider`
   now auto-detects endpoint behavior from `baseURL` (e.g.
   `https://dashscope.aliyuncs.com/apps/anthropic`). For DashScope,
   `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not
   configured (some qwen models default to thinking enabled), with `temperature`
   still forwarded; the official Anthropic request path is byte-for-byte
-  unchanged. `output_config.format` json_schema is sent as-is (strictly enforced
-  for deepseek/glm series; plain JSON mode for qwen series).
+  unchanged. Structured output degrades to prompt-driven JSON
+  (`structuredOutput: 'json_object'`, engine-side zod validation + retries)
+  since qwen series `output_config.format` json_schema only guarantees valid
+  JSON without strict schema enforcement.
 - Endpoint host table now recognizes `dashscope-us.aliyuncs.com` and
   workspace-dedicated `{WorkspaceId}.<region>.maas.aliyuncs.com` domains as
   `dashscope` behavior.

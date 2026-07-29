@@ -66,7 +66,7 @@ const engine = createVenusEngine({
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
 - **小米 MiMo**：Chat Completions 使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）；Responses API 端点（通过 `createOpenAIResponsesProvider` 配合 `https://api.xiaomimimo.com/v1`）仅使用嵌套 `reasoning: { effort }`（`none` 关闭思考，minimal→none，max/xhigh→high；不会发送 `reasoning.summary`，temperature 由模型内部管理）
-- **智谱（BigModel）**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）
+- **智谱（BigModel）**：使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）；Anthropic 兼容端点（通过 `createAnthropicProvider` 配合 `https://open.bigmodel.cn/api/anthropic`）同样自动检测，启用思考时不发送 `budget_tokens`（GLM 无思考预算）
 - **阶跃星辰（StepFun）**：使用 `reasoning_effort: "low" | "medium" | "high"`（五级映射为三级：minimal→low，max→high）
 - **MiniMax**：使用 `thinking: { type: "adaptive" }` 并强制 `reasoning_split: true`
 - **豆包（火山方舟）**：Chat Completions 使用 `thinking.type` 开关 + `reasoning_effort`；Responses API 端点（通过 `createOpenAIResponsesProvider` 配合 `https://ark.cn-beijing.volces.com/api/v3`）使用 `thinking.type` + 嵌套 `reasoning: { effort }`（minimal→关闭思考，xhigh→max；不会发送 `reasoning.summary`）
@@ -128,8 +128,28 @@ const provider = createAnthropicProvider({
 自动处理的 DashScope 特性：
 
 - 未配置推理时显式发送 `thinking: { type: 'disabled' }`（部分 qwen 模型默认开启思考），此时 `temperature` 照常转发；配置推理时与官方一致（`thinking: { type: 'enabled', budget_tokens }`，省略 `temperature`）
-- 结构化输出照常通过 `output_config.format` json_schema 发送。注意支持力度因模型而异：deepseek/glm 系列服务端严格强约束；qwen 系列为普通 JSON 模式（仅保证输出合法 JSON，且要求提示词包含 "json" 关键词——Venus 内置 agent 提示词已满足）。对 schema 约束敏感的场景建议选用 deepseek/glm 系列模型
+- 结构化输出降级为提示词驱动 JSON——provider 声明 `structuredOutput: 'json_object'`，schema 约束回退到引擎侧 zod 校验 + `maxRetries` 重试。qwen 系列的 `output_config.format` json_schema 仅保证输出合法 JSON（不严格约束字段类型），因此为避免字段偏差时无 zod 兜底的问题，选择走更稳的重试路径。若需服务端严格 schema 约束，建议使用 deepseek/glm 系列模型（可通过官方 Anthropic provider 或 DashScope OpenAI Chat provider 搭配 deepseek 模型实现）
 - 认证使用 SDK 默认的 `x-api-key` 请求头（传入百炼 API Key 即可）；流式事件与官方 Messages API 一致
+
+### 智谱（BigModel）Anthropic 兼容端点
+
+Anthropic provider 同样可直接对接智谱的 Claude 兼容 API——端点行为从 `baseURL` 自动检测：
+
+```ts
+const provider = createAnthropicProvider({
+  baseURL: 'https://open.bigmodel.cn/api/anthropic',
+  apiKey: process.env.ZHIPU_API_KEY!,
+  defaultModel: 'glm-4.6',
+});
+```
+
+`baseURL` 填写到 `/api/anthropic` 为止（不要以 `/v1/` 结尾）。
+
+自动处理的智谱特性：
+
+- 未配置推理时显式发送 `thinking: { type: 'disabled' }`（GLM 系列默认开启思考，部分型号强制思考），此时 `temperature` 照常转发；配置推理时发送 `thinking: { type: 'enabled' }`（GLM 不支持思考预算，不发送 `budget_tokens`，`temperature` 省略），`max_tokens` 仍按 effort 对应的预算扩容以为思考留出空间
+- 结构化输出降级为提示词驱动 JSON（智谱兼容端点未文档化支持 `output_config.format`）——provider 声明 `structuredOutput: 'json_object'`，schema 约束回退到引擎侧 zod 校验 + `maxRetries` 重试
+- 认证使用 SDK 默认的 `x-api-key` 请求头（传入智谱 API Key 即可）；流式事件与官方 Messages API 一致
 
 ## 参见
 

@@ -19,13 +19,20 @@
  * - Structured output via `output_config.format` with a strict JSON schema.
  *
  * Also works with Anthropic-compatible endpoints such as Alibaba Cloud DashScope
- * (Model Studio, `.../apps/anthropic`). Endpoint behavior is auto-detected from
- * `baseURL` at construction time via internal `detectEndpointBehavior`:
+ * (Model Studio, `.../apps/anthropic`) and Zhipu BigModel (`.../api/anthropic`).
+ * Endpoint behavior is auto-detected from `baseURL` at construction time via
+ * internal `detectEndpointBehavior`:
  * - DashScope models may default to thinking ENABLED, so `thinking: { type: 'disabled' }`
  *   is sent explicitly when reasoning is not configured.
  * - `output_config.format` json_schema is strictly enforced only for deepseek/glm
  *   series; qwen series degrades to plain JSON mode (valid JSON only) and requires
  *   the word "json" in system/messages — all Venus agent prompts satisfy this.
+ * - Zhipu GLM models default to thinking ENABLED as well, so `thinking: { type: 'disabled' }`
+ *   is sent explicitly when reasoning is not configured; when configured, thinking is
+ *   enabled WITHOUT `budget_tokens` (GLM has no tunable thinking budget).
+ * - Zhipu does not document `output_config.format`, so json_schema degrades to
+ *   prompt-driven JSON (capability reported as 'json_object' — the engine keeps
+ *   its zod validation + retry safety net).
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -137,24 +144,30 @@ export function convertAnthropicMessages(messages: ChatMessage[]): {
  * Map Venus reasoning params into an Anthropic extended-thinking config.
  * Returns the `thinking` config (when enabled) plus the resolved token budget.
  * Reasoning is disabled when not configured or effort is 'none': for the official
- * API `thinking` is simply omitted, while DashScope models may default to thinking
- * enabled, so `{ type: 'disabled' }` is sent explicitly for that behavior.
+ * API `thinking` is simply omitted, while DashScope and Zhipu models may default
+ * to thinking enabled, so `{ type: 'disabled' }` is sent explicitly for those
+ * behaviors. Zhipu has no tunable thinking budget, so when reasoning is configured
+ * `budget_tokens` is omitted from the thinking config (the resolved budget still
+ * sizes `max_tokens` — GLM thinking tokens count toward it).
  */
 export function mapThinking(
   reasoning: ChatReasoningParams | undefined,
   behavior: EndpointBehavior = 'openai',
 ): {
-  thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'disabled' };
+  thinking?: { type: 'enabled'; budget_tokens?: number } | { type: 'disabled' };
   budget: number;
 } {
   if (!reasoning || reasoning.effort === 'none') {
-    if (behavior === 'dashscope') {
+    if (behavior === 'dashscope' || behavior === 'zhipu') {
       return { thinking: { type: 'disabled' }, budget: 0 };
     }
     return { budget: 0 };
   }
   const requested = reasoning.budgetTokens ?? getDefaultBudget(reasoning.effort as ReasoningEffort);
   const budget = Math.max(MIN_THINKING_BUDGET, requested);
+  if (behavior === 'zhipu') {
+    return { thinking: { type: 'enabled' }, budget };
+  }
   return { thinking: { type: 'enabled', budget_tokens: budget }, budget };
 }
 
@@ -278,7 +291,8 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
   const defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
 
   // Auto-detect endpoint behavior from baseURL (internal — not exposed to consumers).
-  // Only 'dashscope' branches; every other behavior follows the official Anthropic path.
+  // Only 'dashscope' and 'zhipu' branch; every other behavior follows the official
+  // Anthropic path.
   const behavior = detectEndpointBehavior(options.baseURL ?? DEFAULT_ANTHROPIC_BASE_URL);
 
   /** Build the common messages.create request body for chat / chatStream */
@@ -308,10 +322,17 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
 
     // Structured output via output_config.format (strict JSON schema, server-enforced).
     // The Messages API only supports a `json_schema` format; json_object degrades to
-    // prompt-driven JSON (no format sent).
+    // prompt-driven JSON (no format sent). Zhipu does not document output_config;
+    // DashScope qwen series triggers "plain JSON mode" (valid JSON guaranteed, but
+    // field-level schema not strictly enforced) — still send output_config so the
+    // model outputs raw JSON without markdown wrapping.
     if (params.response_format) {
-      if (params.response_format.type === 'json_schema') {
+      if (params.response_format.type === 'json_schema' && behavior !== 'zhipu') {
         body.output_config = { format: { type: 'json_schema', schema: params.response_format.schema } };
+      } else if (params.response_format.type === 'json_schema') {
+        logger.warn(
+          `response_format json_schema 未在当前端点（${behavior}）严格保证，已降级为提示词驱动 JSON（schema "${params.response_format.name}" 由引擎侧校验）`,
+        );
       } else {
         logger.debug('response_format json_object 无对应 Messages API format，已降级为提示词驱动 JSON');
       }
@@ -351,11 +372,16 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
     capabilities: {
       vision: true,
       reasoning: true,
-      // Extended thinking exposes a tunable token budget.
-      reasoningBudget: true,
+      // Extended thinking exposes a tunable token budget (not supported by Zhipu GLM).
+      reasoningBudget: behavior !== 'zhipu',
       streaming: true,
-      // Strict JSON schema enforced server-side via output_config.format.
-      structuredOutput: 'json_schema',
+      // Strict JSON schema enforced server-side via output_config.format;
+      // Zhipu has no documented output_config support, so it degrades to json_object
+      // (prompt-driven JSON with engine-side zod validation + retries).
+      // DashScope qwen series degrades to "plain JSON mode" (output_config still sent,
+      // guaranteeing valid JSON output, but field-level schema is not strictly enforced);
+      // we declare json_schema so the schema reaches buildRequestBody for output_config.
+      structuredOutput: behavior === 'zhipu' ? 'json_object' : 'json_schema',
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
