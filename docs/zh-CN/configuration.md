@@ -111,6 +111,26 @@ const provider = createOpenAIResponsesProvider({
 
 MiMo 还支持 `api-key` 请求头作为 `Authorization: Bearer` 的替代认证方式；SDK 默认的 Bearer 认证开箱即用，如有需要可通过 `headers` 选项切换。
 
+### 阿里云百炼（DashScope）Anthropic 兼容端点
+
+Anthropic provider 可直接对接阿里云百炼的 Anthropic 兼容 Messages API——端点行为从 `baseURL` 自动检测：
+
+```ts
+const provider = createAnthropicProvider({
+  baseURL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  apiKey: process.env.DASHSCOPE_API_KEY!,
+  defaultModel: 'qwen3.7-plus',
+});
+```
+
+`baseURL` 填写到 `/apps/anthropic` 为止（不要以 `/v1/` 结尾）。除北京地域外还支持新加坡（`dashscope-intl.aliyuncs.com`）、美国（`dashscope-us.aliyuncs.com`）以及业务空间专属域名（`https://{WorkspaceId}.<region>.maas.aliyuncs.com/apps/anthropic`）。
+
+自动处理的 DashScope 特性：
+
+- 未配置推理时显式发送 `thinking: { type: 'disabled' }`（部分 qwen 模型默认开启思考），此时 `temperature` 照常转发；配置推理时与官方一致（`thinking: { type: 'enabled', budget_tokens }`，省略 `temperature`）
+- 结构化输出照常通过 `output_config.format` json_schema 发送。注意支持力度因模型而异：deepseek/glm 系列服务端严格强约束；qwen 系列为普通 JSON 模式（仅保证输出合法 JSON，且要求提示词包含 "json" 关键词——Venus 内置 agent 提示词已满足）。对 schema 约束敏感的场景建议选用 deepseek/glm 系列模型
+- 认证使用 SDK 默认的 `x-api-key` 请求头（传入百炼 API Key 即可）；流式事件与官方 Messages API 一致
+
 ## 参见
 
 - [API 参考](./api-reference.md) — 引擎创建、提供商设置和类型签名

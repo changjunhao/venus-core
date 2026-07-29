@@ -17,6 +17,15 @@
  *   with thinking blocks surfaced as Venus `reasoning` content and `thinking_tokens`
  *   reported as `usage.reasoningTokens`.
  * - Structured output via `output_config.format` with a strict JSON schema.
+ *
+ * Also works with Anthropic-compatible endpoints such as Alibaba Cloud DashScope
+ * (Model Studio, `.../apps/anthropic`). Endpoint behavior is auto-detected from
+ * `baseURL` at construction time via internal `detectEndpointBehavior`:
+ * - DashScope models may default to thinking ENABLED, so `thinking: { type: 'disabled' }`
+ *   is sent explicitly when reasoning is not configured.
+ * - `output_config.format` json_schema is strictly enforced only for deepseek/glm
+ *   series; qwen series degrades to plain JSON mode (valid JSON only) and requires
+ *   the word "json" in system/messages — all Venus agent prompts satisfy this.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -35,7 +44,8 @@ import type { ProviderErrorCode } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
-import { getDefaultBudget } from './reasoning.js';
+import { detectEndpointBehavior, getDefaultBudget } from './reasoning.js';
+import type { EndpointBehavior } from './reasoning.js';
 
 const logger = createLogger('provider:anthropic');
 
@@ -126,13 +136,21 @@ export function convertAnthropicMessages(messages: ChatMessage[]): {
 /**
  * Map Venus reasoning params into an Anthropic extended-thinking config.
  * Returns the `thinking` config (when enabled) plus the resolved token budget.
- * Reasoning is disabled (thinking omitted) when not configured or effort is 'none'.
+ * Reasoning is disabled when not configured or effort is 'none': for the official
+ * API `thinking` is simply omitted, while DashScope models may default to thinking
+ * enabled, so `{ type: 'disabled' }` is sent explicitly for that behavior.
  */
-export function mapThinking(reasoning: ChatReasoningParams | undefined): {
-  thinking?: { type: 'enabled'; budget_tokens: number };
+export function mapThinking(
+  reasoning: ChatReasoningParams | undefined,
+  behavior: EndpointBehavior = 'openai',
+): {
+  thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'disabled' };
   budget: number;
 } {
   if (!reasoning || reasoning.effort === 'none') {
+    if (behavior === 'dashscope') {
+      return { thinking: { type: 'disabled' }, budget: 0 };
+    }
     return { budget: 0 };
   }
   const requested = reasoning.budgetTokens ?? getDefaultBudget(reasoning.effort as ReasoningEffort);
@@ -259,10 +277,14 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
 
   const defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
 
+  // Auto-detect endpoint behavior from baseURL (internal — not exposed to consumers).
+  // Only 'dashscope' branches; every other behavior follows the official Anthropic path.
+  const behavior = detectEndpointBehavior(options.baseURL ?? DEFAULT_ANTHROPIC_BASE_URL);
+
   /** Build the common messages.create request body for chat / chatStream */
   function buildRequestBody(params: ChatParams, stream?: boolean): Record<string, unknown> {
     const { system, messages } = convertAnthropicMessages(params.messages);
-    const { thinking, budget } = mapThinking(params.reasoning);
+    const { thinking, budget } = mapThinking(params.reasoning, behavior);
     const maxTokens = resolveMaxTokens(params, budget, defaultMaxTokens);
 
     const body: Record<string, unknown> = {
@@ -276,10 +298,11 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
     }
 
     // Extended thinking requires temperature to be 1 (or unset); only forward
-    // temperature when thinking is disabled.
+    // temperature when thinking is not enabled (omitted or explicitly disabled).
     if (thinking) {
       body.thinking = thinking;
-    } else if (params.temperature !== undefined) {
+    }
+    if (thinking?.type !== 'enabled' && params.temperature !== undefined) {
       body.temperature = params.temperature;
     }
 

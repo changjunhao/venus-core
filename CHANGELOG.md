@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **DashScope Anthropic-compatible endpoint support**: `createAnthropicProvider`
+  now auto-detects endpoint behavior from `baseURL` (e.g.
+  `https://dashscope.aliyuncs.com/apps/anthropic`). For DashScope,
+  `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not
+  configured (some qwen models default to thinking enabled), with `temperature`
+  still forwarded; the official Anthropic request path is byte-for-byte
+  unchanged. `output_config.format` json_schema is sent as-is (strictly enforced
+  for deepseek/glm series; plain JSON mode for qwen series).
+- Endpoint host table now recognizes `dashscope-us.aliyuncs.com` and
+  workspace-dedicated `{WorkspaceId}.<region>.maas.aliyuncs.com` domains as
+  `dashscope` behavior.
+
 ## [0.11.0] - 2026-07-28
 
 ### Added

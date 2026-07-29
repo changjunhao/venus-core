@@ -111,6 +111,26 @@ MiMo specifics handled automatically:
 
 MiMo also accepts the `api-key` header as an alternative to `Authorization: Bearer`; the SDK's default Bearer auth works as-is, but you can switch via the `headers` option if needed.
 
+### Alibaba Cloud Model Studio (DashScope) Anthropic-Compatible Endpoint
+
+The Anthropic provider works with Alibaba Cloud Model Studio's Anthropic-compatible Messages API out of the box — endpoint behavior is auto-detected from `baseURL`:
+
+```ts
+const provider = createAnthropicProvider({
+  baseURL: 'https://dashscope.aliyuncs.com/apps/anthropic',
+  apiKey: process.env.DASHSCOPE_API_KEY!,
+  defaultModel: 'qwen3.7-plus',
+});
+```
+
+Set `baseURL` up to `/apps/anthropic` (do not end with `/v1/`). Besides the Beijing region, Singapore (`dashscope-intl.aliyuncs.com`), US (`dashscope-us.aliyuncs.com`), and workspace-dedicated domains (`https://{WorkspaceId}.<region>.maas.aliyuncs.com/apps/anthropic`) are supported.
+
+DashScope specifics handled automatically:
+
+- `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (some qwen models default to thinking enabled), with `temperature` forwarded as usual; when reasoning is configured the behavior matches the official API (`thinking: { type: 'enabled', budget_tokens }`, `temperature` omitted)
+- Structured output is sent via `output_config.format` json_schema as usual. Note that enforcement varies by model: deepseek/glm series enforce the schema strictly server-side; qwen series degrade to plain JSON mode (valid JSON only, and the prompt must contain the word "json" — Venus's built-in agent prompts satisfy this). Prefer deepseek/glm series for schema-sensitive scenarios
+- Authentication uses the SDK's default `x-api-key` header (pass your Model Studio API key); streaming events match the official Messages API
+
 ## See Also
 
 - [API Reference](./api-reference.md) — Engine creation, provider setup, and type signatures

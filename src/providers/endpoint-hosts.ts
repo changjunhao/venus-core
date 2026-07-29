@@ -41,6 +41,8 @@ export const ENDPOINT_HOSTS: ReadonlyArray<readonly [string, EndpointBehavior]> 
   ['openrouter.ai', 'openrouter'],
   ['api.kimi.com', 'kimi'],
   // Broad domain fallbacks
+  ['dashscope-us.aliyuncs.com', 'dashscope'],
+  ['maas.aliyuncs.com', 'dashscope'],
   ['deepseek.com', 'deepseek'],
   ['moonshot.cn', 'kimi'],
   ['moonshot.ai', 'kimi'],

@@ -382,6 +382,20 @@ describe('reasoning', () => {
       );
     });
 
+    it('detects dashscope from dashscope-us.aliyuncs.com baseURL (US region)', () => {
+      expect(detectEndpointBehavior('https://dashscope-us.aliyuncs.com/apps/anthropic')).toBe('dashscope');
+    });
+
+    it('detects dashscope from cn-beijing workspace-dedicated maas.aliyuncs.com baseURL', () => {
+      expect(detectEndpointBehavior('https://ws-1234.cn-beijing.maas.aliyuncs.com/apps/anthropic')).toBe('dashscope');
+    });
+
+    it('detects dashscope from eu-central-1 workspace-dedicated maas.aliyuncs.com baseURL', () => {
+      expect(detectEndpointBehavior('https://ws-1234.eu-central-1.maas.aliyuncs.com/apps/anthropic')).toBe(
+        'dashscope',
+      );
+    });
+
     it('detects deepseek from api.deepseek.com baseURL', () => {
       expect(detectEndpointBehavior('https://api.deepseek.com/v1')).toBe('deepseek');
     });

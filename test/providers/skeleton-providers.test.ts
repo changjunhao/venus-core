@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, mock } from 'bun:test';
-import { createAnthropicProvider } from '../../src/providers/anthropic.js';
+import { createAnthropicProvider, mapThinking } from '../../src/providers/anthropic.js';
 import { createGeminiProvider } from '../../src/providers/gemini.js';
 import { createOpenAIResponsesProvider } from '../../src/providers/openai-responses.js';
 import { ProviderError } from '../../src/utils/errors.js';
@@ -468,6 +468,131 @@ describe('Skeleton Providers', () => {
         expect(error).toBeInstanceOf(ProviderError);
         expect((error as ProviderError).message).toContain('stream exploded');
       }
+    });
+
+    describe('DashScope Anthropic-compatible endpoint (behavior=dashscope)', () => {
+      const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/apps/anthropic';
+
+      function makeDashScopeProvider(overrides: Record<string, unknown> = {}) {
+        return makeAnthropicProvider({ baseURL: DASHSCOPE_BASE_URL, defaultModel: 'qwen3.7-plus', ...overrides });
+      }
+
+      it('should keep json_schema structured output capability', () => {
+        const provider = makeDashScopeProvider();
+        expect(provider.name).toBe(`anthropic(${DASHSCOPE_BASE_URL})`);
+        expect(provider.capabilities.structuredOutput).toBe('json_schema');
+      });
+
+      it('should send thinking disabled explicitly and forward temperature when reasoning is not configured', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeDashScopeProvider();
+        await provider.chat({
+          model: 'qwen3.7-plus',
+          messages: [{ role: 'user', content: 'hi' }],
+          temperature: 0.3,
+        });
+
+        // DashScope models may default to thinking enabled — disable explicitly
+        expect(capturedBody.thinking).toEqual({ type: 'disabled' });
+        // temperature is compatible with thinking disabled
+        expect(capturedBody.temperature).toBe(0.3);
+      });
+
+      it('should send thinking disabled for effort none', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeDashScopeProvider();
+        await provider.chat({
+          model: 'qwen3.7-plus',
+          messages: [{ role: 'user', content: 'hi' }],
+          reasoning: { effort: 'none' },
+        });
+
+        expect(capturedBody.thinking).toEqual({ type: 'disabled' });
+      });
+
+      it('should map reasoning effort to thinking budget and omit temperature (same as official)', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeDashScopeProvider();
+        await provider.chat({
+          model: 'qwen3.7-plus',
+          messages: [{ role: 'user', content: 'hi' }],
+          temperature: 0.3,
+          reasoning: { effort: 'medium' },
+        });
+
+        expect(capturedBody.thinking).toEqual({ type: 'enabled', budget_tokens: 8192 });
+        expect(capturedBody.temperature).toBeUndefined();
+      });
+
+      it('should send output_config.format json_schema unchanged', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeDashScopeProvider();
+        await provider.chat({
+          model: 'qwen3.7-plus',
+          messages: [{ role: 'user', content: 'Output JSON.' }],
+          response_format: {
+            type: 'json_schema',
+            name: 'test_schema',
+            schema: { type: 'object', properties: { score: { type: 'number' } } },
+            strict: true,
+          },
+        });
+
+        expect(capturedBody.output_config).toEqual({
+          format: { type: 'json_schema', schema: { type: 'object', properties: { score: { type: 'number' } } } },
+        });
+      });
+    });
+
+    describe('mapThinking()', () => {
+      it('omits thinking for undefined reasoning without behavior (official default)', () => {
+        expect(mapThinking(undefined)).toEqual({ budget: 0 });
+      });
+
+      it('omits thinking for effort none without behavior (official default)', () => {
+        expect(mapThinking({ effort: 'none' })).toEqual({ budget: 0 });
+      });
+
+      it('returns thinking disabled for undefined reasoning on dashscope', () => {
+        expect(mapThinking(undefined, 'dashscope')).toEqual({ thinking: { type: 'disabled' }, budget: 0 });
+      });
+
+      it('returns thinking disabled for effort none on dashscope', () => {
+        expect(mapThinking({ effort: 'none' }, 'dashscope')).toEqual({ thinking: { type: 'disabled' }, budget: 0 });
+      });
+
+      it('returns identical enabled config with and without behavior', () => {
+        const expected = { thinking: { type: 'enabled', budget_tokens: 8192 }, budget: 8192 };
+        expect(mapThinking({ effort: 'medium' })).toEqual(expected as never);
+        expect(mapThinking({ effort: 'medium' }, 'dashscope')).toEqual(expected as never);
+      });
+
+      it('clamps dashscope thinking budget to the 1024 minimum', () => {
+        expect(mapThinking({ effort: 'minimal' }, 'dashscope')).toEqual({
+          thinking: { type: 'enabled', budget_tokens: 1024 },
+          budget: 1024,
+        });
+      });
     });
   });
 

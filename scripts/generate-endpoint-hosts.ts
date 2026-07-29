@@ -59,6 +59,10 @@ const MANUAL_HOSTS: ReadonlyArray<readonly [string, EndpointBehavior]> = [
  */
 const GENERIC_FALLBACK_HOSTS: ReadonlyArray<readonly [string, EndpointBehavior]> = [
   ['dashscope.aliyuncs.com', 'dashscope'],
+  // DashScope US region + Model Studio workspace-dedicated domains
+  // ({WorkspaceId}.<region>.maas.aliyuncs.com), used by the Anthropic-compatible endpoint.
+  ['dashscope-us.aliyuncs.com', 'dashscope'],
+  ['maas.aliyuncs.com', 'dashscope'],
   ['deepseek.com', 'deepseek'],
   ['moonshot.cn', 'kimi'],
   ['moonshot.ai', 'kimi'],
