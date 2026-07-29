@@ -13,10 +13,17 @@
 | `provider` | `LLMProvider` | *required* | LLM provider instance (use `createOpenAIChatProvider` or `defineProvider`) |
 | `defaultModel` | `string` | — | Default model for all agents (recommended) |
 | `models` | `ModelConfig` | — | Per-agent model overrides (`genreDetector`, `proposer`, `critic`, `arbiter`, `revision`) |
-| `providers` | `ProviderConfig` | — | Per-agent custom provider instances, falls back to `provider` if not set |
+| `providers` | `ProviderConfig` | — | Per-agent custom provider instances, falls back to `provider` if not set (`revision` falls back to the proposer's provider) |
 | `reasoning` | `ReasoningConfig` | — | Reasoning config with global `enabled`/`effort`/`budgetTokens` and per-agent `agents` overrides |
 | `maxRetries` | `number` | — | Max retry attempts per agent LLM call. Only applies to providers in `json_object` structured output mode; providers declaring `structuredOutput: 'json_schema'` use a single call without retries (see [API Reference](./api-reference.md#structuredoutput-semantics)) |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | Event callback for observability |
+
+### Event System and Streaming
+
+`onEvent` fires for both `evaluate()` and `evaluateStream()`. For streaming evaluations
+the engine emits the same pipeline-stage events (`round_start`, `agent_call`,
+`agent_complete`, `round_complete`, `error`) alongside the yielded
+`EvaluationStreamEvent` stream, so observability hooks work without parsing the SSE body.
 
 ## Reasoning Configuration
 
@@ -128,7 +135,7 @@ Set `baseURL` up to `/apps/anthropic` (do not end with `/v1/`). Besides the Beij
 DashScope specifics handled automatically:
 
 - `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (some qwen models default to thinking enabled), with `temperature` forwarded as usual; when reasoning is configured the behavior matches the official API (`thinking: { type: 'enabled', budget_tokens }`, `temperature` omitted)
-- Structured output degrades to prompt-driven JSON — the provider reports `structuredOutput: 'json_object'`, so schema enforcement falls back to the engine-side zod validation + `maxRetries` retries. DashScope's qwen series `output_config.format` json_schema only guarantees valid JSON (no strict field type enforcement), so the zod+retry path is chosen for reliability. For strict server-side schema enforcement, use deepseek/glm series models (via the official Anthropic provider or the DashScope OpenAI Chat provider with deepseek models)
+- Structured output keeps the strict `json_schema` strategy via `output_config.format` — the provider reports `structuredOutput: 'json_schema'` (single call, no retries). JSON Schema keywords rejected by DashScope's validator (e.g. `multipleOf`) are stripped client-side before sending. Note the enforcement level depends on the model series: deepseek/glm enforce the schema strictly, while the qwen series only guarantees valid JSON output
 - Authentication uses the SDK's default `x-api-key` header (pass your Model Studio API key); streaming events match the official Messages API
 
 ### Zhipu (BigModel) Anthropic-Compatible Endpoint
@@ -148,7 +155,7 @@ Set `baseURL` up to `/api/anthropic` (do not end with `/v1/`).
 Zhipu specifics handled automatically:
 
 - `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (GLM models default to thinking enabled, some even force it), with `temperature` forwarded as usual; when reasoning is configured, `thinking: { type: 'enabled' }` is sent without `budget_tokens` (GLM has no tunable thinking budget, `temperature` omitted), and `max_tokens` still grows by the effort's budget to leave room for thinking
-- Structured output degrades to prompt-driven JSON (Zhipu's compatible endpoint does not document `output_config.format`) — the provider reports `structuredOutput: 'json_object'`, so schema enforcement falls back to the engine-side zod validation + `maxRetries` retries
+- Structured output keeps the strict `json_schema` strategy via `output_config.format`, enforced server-side by the GLM series — the provider reports `structuredOutput: 'json_schema'` (single call, no retries)
 - Authentication uses the SDK's default `x-api-key` header (pass your Zhipu API key); streaming events match the official Messages API
 
 ## See Also

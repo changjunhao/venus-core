@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`CallConfig.provider` per-call provider override**: `providers.revision` in
+  `VenusEngineConfig` now actually routes the revision round to its own
+  provider. When not configured, the revision round keeps using the proposer's
+  provider (unchanged behavior).
 - **Zhipu (BigModel) Anthropic-compatible endpoint support**:
   `createAnthropicProvider` now branches on the auto-detected `zhipu` behavior
   (e.g. `https://open.bigmodel.cn/api/anthropic`). GLM models default to
@@ -16,22 +20,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reasoning is not configured (with `temperature` still forwarded); when
   reasoning is configured, `thinking: { type: 'enabled' }` is sent without
   `budget_tokens` (GLM has no tunable thinking budget) while `max_tokens` still
-  grows by the resolved budget. Structured output degrades to prompt-driven
-  JSON (`structuredOutput: 'json_object'`, engine-side zod validation +
-  retries) since `output_config.format` is not documented by Zhipu.
+  grows by the resolved budget. Structured output keeps strict `json_schema`
+  via `output_config.format` (enforced server-side by GLM series).
 - **DashScope Anthropic-compatible endpoint support**: `createAnthropicProvider`
   now auto-detects endpoint behavior from `baseURL` (e.g.
   `https://dashscope.aliyuncs.com/apps/anthropic`). For DashScope,
   `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not
   configured (some qwen models default to thinking enabled), with `temperature`
   still forwarded; the official Anthropic request path is byte-for-byte
-  unchanged. Structured output degrades to prompt-driven JSON
-  (`structuredOutput: 'json_object'`, engine-side zod validation + retries)
-  since qwen series `output_config.format` json_schema only guarantees valid
-  JSON without strict schema enforcement.
+  unchanged. Structured output keeps the `json_schema` strategy: JSON Schema
+  keywords rejected by DashScope's validator (e.g. `multipleOf`) are stripped
+  client-side via `sanitizeDashScopeSchema` before sending (qwen series
+  guarantees valid JSON server-side; deepseek/glm series enforce the schema
+  strictly).
 - Endpoint host table now recognizes `dashscope-us.aliyuncs.com` and
   workspace-dedicated `{WorkspaceId}.<region>.maas.aliyuncs.com` domains as
   `dashscope` behavior.
+
+### Changed
+
+- **Shared provider error classification**: the classifier previously in
+  `providers/openai-errors.ts` (`classifyOpenAIError`) moved to
+  `providers/provider-errors.ts` (`classifyProviderError`) and is now applied
+  by all built-in providers (OpenAI Chat / Responses, Anthropic, Gemini) for
+  both `chat()` and the initial request phase of `chatStream()`.
+- **`chatStream()` initial request error classification** (behavior change):
+  initial request failures (network / timeout / auth) are now classified via
+  `ProviderError.errorCode` the same way as `chat()` — HTTP 401/403 →
+  `auth_error`, timeouts → `timeout`, DNS/connection failures → `network`,
+  other HTTP ≥ 400 → `api_error`, anything else → `unknown`. Previously these
+  always surfaced as `errorCode: 'api_error'` with a `Stream call failed:`
+  message prefix (now `LLM call failed:`, consistent with `chat()`). Do not
+  rely on the old prefix or the uniform `api_error` code; mid-stream failures
+  keep the `Stream call failed:` prefix with `api_error`.
+
+### Fixed
+
+- **`evaluateStream()` now fires `onEvent`**: the streaming evaluation path
+  emits the same observability events as `evaluate()` (`round_start`,
+  `agent_call`, `agent_complete`, `round_complete`, `error`) alongside the
+  yielded `EvaluationStreamEvent` stream. Previously `onEvent` was only
+  invoked by the non-streaming path.
 
 ## [0.11.0] - 2026-07-28
 

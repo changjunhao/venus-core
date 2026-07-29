@@ -302,7 +302,24 @@ Built-in provider support:
 | Provider | `structuredOutput` | Notes |
 |----------|--------------------|-------|
 | `createOpenAIChatProvider` | `'json_object'` | `json_schema` response_format is downgraded to `json_object` with a warning |
-| `createOpenAIResponsesProvider` | `'json_schema'` | Strict schema via `text.format` |
+| `createOpenAIResponsesProvider` | `'json_schema'` | Strict schema via `text.format`; the Xiaomi MiMo endpoint declares `'json_object'` (its `text.format` has no json_schema enforcement) |
+| `createAnthropicProvider` | `'json_schema'` | Strict schema enforced server-side via `output_config.format`; on DashScope-compatible endpoints, unsupported schema keywords (e.g. `multipleOf`) are stripped client-side |
+| `createGeminiProvider` | `'json_schema'` | Strict schema via `response_format` (Interactions API) |
+
+#### Streaming JSON partials (`StreamChunk.partial`)
+
+All built-in providers emit incremental JSON snapshots during `chatStream()` via the
+`partial` field on `StreamChunk`:
+
+- `content` — the raw text delta from the provider.
+- `reasoning` — the reasoning/thinking text delta, if any.
+- `partial` — an incremental JSON object parsed from the accumulated `content` stream.
+  It is omitted whenever no parseable JSON value is available yet or parsing fails,
+  so consumers must treat it as optional on every chunk.
+
+`partial` powers the engine-level `result_chunk` events yielded by `evaluateStream()`
+in `mode: 'updates'`, enabling incremental UI rendering of the evaluation JSON without
+re-parsing the concatenated text yourself.
 
 ```ts
 import { createVenusEngine, defineProvider, createOpenAIChatProvider } from '@theogony/venus-core';
@@ -362,9 +379,11 @@ All errors extend `VenusError` with a `code` property:
 - `errorCode: ProviderErrorCode` — One of `'network' | 'api_error' | 'parse_error' | 'timeout' | 'auth_error' | 'unknown'`
 - `statusCode?: number` — HTTP status code if applicable
 
-Errors thrown by the OpenAI SDK (Chat Completions and Responses providers) are classified
-centrally and consistently: HTTP 401/403 → `auth_error`, connection timeouts → `timeout`,
-DNS/connection failures → `network`, other HTTP ≥ 400 → `api_error`, anything else → `unknown`.
+Errors thrown by the built-in LLM SDKs (OpenAI Chat Completions, OpenAI Responses,
+Anthropic Messages API, and Google GenAI) are classified centrally and consistently by
+the provider layer — for both `chat()` and the initial request phase of `chatStream()`:
+HTTP 401/403 → `auth_error`, connection timeouts → `timeout`, DNS/connection failures →
+`network`, other HTTP ≥ 400 → `api_error`, anything else → `unknown`.
 
 ```ts
 import { ProviderError, ValidationError } from '@theogony/venus-core';

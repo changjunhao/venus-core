@@ -301,7 +301,22 @@ interface ProviderCapabilities {
 | 提供商 | `structuredOutput` | 说明 |
 |--------|--------------------|------|
 | `createOpenAIChatProvider` | `'json_object'` | `json_schema` response_format 会降级为 `json_object` 并输出警告 |
-| `createOpenAIResponsesProvider` | `'json_schema'` | 通过 `text.format` 支持严格 schema |
+| `createOpenAIResponsesProvider` | `'json_schema'` | 通过 `text.format` 支持严格 schema；小米 MiMo 端点声明 `'json_object'`（其 `text.format` 不支持 json_schema 强约束） |
+| `createAnthropicProvider` | `'json_schema'` | 通过 `output_config.format` 由服务端强制执行严格 schema；DashScope 兼容端点会在客户端剥离不支持的 schema 关键字（如 `multipleOf`） |
+| `createGeminiProvider` | `'json_schema'` | 通过 `response_format` 支持严格 schema（Interactions API） |
+
+#### 流式 JSON 增量（`StreamChunk.partial`）
+
+所有内置提供商在 `chatStream()` 过程中都会通过 `StreamChunk` 的 `partial` 字段
+产出增量 JSON 快照：
+
+- `content` — 提供商返回的原始文本增量。
+- `reasoning` — 推理/思考文本增量（如有）。
+- `partial` — 从累积的 `content` 流中解析出的增量 JSON 对象。当尚无可解析的
+  JSON 值或解析失败时会省略该字段，因此消费方必须将其视为每个 chunk 上的可选字段。
+
+`partial` 是 `evaluateStream()` 在 `mode: 'updates'` 下产出的引擎级 `result_chunk`
+事件的数据来源，可用于对评估 JSON 做增量 UI 渲染，无需自行重新解析拼接文本。
 
 ```ts
 import { createVenusEngine, defineProvider, createOpenAIChatProvider } from '@theogony/venus-core';
@@ -361,7 +376,8 @@ const engine = createVenusEngine({
 - `errorCode: ProviderErrorCode` — 以下之一：`'network' | 'api_error' | 'parse_error' | 'timeout' | 'auth_error' | 'unknown'`
 - `statusCode?: number` — HTTP 状态码（如适用）
 
-OpenAI SDK 抛出的错误（Chat Completions 与 Responses 提供商）现已统一集中分类：
+内置 LLM SDK 抛出的错误（OpenAI Chat Completions / Responses、Anthropic Messages API、
+Google GenAI）现均由提供商层统一集中分类——对 `chat()` 和 `chatStream()` 的初始请求阶段同样适用：
 HTTP 401/403 → `auth_error`，连接超时 → `timeout`，DNS/连接失败 → `network`，
 其他 HTTP ≥ 400 → `api_error`，其余 → `unknown`。
 

@@ -308,6 +308,8 @@ const engine = createVenusEngine({
 | `agent_complete` | `{ round, agent, data: { result, reasoning } }` |
 | `error` | `{ agent, data: { error } }` |
 
+`onEvent` fires for both `evaluate()` and `evaluateStream()` — streaming evaluations emit the same pipeline-stage events alongside the yielded `EvaluationStreamEvent` stream.
+
 ## See Also
 
 - [API Reference](./api-reference.md) — Complete type signatures for all engine, provider, and schema APIs

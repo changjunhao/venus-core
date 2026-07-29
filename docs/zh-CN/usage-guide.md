@@ -308,6 +308,8 @@ const engine = createVenusEngine({
 | `agent_complete` | `{ round, agent, data: { result, reasoning } }` |
 | `error` | `{ agent, data: { error } }` |
 
+`onEvent` 在 `evaluate()` 与 `evaluateStream()` 中都会触发——流式评估会在产出 `EvaluationStreamEvent` 流的同时发出相同的管线阶段事件。
+
 ## 参见
 
 - [API 参考](./api-reference.md) — 所有引擎、提供商和 Schema API 的完整类型签名

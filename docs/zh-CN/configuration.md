@@ -13,10 +13,16 @@
 | `provider` | `LLMProvider` | *必填* | LLM provider 实例（使用 `createOpenAIChatProvider` 或 `defineProvider`） |
 | `defaultModel` | `string` | — | 所有智能体的默认模型（建议） |
 | `models` | `ModelConfig` | — | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`） |
-| `providers` | `ProviderConfig` | — | 按智能体自定义提供商实例，未设置时回退到 `provider` |
+| `providers` | `ProviderConfig` | — | 按智能体自定义提供商实例，未设置时回退到 `provider`（`revision` 未设置时沿用 proposer 的提供商） |
 | `reasoning` | `ReasoningConfig` | — | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖 |
 | `maxRetries` | `number` | — | 每次智能体 LLM 调用的最大重试次数。仅适用于 `json_object` 结构化输出模式的提供商；声明 `structuredOutput: 'json_schema'` 的提供商单次调用不重试（参见 [API 参考](./api-reference.md#structuredoutput-语义)） |
 | `onEvent` | `(event: EvaluationEvent) => void` | — | 用于可观测性的事件回调 |
+
+### 事件系统与流式评估
+
+`onEvent` 在 `evaluate()` 与 `evaluateStream()` 中都会触发。流式评估时，引擎会在产出
+`EvaluationStreamEvent` 流的同时发出相同的管线阶段事件（`round_start`、`agent_call`、
+`agent_complete`、`round_complete`、`error`），可观测性钩子无需解析 SSE 响应体即可工作。
 
 ## 推理配置
 
@@ -128,7 +134,7 @@ const provider = createAnthropicProvider({
 自动处理的 DashScope 特性：
 
 - 未配置推理时显式发送 `thinking: { type: 'disabled' }`（部分 qwen 模型默认开启思考），此时 `temperature` 照常转发；配置推理时与官方一致（`thinking: { type: 'enabled', budget_tokens }`，省略 `temperature`）
-- 结构化输出降级为提示词驱动 JSON——provider 声明 `structuredOutput: 'json_object'`，schema 约束回退到引擎侧 zod 校验 + `maxRetries` 重试。qwen 系列的 `output_config.format` json_schema 仅保证输出合法 JSON（不严格约束字段类型），因此为避免字段偏差时无 zod 兜底的问题，选择走更稳的重试路径。若需服务端严格 schema 约束，建议使用 deepseek/glm 系列模型（可通过官方 Anthropic provider 或 DashScope OpenAI Chat provider 搭配 deepseek 模型实现）
+- 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，provider 声明 `structuredOutput: 'json_schema'`（单次调用，不重试）。DashScope 校验器不支持的 JSON Schema 关键字（如 `multipleOf`）会在发送前于客户端剥离。注意约束强度取决于模型系列：deepseek/glm 系列严格执行 schema，qwen 系列仅保证输出合法 JSON
 - 认证使用 SDK 默认的 `x-api-key` 请求头（传入百炼 API Key 即可）；流式事件与官方 Messages API 一致
 
 ### 智谱（BigModel）Anthropic 兼容端点
@@ -148,7 +154,7 @@ const provider = createAnthropicProvider({
 自动处理的智谱特性：
 
 - 未配置推理时显式发送 `thinking: { type: 'disabled' }`（GLM 系列默认开启思考，部分型号强制思考），此时 `temperature` 照常转发；配置推理时发送 `thinking: { type: 'enabled' }`（GLM 不支持思考预算，不发送 `budget_tokens`，`temperature` 省略），`max_tokens` 仍按 effort 对应的预算扩容以为思考留出空间
-- 结构化输出降级为提示词驱动 JSON（智谱兼容端点未文档化支持 `output_config.format`）——provider 声明 `structuredOutput: 'json_object'`，schema 约束回退到引擎侧 zod 校验 + `maxRetries` 重试
+- 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，由 GLM 系列在服务端严格执行，provider 声明 `structuredOutput: 'json_schema'`（单次调用，不重试）
 - 认证使用 SDK 默认的 `x-api-key` 请求头（传入智谱 API Key 即可）；流式事件与官方 Messages API 一致
 
 ## 参见

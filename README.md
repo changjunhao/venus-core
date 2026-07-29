@@ -42,7 +42,8 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **8 Photography Genres** — Portrait, Landscape, Documentary, Fine Art, Commercial, Architecture, Nature, Sports
 - **Multi-Model Routing** — Per-agent model selection and per-agent custom LLM providers
 - **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope), Kimi (Moonshot), Xiaomi MIMO, StepFun, MiniMax, Doubao (Volcano Ark), Baidu Qianfan (ERNIE), Zhipu (BigModel), Grok (xAI), Gemini, DeepSeek, and OpenRouter
-- **OpenAI Responses API** — First-class `/v1/responses` provider for reasoning models (o-series, GPT-5) with strict JSON Schema structured output
+- **OpenAI Responses API** — First-class `/v1/responses` provider for reasoning models (o-series, GPT-5) with strict JSON Schema structured output; auto-adapts to Doubao (Volcano Ark) and Xiaomi MiMo Responses endpoints
+- **Native Anthropic & Gemini Providers** — Claude Messages API with extended thinking and Google Gemini Interactions API, both with strict JSON Schema structured output; the Anthropic provider also drives DashScope and Zhipu Anthropic-compatible endpoints out of the box
 - **Structured Output Modes** — `json_schema` providers get single-call schema-guaranteed output; `json_object` providers keep Zod validation with automatic repair retries
 - **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
@@ -136,13 +137,12 @@ bun add @theogony/venus-core
 deno add jsr:@theogony/venus-core
 ```
 
-Core dependencies (`openai`, `@google/genai`, `zod`, `vectorjson`) are included automatically.
+Core dependencies (`openai`, `@anthropic-ai/sdk`, `@google/genai`, `zod`, `vectorjson`) are included automatically.
 
 ### Optional Peer Dependencies
 
 | Package                    | Required | Notes |
 |----------------------------|----------|-------|
-| `@anthropic-ai/sdk` ^0.115 | Optional | For Anthropic provider |
 | `hono` ^4.12               | Optional | For Hono adapter (`@theogony/venus-core/hono`) |
 | `express` ^5.2             | Optional | For Express adapter (`@theogony/venus-core/express`) |
 
