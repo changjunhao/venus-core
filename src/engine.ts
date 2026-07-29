@@ -51,7 +51,12 @@ export class VenusEngine {
 
   /** Emit an evaluation event to the configured callback */
   #emit(event: Omit<EvaluationEvent, 'timestamp'>): void {
-    this.#config.onEvent?.({ ...event, timestamp: Date.now() });
+    try {
+      this.#config.onEvent?.({ ...event, timestamp: Date.now() });
+    } catch (err) {
+      // Observability callbacks must never break the evaluation pipeline
+      this.#logger.warn(`onEvent 回调抛出异常（已忽略）: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Build the genre detector agent */
@@ -418,6 +423,11 @@ export class VenusEngine {
     mode: StreamMode,
   ): AsyncGenerator<EvaluationStreamEvent, AgentCallResult<T>, unknown> {
     yield { type: 'agent_call', round, agent: agentName, timestamp: Date.now() };
+    // round 0 (genre detection) is not surfaced via onEvent, matching evaluate()
+    // where round 0 only carries the round_start marker emitted after resolution
+    if (round > 0) {
+      this.#emit({ type: 'agent_call', round, agent: agentName });
+    }
 
     // Inline the old #wrapAgentStream logic
     let next = await stream.next();
@@ -447,6 +457,15 @@ export class VenusEngine {
       data: { result: result.result, reasoning: result.reasoning },
       timestamp: Date.now(),
     };
+    if (round > 0) {
+      this.#emit({
+        type: 'agent_complete',
+        round,
+        agent: agentName,
+        data: { result: result.result, reasoning: result.reasoning },
+      });
+      this.#emit({ type: 'round_complete', round });
+    }
 
     return result;
   }
@@ -494,6 +513,7 @@ export class VenusEngine {
       }
 
       yield { type: 'evaluation_start', data: { imageUrl, genre: detectedGenre }, timestamp: Date.now() };
+      this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrl, genre: detectedGenre } });
 
       // Build Agents
       const { proposer, critic, arbiter } = this.#buildAgents();
@@ -577,6 +597,7 @@ export class VenusEngine {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const code = err instanceof VenusError ? err.code : undefined;
+      this.#emit({ type: 'error', agent: 'engine', data: { error: err } });
       yield { type: 'error', error: { message, code }, timestamp: Date.now() };
     }
   }

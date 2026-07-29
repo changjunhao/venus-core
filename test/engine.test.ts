@@ -235,6 +235,38 @@ describe('Engine Layer', () => {
         expect(event.timestamp).toBeGreaterThan(0);
       }
     });
+
+    it('should not break evaluation when onEvent callback throws', async () => {
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('MEDIUM') }],
+        arbiterResponses: [{ content: makeArbiterJSON() }],
+        onEvent: () => {
+          throw new Error('listener boom');
+        },
+      });
+
+      const result = await engine.evaluate(TEST_IMAGE, 'portrait');
+      expect(result.totalScore).toBe(7.2);
+    });
+
+    it('should not break streaming evaluation when onEvent callback throws', async () => {
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('MEDIUM') }],
+        arbiterResponses: [{ content: makeArbiterJSON() }],
+        onEvent: () => {
+          throw new Error('listener boom');
+        },
+      });
+
+      const events: EvaluationStreamEvent[] = [];
+      for await (const event of engine.evaluateStream(TEST_IMAGE, { genre: 'portrait' })) {
+        events.push(event);
+      }
+
+      expect(events[events.length - 1]!.type).toBe('evaluation_complete');
+    });
   });
 
   // ── evaluateStream() — 事件顺序验证 ──
@@ -295,6 +327,35 @@ describe('Engine Layer', () => {
       expect(agentCalls).toContain('critic');
       expect(agentCalls).toContain('proposer-revision');
       expect(agentCalls).toContain('arbiter');
+    });
+
+    it('should fire onEvent during streaming evaluation', async () => {
+      const observed: EvaluationEvent[] = [];
+
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('MEDIUM') }],
+        arbiterResponses: [{ content: makeArbiterJSON() }],
+        onEvent: (event) => observed.push(event),
+      });
+
+      for await (const _event of engine.evaluateStream(TEST_IMAGE, { genre: 'portrait' })) {
+        // consume the stream; observability should come through onEvent as well
+      }
+
+      const eventTypes = observed.map((e) => `${e.type}${e.agent ? ':' + e.agent : ''}`);
+      expect(eventTypes).toContain('round_start:engine');
+      expect(eventTypes).toContain('agent_call:proposer');
+      expect(eventTypes).toContain('agent_complete:proposer');
+      expect(eventTypes).toContain('agent_call:critic');
+      expect(eventTypes).toContain('agent_complete:critic');
+      expect(eventTypes).toContain('agent_call:arbiter');
+      expect(eventTypes).toContain('agent_complete:arbiter');
+      expect(eventTypes).toContain('round_complete');
+
+      for (const event of observed) {
+        expect(event.timestamp).toBeGreaterThan(0);
+      }
     });
 
     it('should have complete EvaluationResult in final event', async () => {
