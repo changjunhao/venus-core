@@ -27,6 +27,9 @@
  * - `output_config.format` json_schema is strictly enforced only for deepseek/glm
  *   series; qwen series degrades to plain JSON mode (valid JSON only) and requires
  *   the word "json" in system/messages — all Venus agent prompts satisfy this.
+ * - DashScope's json_schema validator supports a narrower JSON Schema subset
+ *   (e.g. `multipleOf` on number/integer types is rejected with InvalidParameter),
+ *   so unsupported keywords are stripped client-side via `sanitizeDashScopeSchema`.
  * - Zhipu GLM models default to thinking ENABLED as well, so `thinking: { type: 'disabled' }`
  *   is sent explicitly when reasoning is not configured; when configured, thinking is
  *   enabled WITHOUT `budget_tokens` (GLM has no tunable thinking budget).
@@ -138,6 +141,43 @@ export function convertAnthropicMessages(messages: ChatMessage[]): {
   }
 
   return { system, messages: converted };
+}
+
+/** JSON Schema keywords rejected by DashScope's json_schema validator */
+const DASHSCOPE_UNSUPPORTED_SCHEMA_KEYWORDS = new Set(['multipleOf']);
+
+/**
+ * Recursively strip JSON Schema keywords that DashScope's json_schema validator
+ * rejects (e.g. `multipleOf` on number/integer types triggers a 400 InvalidParameter:
+ * "When the schema contains the fields multipleOf, the type should not be integer
+ * or number"). Property/definition names inside `properties`/`$defs` maps are
+ * preserved — only schema keywords are removed. The engine-side zod validation
+ * still enforces the stripped constraints.
+ */
+export function sanitizeDashScopeSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  let removed = 0;
+  const walk = (node: unknown, isNameMap: boolean): unknown => {
+    if (Array.isArray(node)) return node.map((item) => walk(item, false));
+    if (node === null || typeof node !== 'object') return node;
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (!isNameMap && DASHSCOPE_UNSUPPORTED_SCHEMA_KEYWORDS.has(key)) {
+        removed++;
+        continue;
+      }
+      // Values under these keywords map property/definition names to sub-schemas;
+      // the names themselves must never be treated as schema keywords.
+      const childIsNameMap =
+        !isNameMap && (key === 'properties' || key === 'patternProperties' || key === '$defs' || key === 'definitions');
+      result[key] = walk(value, childIsNameMap);
+    }
+    return result;
+  };
+  const sanitized = walk(schema, false) as Record<string, unknown>;
+  if (removed > 0) {
+    logger.debug(`已从 json_schema 中移除 ${removed} 个 DashScope 不支持的关键字（multipleOf），约束仍由引擎侧 zod 校验兜底`);
+  }
+  return sanitized;
 }
 
 /**
@@ -321,18 +361,17 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
     }
 
     // Structured output via output_config.format (strict JSON schema, server-enforced).
-    // The Messages API only supports a `json_schema` format; json_object degrades to
-    // prompt-driven JSON (no format sent). Zhipu does not document output_config;
-    // DashScope qwen series triggers "plain JSON mode" (valid JSON guaranteed, but
-    // field-level schema not strictly enforced) — still send output_config so the
-    // model outputs raw JSON without markdown wrapping.
+    // All Anthropic-compatible endpoints (official, DashScope, Zhipu) use the same
+    // json_schema format; json_object degrades to prompt-driven JSON (no format sent).
+    // DashScope validates the schema against a narrower JSON Schema subset, so
+    // unsupported keywords are stripped before sending.
     if (params.response_format) {
-      if (params.response_format.type === 'json_schema' && behavior !== 'zhipu') {
-        body.output_config = { format: { type: 'json_schema', schema: params.response_format.schema } };
-      } else if (params.response_format.type === 'json_schema') {
-        logger.warn(
-          `response_format json_schema 未在当前端点（${behavior}）严格保证，已降级为提示词驱动 JSON（schema "${params.response_format.name}" 由引擎侧校验）`,
-        );
+      if (params.response_format.type === 'json_schema') {
+        const schema =
+          behavior === 'dashscope'
+            ? sanitizeDashScopeSchema(params.response_format.schema)
+            : params.response_format.schema;
+        body.output_config = { format: { type: 'json_schema', schema } };
       } else {
         logger.debug('response_format json_object 无对应 Messages API format，已降级为提示词驱动 JSON');
       }
@@ -375,13 +414,8 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
       // Extended thinking exposes a tunable token budget (not supported by Zhipu GLM).
       reasoningBudget: behavior !== 'zhipu',
       streaming: true,
-      // Strict JSON schema enforced server-side via output_config.format;
-      // Zhipu has no documented output_config support, so it degrades to json_object
-      // (prompt-driven JSON with engine-side zod validation + retries).
-      // DashScope qwen series degrades to "plain JSON mode" (output_config still sent,
-      // guaranteeing valid JSON output, but field-level schema is not strictly enforced);
-      // we declare json_schema so the schema reaches buildRequestBody for output_config.
-      structuredOutput: behavior === 'zhipu' ? 'json_object' : 'json_schema',
+      // Strict JSON schema enforced server-side via output_config.format.
+      structuredOutput: 'json_schema',
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {

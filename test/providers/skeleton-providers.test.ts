@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, mock } from 'bun:test';
-import { createAnthropicProvider, mapThinking } from '../../src/providers/anthropic.js';
+import { createAnthropicProvider, mapThinking, sanitizeDashScopeSchema } from '../../src/providers/anthropic.js';
 import { createGeminiProvider } from '../../src/providers/gemini.js';
 import { createOpenAIResponsesProvider } from '../../src/providers/openai-responses.js';
 import { ProviderError } from '../../src/utils/errors.js';
@@ -264,6 +264,27 @@ describe('Skeleton Providers', () => {
         response_format: { type: 'json_object' },
       });
       expect(capturedBody.output_config).toBeUndefined();
+    });
+
+    it('should keep multipleOf in json_schema for the official Anthropic endpoint', async () => {
+      let capturedBody: any = null;
+      mockFetch(async (input: any, init: any) => {
+        capturedBody = await readRequestBody(input, init);
+        return makeMessageResponse();
+      });
+
+      const provider = makeAnthropicProvider();
+      await provider.chat({
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'hi' }],
+        response_format: {
+          type: 'json_schema',
+          name: 'test_schema',
+          schema: { type: 'object', properties: { score: { type: 'number', multipleOf: 0.1 } } },
+          strict: true,
+        },
+      });
+      expect(capturedBody.output_config.format.schema.properties.score.multipleOf).toBe(0.1);
     });
 
     it('should merge defaultExtra and per-call extra into the request body', async () => {
@@ -539,7 +560,7 @@ describe('Skeleton Providers', () => {
         expect(capturedBody.temperature).toBeUndefined();
       });
 
-      it('should send output_config.format json_schema for DashScope (plain JSON mode)', async () => {
+      it('should send output_config.format json_schema for DashScope', async () => {
         let capturedBody: any = null;
         mockFetch(async (input: any, init: any) => {
           capturedBody = await readRequestBody(input, init);
@@ -562,6 +583,58 @@ describe('Skeleton Providers', () => {
           format: { type: 'json_schema', schema: { type: 'object', properties: { score: { type: 'number' } } } },
         });
       });
+
+      it('should strip multipleOf from json_schema at every nesting level', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const schema = {
+          type: 'object',
+          properties: {
+            total_score: { type: 'number', minimum: 0, maximum: 10, multipleOf: 0.1 },
+            dimensions: {
+              type: 'object',
+              properties: { depth: { type: 'number', multipleOf: 0.1 } },
+            },
+            challenges: {
+              type: 'array',
+              items: { type: 'object', properties: { suggested_score: { type: 'number', multipleOf: 0.1 } } },
+            },
+          },
+        };
+
+        const provider = makeDashScopeProvider();
+        await provider.chat({
+          model: 'qwen3.7-plus',
+          messages: [{ role: 'user', content: 'Output JSON.' }],
+          response_format: { type: 'json_schema', name: 'test_schema', schema, strict: true },
+        });
+
+        // DashScope rejects multipleOf on number/integer types — it is removed
+        // at every nesting level while the other constraints survive
+        expect(capturedBody.output_config).toEqual({
+          format: {
+            type: 'json_schema',
+            schema: {
+              type: 'object',
+              properties: {
+                total_score: { type: 'number', minimum: 0, maximum: 10 },
+                dimensions: {
+                  type: 'object',
+                  properties: { depth: { type: 'number' } },
+                },
+                challenges: {
+                  type: 'array',
+                  items: { type: 'object', properties: { suggested_score: { type: 'number' } } },
+                },
+              },
+            },
+          },
+        });
+      });
     });
 
     describe('Zhipu Anthropic-compatible endpoint (behavior=zhipu)', () => {
@@ -571,10 +644,10 @@ describe('Skeleton Providers', () => {
         return makeAnthropicProvider({ baseURL: ZHIPU_BASE_URL, defaultModel: 'glm-4.6', ...overrides });
       }
 
-      it('should degrade structured output capability to json_object and drop reasoningBudget', () => {
+      it('should keep json_schema structured output and drop reasoningBudget', () => {
         const provider = makeZhipuProvider();
         expect(provider.name).toBe(`anthropic(${ZHIPU_BASE_URL})`);
-        expect(provider.capabilities.structuredOutput).toBe('json_object');
+        expect(provider.capabilities.structuredOutput).toBe('json_schema');
         expect(provider.capabilities.reasoningBudget).toBe(false);
       });
 
@@ -638,7 +711,7 @@ describe('Skeleton Providers', () => {
         expect(capturedBody.temperature).toBeUndefined();
       });
 
-      it('should not send output_config for json_schema (degrades to prompt-driven JSON)', async () => {
+      it('should send output_config.format json_schema for Zhipu', async () => {
         let capturedBody: any = null;
         mockFetch(async (input: any, init: any) => {
           capturedBody = await readRequestBody(input, init);
@@ -657,7 +730,34 @@ describe('Skeleton Providers', () => {
           },
         });
 
-        expect(capturedBody.output_config).toBeUndefined();
+        expect(capturedBody.output_config).toEqual({
+          format: { type: 'json_schema', schema: { type: 'object', properties: { score: { type: 'number' } } } },
+        });
+      });
+    });
+
+    describe('sanitizeDashScopeSchema()', () => {
+      it('removes multipleOf but keeps sibling constraints', () => {
+        expect(
+          sanitizeDashScopeSchema({ type: 'number', minimum: 0, maximum: 10, multipleOf: 0.1 }),
+        ).toEqual({ type: 'number', minimum: 0, maximum: 10 });
+      });
+
+      it('preserves a property literally named multipleOf while stripping the keyword inside it', () => {
+        expect(
+          sanitizeDashScopeSchema({
+            type: 'object',
+            properties: { multipleOf: { type: 'number', multipleOf: 0.5 } },
+          }),
+        ).toEqual({
+          type: 'object',
+          properties: { multipleOf: { type: 'number' } },
+        });
+      });
+
+      it('returns a schema without unsupported keywords unchanged', () => {
+        const schema = { type: 'object', properties: { genre: { type: 'string', enum: ['landscape'] } } };
+        expect(sanitizeDashScopeSchema(schema)).toEqual(schema);
       });
     });
 
