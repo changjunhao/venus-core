@@ -7,3 +7,4 @@ dist/
 .idea
 /coverage/
 .qoder/
+scripts/local-test-server.ts
