@@ -201,6 +201,8 @@ export interface CallConfig {
   model?: string;
   reasoning?: ChatReasoningParams;
   temperature?: number;
+  /** Provider override for this call (e.g. route the revision round to a dedicated provider) */
+  provider?: LLMProvider;
 }
 
 // ─── Evaluation Result Types ──────────────────────────────

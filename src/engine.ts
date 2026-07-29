@@ -74,7 +74,12 @@ export class VenusEngine {
         reasoning: proposerCfg.reasoning,
         maxRetries: this.#config.maxRetries,
       },
-      { model: revCfg.model, reasoning: revCfg.reasoning },
+      {
+        model: revCfg.model,
+        reasoning: revCfg.reasoning,
+        // 仅当显式配置 providers.revision 时覆盖，否则修正轮沿用 proposer 的 provider
+        provider: this.#config.providers?.revision,
+      },
     );
 
     const criticCfg = this.#getAgentConfig('critic');

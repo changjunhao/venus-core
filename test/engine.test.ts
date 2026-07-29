@@ -178,6 +178,30 @@ describe('Engine Layer', () => {
     });
   });
 
+  // ── evaluate() — providers.revision 路由 ──
+  describe('evaluate() — providers.revision routing', () => {
+    it('should route the revision round to the dedicated revision provider', async () => {
+      // proposer provider only has 1 response: if the revision round reused it, it would exhaust and throw
+      const proposerProvider = createMockProvider([{ content: makeProposalJSON() }], { name: 'mock-proposer' });
+      const revisionProvider = createMockProvider([{ content: makeRevisionJSON() }], { name: 'mock-revision' });
+
+      const engine = createVenusEngine({
+        // default provider serves critic then arbiter (in call order)
+        provider: createMockProvider([{ content: makeCritiqueJSON('HIGH') }, { content: makeArbiterJSON() }]),
+        defaultModel: 'test-model',
+        providers: {
+          proposer: proposerProvider,
+          revision: revisionProvider,
+        },
+      });
+
+      const result = await engine.evaluate(TEST_IMAGE, 'portrait');
+
+      expect(result.metadata.rounds).toBe(4);
+      expect(result.process.revision?.result.total_score).toBe(7.0);
+    });
+  });
+
   // ── evaluate() — onEvent callback ──
   describe('evaluate() — onEvent callback', () => {
     it('should emit events in correct sequence', async () => {

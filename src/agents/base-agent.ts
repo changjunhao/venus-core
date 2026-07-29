@@ -62,8 +62,8 @@ export class BaseAgent {
   }
 
   /** Build response format based on provider capabilities */
-  #buildResponseFormat(schema: ZodType): ResponseFormat {
-    if (this.provider.capabilities.structuredOutput === 'json_schema') {
+  #buildResponseFormat(schema: ZodType, provider: LLMProvider): ResponseFormat {
+    if (provider.capabilities.structuredOutput === 'json_schema') {
       const jsonSchema = toJSONSchema(schema);
       const { $schema: _$schema, ...schemaBody } = jsonSchema as Record<string, unknown>;
       return {
@@ -77,12 +77,18 @@ export class BaseAgent {
   }
 
   /** Parse JSON content and validate with Zod schema */
-  #parseResponse<T>(rawContent: string, schema: ZodType, reasoning: string | null, label?: string): AgentCallResult<T> {
+  #parseResponse<T>(
+    rawContent: string,
+    schema: ZodType,
+    reasoning: string | null,
+    providerName: string,
+    label?: string,
+  ): AgentCallResult<T> {
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawContent);
     } catch (e) {
-      throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, this.provider.name, 'parse_error');
+      throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, providerName, 'parse_error');
     }
     // Runtime validation by Zod; as T is safe because schema.parse() validates the shape
     const result = schema.parse(parsed) as T;
@@ -125,8 +131,9 @@ export class BaseAgent {
     schema: ZodType,
     callConfig?: CallConfig,
   ): Promise<AgentCallResult<T>> {
+    const provider = callConfig?.provider ?? this.provider;
     const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
-    const responseFormat = this.#buildResponseFormat(schema);
+    const responseFormat = this.#buildResponseFormat(schema, provider);
     const useJsonSchema = responseFormat.type === 'json_schema';
 
     if (useJsonSchema) {
@@ -138,7 +145,7 @@ export class BaseAgent {
         `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, mode=json_schema`,
       );
 
-      const response = await this.provider.chat({
+      const response = await provider.chat({
         model: callConfig?.model ?? this.config.model,
         messages: requestMessages,
         temperature: this.config.temperature ?? 0.3,
@@ -151,7 +158,7 @@ export class BaseAgent {
         parsed = JSON.parse(response.content);
       } catch (e) {
         this.logger.warn('json_schema 模式解析失败：provider 声明的 schema 保证未兑现，不会重试');
-        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, this.provider.name, 'parse_error');
+        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, provider.name, 'parse_error');
       }
 
       this.logger.info('调用完成');
@@ -172,7 +179,7 @@ export class BaseAgent {
           `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, attempt=${attempt + 1}/${this.#maxRetries}`,
         );
 
-        const response = await this.provider.chat({
+        const response = await provider.chat({
           model: callConfig?.model ?? this.config.model,
           messages: requestMessages,
           temperature: this.config.temperature ?? 0.3,
@@ -181,7 +188,7 @@ export class BaseAgent {
         });
 
         reasoning = response.reasoning ?? null;
-        return this.#parseResponse<T>(response.content, schema, reasoning);
+        return this.#parseResponse<T>(response.content, schema, reasoning, provider.name);
       } catch (error) {
         lastError = error as Error;
         this.logger.warn(`第 ${attempt + 1} 次尝试失败: ${lastError.message}${reasoning ? ' (有推理链)' : ''}`);
@@ -208,13 +215,15 @@ export class BaseAgent {
     schema: ZodType,
     callConfig?: CallConfig,
   ): AsyncGenerator<StreamChunk, AgentCallResult<T>, unknown> {
+    const provider = callConfig?.provider ?? this.provider;
+
     // 降级：provider 不支持流式，回退到非流式 call()
-    if (!this.provider.chatStream) {
+    if (!provider.chatStream) {
       return (await this.call<T>(systemPrompt, userPrompt, imageUrl, schema, callConfig)) as AgentCallResult<T>;
     }
 
     const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
-    const responseFormat = this.#buildResponseFormat(schema);
+    const responseFormat = this.#buildResponseFormat(schema, provider);
     const useJsonSchema = responseFormat.type === 'json_schema';
 
     if (useJsonSchema) {
@@ -229,7 +238,7 @@ export class BaseAgent {
       let reasoning = '';
       let finalContent = '';
 
-      for await (const chunk of this.provider.chatStream({
+      for await (const chunk of provider.chatStream({
         model: callConfig?.model ?? this.config.model,
         messages: requestMessages,
         temperature: this.config.temperature ?? 0.3,
@@ -246,7 +255,7 @@ export class BaseAgent {
         parsed = JSON.parse(finalContent);
       } catch (e) {
         this.logger.warn('json_schema 模式流式解析失败：provider 声明的 schema 保证未兑现，不会重试');
-        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, this.provider.name, 'parse_error');
+        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, provider.name, 'parse_error');
       }
 
       this.logger.info('流式调用完成');
@@ -273,7 +282,7 @@ export class BaseAgent {
       let reasoning = '';
       let finalContent = '';
 
-      for await (const chunk of this.provider.chatStream({
+      for await (const chunk of provider.chatStream({
         model: callConfig?.model ?? this.config.model,
         messages: requestMessages,
         temperature: this.config.temperature ?? 0.3,
@@ -286,7 +295,7 @@ export class BaseAgent {
       }
 
       try {
-        return this.#parseResponse<T>(finalContent, schema, reasoning || null, '流式');
+        return this.#parseResponse<T>(finalContent, schema, reasoning || null, provider.name, '流式');
       } catch (err: unknown) {
         lastError = err as Error;
         this.logger.warn(
