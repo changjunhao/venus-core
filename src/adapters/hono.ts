@@ -29,7 +29,9 @@ import {
   mapErrorToResponse,
   handleEvaluate,
   handleMetadata,
+  handleGroupEvaluate,
   resolveStreamParamsWithHook,
+  resolveGroupStreamParamsWithHook,
   formatSSEError,
   formatJSONLError,
 } from './common.js';
@@ -114,6 +116,110 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
             const encoder = new TextEncoder();
             try {
               for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
+                controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+              }
+            } catch (err) {
+              controller.enqueue(encoder.encode(formatJSONLError(err)));
+            } finally {
+              controller.close();
+            }
+          },
+        }),
+        {
+          headers: {
+            'Content-Type': 'application/x-ndjson',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+            'X-Accel-Buffering': 'no',
+          },
+        },
+      );
+    } catch (error) {
+      const { status, body } = mapErrorToResponse(error);
+      return c.json(body, status);
+    }
+  });
+
+  // POST /evaluate/group
+  app.post(`${prefix}/evaluate/group`, async (c) => {
+    try {
+      const body = await c.req.json();
+      const result = await handleGroupEvaluate(engine, body, hooks);
+      if (!result.ok) {
+        return c.json(result.body, result.status);
+      }
+      return c.json(result.data);
+    } catch (error) {
+      const { status, body } = mapErrorToResponse(error);
+      return c.json(body, status);
+    }
+  });
+
+  // POST /evaluate/group/stream (SSE)
+  app.post(`${prefix}/evaluate/group/stream`, async (c) => {
+    try {
+      const body = await c.req.json();
+      const parsed = await resolveGroupStreamParamsWithHook(body, hooks);
+      if (!parsed.ok) {
+        return c.json(parsed.body, parsed.status);
+      }
+      const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
+
+      return new Response(
+        new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            try {
+              for await (const event of engine.evaluateGroupStream(imageUrls, mode, {
+                genre,
+                context,
+                includePerImage,
+                mode: streamMode,
+              })) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+              }
+            } catch (err) {
+              controller.enqueue(encoder.encode(formatSSEError(err)));
+            } finally {
+              controller.close();
+            }
+          },
+        }),
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        },
+      );
+    } catch (error) {
+      const { status, body } = mapErrorToResponse(error);
+      return c.json(body, status);
+    }
+  });
+
+  // POST /evaluate/group/stream/jsonl (Streamable HTTP - JSON Lines)
+  app.post(`${prefix}/evaluate/group/stream/jsonl`, async (c) => {
+    try {
+      const body = await c.req.json();
+      const parsed = await resolveGroupStreamParamsWithHook(body, hooks);
+      if (!parsed.ok) {
+        return c.json(parsed.body, parsed.status);
+      }
+      const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
+
+      return new Response(
+        new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            try {
+              for await (const event of engine.evaluateGroupStream(imageUrls, mode, {
+                genre,
+                context,
+                includePerImage,
+                mode: streamMode,
+              })) {
                 controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
               }
             } catch (err) {

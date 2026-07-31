@@ -254,14 +254,14 @@ const GENRE_CONFIG = {
 // ============================================================
 // 3. 评分字段辅助
 // ============================================================
-const scoreField = (): z.ZodNumber => z.number().min(0).max(10).multipleOf(0.1);
+export const scoreField = (): z.ZodNumber => z.number().min(0).max(10).multipleOf(0.1);
 
 // ============================================================
 // 4. 子类型枚举注册表（缓存）
 // ============================================================
 const subtypeEnumCache: Record<string, z.ZodType<string>> = {};
 
-function getSubtypeEnum(genre: Genre): z.ZodType<string> {
+export function getSubtypeEnum(genre: Genre): z.ZodType<string> {
   if (!subtypeEnumCache[genre]) {
     const cfg = GENRE_CONFIG[genre];
     if (!cfg) throw new Error(`Unknown genre: ${genre}`);
@@ -274,7 +274,7 @@ function getSubtypeEnum(genre: Genre): z.ZodType<string> {
 // 5. 工厂函数 — 动态创建 Schema
 // ============================================================
 
-function buildDimensionsSchema(genre: Genre) {
+export function buildDimensionsSchema(genre: Genre) {
   const cfg = GENRE_CONFIG[genre];
   if (!cfg) throw new Error(`Unknown genre: ${genre}`);
   const shape: Record<string, z.ZodNumber> = {};

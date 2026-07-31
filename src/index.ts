@@ -42,6 +42,7 @@ export {
   getMetadata,
   getAllGenres,
 } from './schema/index.js';
+export { getGroupJointSchemas, getGroupCompareSchemas } from './schema/group.js';
 export type { SubtypeForGenre, DimensionForGenre } from './schema/index.js';
 
 // ─── Errors ───────────────────────────────────────────────

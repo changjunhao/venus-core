@@ -18,15 +18,47 @@ import type {
   ArbitrationResult,
   EvaluationContext,
   ChatReasoningParams,
+  GroupEvaluationMode,
+  GroupEvaluateOptions,
+  GroupEvaluateStreamOptions,
+  GroupEvaluationMetadata,
+  GroupEvaluationResult,
+  GroupJointEvaluationResult,
+  GroupCompareEvaluationResult,
+  GroupJointProposerResult,
+  GroupCompareProposerResult,
+  GroupJointArbitrationResult,
+  GroupCompareArbitrationResult,
+  GroupEvaluationStreamEvent,
 } from './types.js';
 import { ProposerAgent } from './agents/proposer.js';
 import { CriticAgent } from './agents/critic.js';
 import { ArbiterAgent } from './agents/arbiter.js';
 import { GenreDetectorAgent } from './agents/genre-detector.js';
 import { getProposerResultSchema, getGenreConfig } from './schema/index.js';
-import { VenusError } from './utils/errors.js';
+import { VenusError, ValidationError } from './utils/errors.js';
 import { createLogger } from './utils/logger.js';
 import { z } from 'zod';
+
+/** 组图评估的图片数量下限 */
+const MIN_GROUP_IMAGES = 2;
+/** 组图评估的图片数量上限 */
+const MAX_GROUP_IMAGES = 10;
+
+/** 组图 Proposer 输出联合类型（joint | compare） */
+type GroupProposerOutput = GroupJointProposerResult | GroupCompareProposerResult;
+
+/** 组图 Arbiter 输出联合类型（joint | compare） */
+type GroupArbitrationOutput = GroupJointArbitrationResult | GroupCompareArbitrationResult;
+
+/**
+ * #runStreamRound 实际产出的事件联合（agent_call / reasoning_chunk / result_chunk / agent_complete）。
+ * 同时可安全赋值给 EvaluationStreamEvent 与 GroupEvaluationStreamEvent，供单图与组图流式复用。
+ */
+type StreamRoundEvent = Extract<
+  EvaluationStreamEvent,
+  { type: 'agent_call' | 'reasoning_chunk' | 'result_chunk' | 'agent_complete' }
+>;
 
 /**
  * VenusEngine — 核心编排器
@@ -421,7 +453,7 @@ export class VenusEngine {
     agentName: string,
     round: number,
     mode: StreamMode,
-  ): AsyncGenerator<EvaluationStreamEvent, AgentCallResult<T>, unknown> {
+  ): AsyncGenerator<StreamRoundEvent, AgentCallResult<T>, unknown> {
     yield { type: 'agent_call', round, agent: agentName, timestamp: Date.now() };
     // round 0 (genre detection) is not surfaced via onEvent, matching evaluate()
     // where round 0 only carries the round_start marker emitted after resolution
@@ -434,7 +466,7 @@ export class VenusEngine {
     while (!next.done) {
       const chunk = next.value;
       // Convert provider-level StreamChunk → engine-level EvaluationStreamEvent
-      const events: EvaluationStreamEvent[] = [];
+      const events: StreamRoundEvent[] = [];
       if (chunk.reasoning) {
         events.push({ type: 'reasoning_chunk', agent: agentName, content: chunk.reasoning, timestamp: Date.now() });
       }
@@ -594,6 +626,402 @@ export class VenusEngine {
       );
 
       yield { type: 'evaluation_complete', data: result, timestamp: Date.now() };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const code = err instanceof VenusError ? err.code : undefined;
+      this.#emit({ type: 'error', agent: 'engine', data: { error: err } });
+      yield { type: 'error', error: { message, code }, timestamp: Date.now() };
+    }
+  }
+
+  /** Validate group size, throwing ValidationError when out of the [2, 10] range */
+  #validateGroupSize(imageUrls: string[]): void {
+    if (imageUrls.length < MIN_GROUP_IMAGES || imageUrls.length > MAX_GROUP_IMAGES) {
+      throw new ValidationError(
+        `组图评估需要 ${MIN_GROUP_IMAGES}-${MAX_GROUP_IMAGES} 张图片，实际收到 ${imageUrls.length} 张`,
+      );
+    }
+  }
+
+  /** Resolve group genre (auto-detect over all images or use provided) and build augmented context */
+  async #resolveGroupGenreAndContext(
+    imageUrls: string[],
+    genre: Genre | null | undefined,
+    context: EvaluationContext | undefined,
+  ): Promise<{
+    detectedGenre: Genre;
+    genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
+    augmentedContext: EvaluationContext | undefined;
+  }> {
+    let detectedGenre: Genre;
+    let genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
+
+    if (!genre) {
+      genreDetectionOut = await this.#buildGenreDetector().detect(imageUrls);
+      detectedGenre = genreDetectionOut.result.genre;
+    } else {
+      detectedGenre = genre;
+    }
+
+    const augmentedContext = this.#augmentContextWithGenreReasoning(context, genreDetectionOut);
+
+    return { detectedGenre, genreDetectionOut, augmentedContext };
+  }
+
+  /** Build the final GroupEvaluationResult from agent outputs */
+  #buildGroupResult(
+    imageUrls: string[],
+    mode: GroupEvaluationMode,
+    includePerImage: boolean,
+    detectedGenre: Genre,
+    genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined,
+    proposalOut: AgentCallResult<GroupProposerOutput>,
+    critiqueOut: AgentCallResult<CritiqueResult>,
+    revisionOut: AgentCallResult<GroupProposerOutput> | undefined,
+    arbitrationOut: AgentCallResult<GroupArbitrationOutput>,
+    startTime: number,
+    context?: EvaluationContext,
+  ): GroupEvaluationResult {
+    const rounds: 3 | 4 = critiqueOut.result.severity === 'HIGH' ? 4 : 3;
+    const metadata: GroupEvaluationMetadata = {
+      evaluatedAt: new Date().toISOString(),
+      durationMs: Date.now() - startTime,
+      rounds,
+      imageCount: imageUrls.length,
+      includePerImage,
+      context: context,
+    };
+
+    if (mode === 'joint') {
+      const arb = arbitrationOut.result as GroupJointArbitrationResult;
+      const result: GroupJointEvaluationResult = {
+        imageUrls,
+        mode: 'joint',
+        genre: detectedGenre,
+        sceneType: arb.scene_type,
+        totalScore: arb.total_score,
+        dimensions: arb.dimensions,
+        groupAnalysis: arb.group_analysis,
+        critique: arb.critique,
+        suggestions: arb.suggestions,
+        arbitrationNotes: arb.arbitration_notes,
+        process: {
+          genreDetection: genreDetectionOut,
+          proposal: proposalOut as AgentCallResult<GroupJointProposerResult>,
+          critique: critiqueOut,
+          revision: revisionOut as AgentCallResult<GroupJointProposerResult> | undefined,
+          arbitration: arbitrationOut as AgentCallResult<GroupJointArbitrationResult>,
+        },
+        metadata,
+      };
+      if (includePerImage && arb.per_image) {
+        result.perImage = arb.per_image;
+      }
+      return result;
+    }
+
+    const arb = arbitrationOut.result as GroupCompareArbitrationResult;
+    const result: GroupCompareEvaluationResult = {
+      imageUrls,
+      mode: 'compare',
+      genre: detectedGenre,
+      ranking: arb.ranking,
+      comparisonSummary: arb.comparison_summary,
+      suggestions: arb.suggestions,
+      arbitrationNotes: arb.arbitration_notes,
+      process: {
+        genreDetection: genreDetectionOut,
+        proposal: proposalOut as AgentCallResult<GroupCompareProposerResult>,
+        critique: critiqueOut,
+        revision: revisionOut as AgentCallResult<GroupCompareProposerResult> | undefined,
+        arbitration: arbitrationOut as AgentCallResult<GroupCompareArbitrationResult>,
+      },
+      metadata,
+    };
+    if (includePerImage && arb.per_image) {
+      result.perImage = arb.per_image;
+    }
+    return result;
+  }
+
+  /** Run a full group evaluation (joint or compare) on a set of images */
+  async evaluateGroup(
+    imageUrls: string[],
+    mode: GroupEvaluationMode,
+    options?: GroupEvaluateOptions,
+  ): Promise<GroupEvaluationResult> {
+    const startTime = Date.now();
+    const includePerImage = options?.includePerImage ?? false;
+
+    this.#validateGroupSize(imageUrls);
+
+    this.#logger.info(`组图评估 (mode=${mode}): ${imageUrls.length} 张图片`);
+
+    const { detectedGenre, genreDetectionOut, augmentedContext } = await this.#resolveGroupGenreAndContext(
+      imageUrls,
+      options?.genre,
+      options?.context,
+    );
+
+    if (genreDetectionOut) {
+      const genreLabel = getGenreConfig(detectedGenre).label;
+      this.#logger.info(`检测结果: ${genreLabel}${genreDetectionOut.reasoning ? ' (有推理链)' : ''}`);
+    }
+
+    this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrls, mode, genre: detectedGenre } });
+
+    try {
+      // 构建 Agents
+      const { proposer, critic, arbiter } = this.#buildAgents();
+
+      // 第1轮：提案者组图初评
+      this.#logger.info('第1轮：提案者组图初评');
+      this.#emit({ type: 'agent_call', round: 1, agent: 'proposer' });
+      const proposalOut: AgentCallResult<GroupProposerOutput> = await proposer.evaluateGroup(
+        imageUrls,
+        mode,
+        detectedGenre,
+        includePerImage,
+        augmentedContext,
+      );
+      this.#emit({
+        type: 'agent_complete',
+        round: 1,
+        agent: 'proposer',
+        data: { result: proposalOut.result, reasoning: proposalOut.reasoning },
+      });
+      this.#emit({ type: 'round_complete', round: 1 });
+
+      // 第2轮：批判者攻击
+      this.#logger.info('第2轮：批判者攻击');
+      this.#emit({ type: 'agent_call', round: 2, agent: 'critic' });
+      const critiqueOut: AgentCallResult<CritiqueResult> = await critic.attackGroup(
+        imageUrls,
+        mode,
+        proposalOut.result,
+        proposalOut.reasoning,
+        detectedGenre,
+        augmentedContext,
+      );
+      this.#emit({
+        type: 'agent_complete',
+        round: 2,
+        agent: 'critic',
+        data: { result: critiqueOut.result, reasoning: critiqueOut.reasoning },
+      });
+      this.#emit({ type: 'round_complete', round: 2 });
+      const critiqueSeverity = critiqueOut.result.severity;
+      this.#logger.info(`严重程度: ${critiqueSeverity}`);
+
+      // 第3轮：条件分支
+      let revisionOut: AgentCallResult<GroupProposerOutput> | undefined;
+      if (critiqueSeverity === 'HIGH') {
+        this.#logger.info('第3轮：提案者修正（严重程度 HIGH）');
+        this.#emit({ type: 'agent_call', round: 3, agent: 'proposer' });
+        revisionOut = await proposer.reviseGroup(
+          imageUrls,
+          mode,
+          proposalOut.result,
+          critiqueOut.result,
+          critiqueOut.reasoning,
+          detectedGenre,
+          includePerImage,
+          augmentedContext,
+        );
+        this.#emit({
+          type: 'agent_complete',
+          round: 3,
+          agent: 'proposer',
+          data: { result: revisionOut.result, reasoning: revisionOut.reasoning },
+        });
+        this.#emit({ type: 'round_complete', round: 3 });
+      }
+
+      // 第4轮：仲裁者裁决
+      const finalRound = critiqueSeverity === 'HIGH' ? 4 : 3;
+      this.#logger.info('最终轮：仲裁者裁决');
+      this.#emit({ type: 'agent_call', round: finalRound, agent: 'arbiter' });
+      const arbitrationOut: AgentCallResult<GroupArbitrationOutput> = await arbiter.decideGroup(
+        imageUrls,
+        mode,
+        proposalOut.result,
+        critiqueOut.result,
+        revisionOut?.result ?? null,
+        proposalOut.reasoning,
+        critiqueOut.reasoning,
+        revisionOut?.reasoning ?? null,
+        detectedGenre,
+        includePerImage,
+        augmentedContext,
+      );
+      this.#emit({
+        type: 'agent_complete',
+        round: finalRound,
+        agent: 'arbiter',
+        data: { result: arbitrationOut.result, reasoning: arbitrationOut.reasoning },
+      });
+      this.#emit({ type: 'round_complete', round: finalRound });
+
+      // ── 组装最终结果 ──
+      return this.#buildGroupResult(
+        imageUrls,
+        mode,
+        includePerImage,
+        detectedGenre,
+        genreDetectionOut,
+        proposalOut,
+        critiqueOut,
+        revisionOut,
+        arbitrationOut,
+        startTime,
+        augmentedContext,
+      );
+    } catch (err) {
+      this.#emit({ type: 'error', agent: 'engine', data: { error: err } });
+      throw err;
+    }
+  }
+
+  /** Run a streaming group evaluation, yielding events at each stage */
+  async *evaluateGroupStream(
+    imageUrls: string[],
+    mode: GroupEvaluationMode,
+    options?: GroupEvaluateStreamOptions,
+  ): AsyncGenerator<GroupEvaluationStreamEvent, void, unknown> {
+    const includePerImage = options?.includePerImage ?? false;
+    const streamMode: StreamMode = options?.mode ?? 'values';
+    const startTime = Date.now();
+
+    try {
+      this.#validateGroupSize(imageUrls);
+
+      this.#logger.info(`[stream] 组图评估 (mode=${mode}): ${imageUrls.length} 张图片 (streamMode=${streamMode})`);
+
+      // ── 门类检测（支持流式）──
+      let detectedGenre: Genre;
+      let genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
+      let augmentedContext: EvaluationContext | undefined;
+
+      if (!options?.genre) {
+        const detector = this.#buildGenreDetector();
+        genreDetectionOut = yield* this.#runStreamRound<{ genre: Genre; confidence: number }>(
+          detector.detectStream(imageUrls),
+          'genreDetector',
+          0,
+          streamMode,
+        );
+        detectedGenre = genreDetectionOut.result.genre;
+
+        augmentedContext = this.#augmentContextWithGenreReasoning(options?.context, genreDetectionOut);
+
+        const genreLabel = getGenreConfig(detectedGenre).label;
+        this.#logger.info(`[stream] 检测结果: ${genreLabel}${genreDetectionOut.reasoning ? ' (有推理链)' : ''}`);
+        yield {
+          type: 'genre_detected',
+          data: { genre: detectedGenre, reasoning: genreDetectionOut.reasoning },
+          timestamp: Date.now(),
+        };
+      } else {
+        detectedGenre = options.genre;
+        augmentedContext = options?.context;
+      }
+
+      yield {
+        type: 'group_evaluation_start',
+        data: { imageUrls, mode, genre: detectedGenre },
+        timestamp: Date.now(),
+      };
+      this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrls, mode, genre: detectedGenre } });
+
+      // Build Agents
+      const { proposer, critic, arbiter } = this.#buildAgents();
+
+      // ── 第1轮：提案者组图初评 ──
+      this.#logger.info('[stream] 第1轮：提案者组图初评');
+      const proposalOut = yield* this.#runStreamRound<GroupProposerOutput>(
+        proposer.evaluateGroupStream(imageUrls, mode, detectedGenre, includePerImage, augmentedContext),
+        'proposer',
+        1,
+        streamMode,
+      );
+
+      // ── 第2轮：批判者攻击 ──
+      this.#logger.info('[stream] 第2轮：批判者攻击');
+      const critiqueOut = yield* this.#runStreamRound<CritiqueResult>(
+        critic.attackGroupStream(
+          imageUrls,
+          mode,
+          proposalOut.result,
+          proposalOut.reasoning,
+          detectedGenre,
+          augmentedContext,
+        ),
+        'critic',
+        2,
+        streamMode,
+      );
+      const critiqueSeverity = critiqueOut.result.severity;
+      this.#logger.info(`[stream] 严重程度: ${critiqueSeverity}`);
+
+      // ── 第3轮：条件分支 ──
+      let revisionOut: AgentCallResult<GroupProposerOutput> | undefined;
+      if (critiqueSeverity === 'HIGH') {
+        this.#logger.info('[stream] 第3轮：提案者修正（严重程度 HIGH）');
+        revisionOut = yield* this.#runStreamRound<GroupProposerOutput>(
+          proposer.reviseGroupStream(
+            imageUrls,
+            mode,
+            proposalOut.result,
+            critiqueOut.result,
+            critiqueOut.reasoning,
+            detectedGenre,
+            includePerImage,
+            augmentedContext,
+          ),
+          'proposer-revision',
+          3,
+          streamMode,
+        );
+      }
+
+      // ── 最终轮：仲裁者裁决 ──
+      const finalRound = critiqueSeverity === 'HIGH' ? 4 : 3;
+      this.#logger.info('[stream] 最终轮：仲裁者裁决');
+      const arbitrationOut = yield* this.#runStreamRound<GroupArbitrationOutput>(
+        arbiter.decideGroupStream(
+          imageUrls,
+          mode,
+          proposalOut.result,
+          critiqueOut.result,
+          revisionOut?.result ?? null,
+          proposalOut.reasoning,
+          critiqueOut.reasoning,
+          revisionOut?.reasoning ?? null,
+          detectedGenre,
+          includePerImage,
+          augmentedContext,
+        ),
+        'arbiter',
+        finalRound,
+        streamMode,
+      );
+
+      // 组装最终结果
+      const result = this.#buildGroupResult(
+        imageUrls,
+        mode,
+        includePerImage,
+        detectedGenre,
+        genreDetectionOut,
+        proposalOut,
+        critiqueOut,
+        revisionOut,
+        arbitrationOut,
+        startTime,
+        augmentedContext,
+      );
+
+      yield { type: 'group_evaluation_complete', data: result, timestamp: Date.now() };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const code = err instanceof VenusError ? err.code : undefined;

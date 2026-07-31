@@ -63,6 +63,76 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg',
 }
 ```
 
+## Group Evaluation
+
+`evaluateGroup()` evaluates **2 to 10 images at once** through the same adversarial pipeline. The group mode is the second positional argument:
+
+| Mode | Use it for | Key result fields |
+|------|-----------|-------------------|
+| `joint` | A series / photo essay judged as a whole | `sceneType`, `totalScore`, `dimensions`, `groupAnalysis`, `critique`, `suggestions` |
+| `compare` | Ranking the images against each other | `ranking` (per image: `index`, `rank`, `score`, `rationale`), `comparisonSummary`, `suggestions` |
+
+```ts
+const imageUrls = [
+  'https://example.com/wedding-01.jpg',
+  'https://example.com/wedding-02.jpg',
+  'https://example.com/wedding-03.jpg',
+];
+
+// Joint evaluation — the group as one body of work
+const joint = await engine.evaluateGroup(imageUrls, 'joint', { genre: 'portrait' });
+console.log(joint.totalScore);     // 8.4
+console.log(joint.groupAnalysis);  // narrative / consistency analysis of the series
+
+// Compare evaluation — rank the images against each other
+const compare = await engine.evaluateGroup(imageUrls, 'compare');
+for (const item of compare.ranking) {
+  console.log(`#${item.rank} → image ${item.index} (${item.score}): ${item.rationale}`);
+}
+```
+
+Fewer than 2 or more than 10 URLs throws `ValidationError`. `index` in `ranking` (and in `perImage`) is the 0-based position in the input `imageUrls` array.
+
+### Per-Image Details (`includePerImage`)
+
+`includePerImage` defaults to `false`. It is enforced at **both the prompt and the JSON Schema layer**: when disabled, the prompts do not ask for per-image output and the schema has no `per_image` field, so the model never generates those tokens. Enable it only when you actually need the extra detail:
+
+```ts
+const result = await engine.evaluateGroup(imageUrls, 'joint', { includePerImage: true });
+
+result.perImage?.forEach((item) => {
+  console.log(`image ${item.index}: ${item.score} — ${item.comment}`);
+});
+console.log(result.metadata.includePerImage); // true
+```
+
+> Tip: prefer public HTTP(S) URLs over `data:` base64 URLs for groups — providers that accept URLs pass them straight through, avoiding base64 payload inflation across all rounds.
+
+### Streaming Group Evaluation
+
+```ts
+for await (const event of engine.evaluateGroupStream(imageUrls, 'compare', {
+  mode: 'updates', // streaming granularity, independent of the group mode above
+})) {
+  switch (event.type) {
+    case 'group_evaluation_start':
+      console.log(`Evaluating ${event.data.imageUrls.length} images (${event.data.mode})`);
+      break;
+    case 'reasoning_chunk':
+      process.stdout.write(event.content);
+      break;
+    case 'group_evaluation_complete':
+      console.log(event.data.mode === 'compare' ? event.data.ranking : event.data.totalScore);
+      break;
+    case 'error':
+      console.error(event.error.message);
+      break;
+  }
+}
+```
+
+Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Errors — including an image count outside 2–10 — surface as a final `error` event.
+
 ## Web Framework Integration
 
 ### Hono (recommended)
@@ -126,11 +196,150 @@ Both adapters expose the same endpoints:
 | `POST` | `/evaluate` | Synchronous evaluation |
 | `POST` | `/evaluate/stream` | Streaming evaluation (SSE / `text/event-stream`) |
 | `POST` | `/evaluate/stream/jsonl` | Streaming evaluation (JSON Lines / `application/x-ndjson`) |
+| `POST` | `/evaluate/group` | Synchronous group evaluation (2–10 images) |
+| `POST` | `/evaluate/group/stream` | Streaming group evaluation (SSE / `text/event-stream`) |
+| `POST` | `/evaluate/group/stream/jsonl` | Streaming group evaluation (JSON Lines / `application/x-ndjson`) |
 | `GET` | `/metadata` | Genre metadata and dimensions |
+
+### Group Evaluation Endpoints
+
+All three group endpoints accept the same JSON body:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `imageUrls` | `string[]` | yes | 2–10 image URLs; private/reserved hosts are rejected (SSRF protection) |
+| `mode` | `'joint' \| 'compare'` | yes | **Group evaluation mode** |
+| `genre` | `Genre` | no | Pre-specified genre; auto-detected if omitted |
+| `context` | `EvaluationContext` | no | EXIF data, user notes, custom metadata |
+| `includePerImage` | `boolean` | no | Request per-image details (default `false`) |
+| `streamMode` | `'values' \| 'updates'` | no | **Streaming granularity**, stream endpoints only (default `values`) |
+
+**`mode` vs `streamMode`** — the group endpoints carry two independent switches:
+
+| Field | Values | Meaning | SDK equivalent |
+|-------|--------|---------|----------------|
+| `mode` | `joint` / `compare` | *What* is evaluated: the group as a whole vs. images against each other | 2nd positional argument of `evaluateGroup()` / `evaluateGroupStream()` |
+| `streamMode` | `values` / `updates` | *How finely* events are emitted (milestones only vs. plus `reasoning_chunk` / `result_chunk`) | `options.mode` of `evaluateGroupStream()` |
+
+> On the single-image endpoints the granularity field is called `mode` (there is no evaluation mode there). The group endpoints rename it to `streamMode` so that `mode` can carry `joint` / `compare`.
+
+Synchronous group evaluation:
+
+```bash
+curl -X POST http://localhost:3000/api/evaluate/group \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "imageUrls": [
+      "https://example.com/wedding-01.jpg",
+      "https://example.com/wedding-02.jpg"
+    ],
+    "mode": "joint",
+    "genre": "portrait",
+    "includePerImage": false
+  }'
+```
+
+`joint` response (abridged):
+
+```json
+{
+  "imageUrls": ["https://example.com/wedding-01.jpg", "https://example.com/wedding-02.jpg"],
+  "mode": "joint",
+  "genre": "portrait",
+  "sceneType": "wedding",
+  "totalScore": 8.4,
+  "dimensions": { "facial_expression": 8.5, "pose_body": 8.0, "lighting_quality": 8.5 },
+  "groupAnalysis": "The two frames form a coherent narrative ...",
+  "critique": "...",
+  "suggestions": "...",
+  "arbitrationNotes": "...",
+  "process": { "proposal": {}, "critique": {}, "arbitration": {} },
+  "metadata": {
+    "evaluatedAt": "2026-07-29T09:12:34.567Z",
+    "durationMs": 42100,
+    "rounds": 3,
+    "imageCount": 2,
+    "includePerImage": false
+  }
+}
+```
+
+`compare` response (abridged) — same request with `"mode": "compare"`:
+
+```json
+{
+  "imageUrls": ["https://example.com/wedding-01.jpg", "https://example.com/wedding-02.jpg"],
+  "mode": "compare",
+  "genre": "portrait",
+  "ranking": [
+    { "index": 1, "rank": 1, "score": 8.5, "rationale": "Stronger light and cleaner background" },
+    { "index": 0, "rank": 2, "score": 7.5, "rationale": "Flatter expression, busier frame" }
+  ],
+  "comparisonSummary": "The second frame leads on light control ...",
+  "suggestions": "...",
+  "arbitrationNotes": "...",
+  "process": { "proposal": {}, "critique": {}, "arbitration": {} },
+  "metadata": {
+    "evaluatedAt": "2026-07-29T09:14:02.001Z",
+    "durationMs": 39800,
+    "rounds": 3,
+    "imageCount": 2,
+    "includePerImage": false
+  }
+}
+```
+
+Validation failures return `400` with `{ "error": { "code": "VALIDATION_ERROR", "message": "..." } }` — fewer than 2 or more than 10 URLs, a missing/unknown `mode`, an unknown `genre`, or any URL pointing at a private/reserved host.
+
+Streaming group evaluation over SSE:
+
+```bash
+curl -N -X POST http://localhost:3000/api/evaluate/group/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "imageUrls": ["https://example.com/a.jpg", "https://example.com/b.jpg"],
+    "mode": "compare",
+    "streamMode": "updates"
+  }'
+```
+
+Each event is a `data:` line terminated by a blank line:
+
+```text
+data: {"type":"agent_call","round":0,"agent":"genreDetector","timestamp":1785000000000}
+
+data: {"type":"genre_detected","data":{"genre":"portrait","reasoning":null},"timestamp":1785000000100}
+
+data: {"type":"group_evaluation_start","data":{"imageUrls":["https://example.com/a.jpg","https://example.com/b.jpg"],"mode":"compare","genre":"portrait"},"timestamp":1785000000200}
+
+data: {"type":"agent_call","round":1,"agent":"proposer","timestamp":1785000000300}
+
+data: {"type":"reasoning_chunk","agent":"proposer","content":"Comparing the two frames ...","timestamp":1785000000400}
+
+data: {"type":"agent_complete","round":1,"agent":"proposer","data":{"result":{},"reasoning":null},"timestamp":1785000012000}
+
+data: {"type":"group_evaluation_complete","data":{"mode":"compare","ranking":[]},"timestamp":1785000040000}
+```
+
+The JSONL endpoint emits the very same events, one compact JSON object per line (no `data:` prefix) with `Content-Type: application/x-ndjson`:
+
+```bash
+curl -N -X POST http://localhost:3000/api/evaluate/group/stream/jsonl \
+  -H 'Content-Type: application/json' \
+  -d '{"imageUrls":["https://example.com/a.jpg","https://example.com/b.jpg"],"mode":"joint"}'
+```
+
+```text
+{"type":"group_evaluation_start","data":{"imageUrls":["https://example.com/a.jpg","https://example.com/b.jpg"],"mode":"joint","genre":"portrait"},"timestamp":1785000000200}
+{"type":"agent_call","round":1,"agent":"proposer","timestamp":1785000000300}
+{"type":"group_evaluation_complete","data":{"mode":"joint","totalScore":8.4},"timestamp":1785000040000}
+```
+
+On both stream endpoints a mid-flight failure is appended as a final `error` event, and the HTTP status stays `200` because the headers are already sent.
 
 ## Adapter Hooks
 
-Adapters expose a `beforeEvaluate` lifecycle hook for request transformation. The hook receives validated `EvaluateParams` and can transform them before the engine call — ideal for pre-processing workflows.
+Adapters expose a `beforeEvaluate` lifecycle hook for request transformation. The hook receives validated `EvaluateParams` and can transform them before the engine call — ideal for pre-processing workflows. Group endpoints have their own `beforeEvaluateGroup` counterpart.
 
 ### `AdapterHooks`
 
@@ -144,6 +353,12 @@ interface AdapterHooks {
    * override genre, switch streaming granularity, etc.
    */
   beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+
+  /**
+   * Called before a group evaluation starts (both sync and stream endpoints).
+   * Receives the validated group request params, can transform and return modified params.
+   */
+  beforeEvaluateGroup?: (params: GroupEvaluateParams) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
 }
 ```
 
@@ -155,6 +370,19 @@ interface EvaluateParams {
   genre: Genre | null;
   context?: EvaluationContext;
   mode?: StreamMode;
+}
+```
+
+### `GroupEvaluateParams`
+
+```ts
+interface GroupEvaluateParams {
+  imageUrls: string[];
+  mode: GroupEvaluationMode;   // 'joint' | 'compare'
+  genre: Genre | null;
+  context?: EvaluationContext;
+  includePerImage?: boolean;
+  streamMode?: StreamMode;     // 'values' | 'updates'
 }
 ```
 
@@ -194,7 +422,25 @@ const adapter = createExpressAdapter(engine, {
 });
 ```
 
-The hook fires on **all endpoints** (`/evaluate`, `/evaluate/stream`, `/evaluate/stream/jsonl`) and supports both sync and async implementations.
+The hook fires on **all single-image endpoints** (`/evaluate`, `/evaluate/stream`, `/evaluate/stream/jsonl`) and supports both sync and async implementations.
+
+### Hook Example: Group Pre-Processing
+
+`beforeEvaluateGroup` fires on **all three group endpoints** (`/evaluate/group`, `/evaluate/group/stream`, `/evaluate/group/stream/jsonl`) and can rewrite every field of `GroupEvaluateParams`:
+
+```ts
+const adapter = createHonoAdapter(engine, {
+  hooks: {
+    beforeEvaluateGroup: async (params) => {
+      // Upload each image and force per-image details for premium tenants
+      const imageUrls = await Promise.all(params.imageUrls.map(uploadToFileAPI));
+      return { ...params, imageUrls, includePerImage: true };
+    },
+  },
+});
+```
+
+`beforeEvaluate` and `beforeEvaluateGroup` are independent: single-image requests never trigger the group hook, and vice versa.
 
 ## Context Extension
 

@@ -78,6 +78,127 @@ interface EvaluationResult {
 | `values` | 仅发送里程碑事件：`agent_call`、`agent_complete`、`evaluation_start`、`genre_detected`、`evaluation_complete`、`error` |
 | `updates` | 包含 `values` 全部事件，外加实时 `reasoning_chunk` 和 `result_chunk` 事件用于增量 UI 更新 |
 
+## 组图评估
+
+组图评估对**一次 2 到 10 张图片**运行与单图完全相同的对抗管线（门类检测 → 提案者 → 批判者 →（必要时）修订 → 仲裁者）。每一轮都会把全部图片随消息传入，因此智能体是把这组图当作一个整体来评判，而非把多次单图评分机械聚合。
+
+提供两种模式：
+
+| 模式 | 含义 | 输出侧重 |
+|------|---------|--------------|
+| `joint` | 把多张图片作为一个系列/组照整体评估 | 组级 `sceneType`、`totalScore`、门类 `dimensions`，以及关于叙事与一致性的 `groupAnalysis` |
+| `compare` | 组内图片相互对比 | 完整 `ranking`（每张图的排名、分数、依据）与 `comparisonSummary` |
+
+### `engine.evaluateGroup(imageUrls, mode, options?): Promise<GroupEvaluationResult>`
+
+执行完整组图评估。所有轮次完成后返回结果。
+
+| 参数 | 类型 | 说明 |
+|-----------|------|-------------|
+| `imageUrls` | `string[]` | 待评估图片的 URL 数组 — **2 到 10 张**；超出范围抛出 `ValidationError` |
+| `mode` | `'joint' \| 'compare'` | 组图评估模式 |
+| `options` | `GroupEvaluateOptions` | 可选配置（见下） |
+
+`GroupEvaluateOptions`：
+
+| 选项 | 类型 | 默认值 | 说明 |
+|--------|------|---------|-------------|
+| `genre` | `Genre \| null` | — | 为整组预先指定门类（跳过自动检测） |
+| `context` | `EvaluationContext` | — | 附加评估上下文（EXIF 数据、用户备注、自定义元数据） |
+| `includePerImage` | `boolean` | `false` | 是否额外要求逐图明细（`perImage`） |
+
+**`includePerImage` 与 token 成本**：该参数在**提示词与 JSON Schema 两层**同时控制。为 `false`（默认）时，提示词不要求逐图输出、Schema 也不含 `per_image` 字段，模型根本不会生成这些 token —— 是真实的节省，而非生成后过滤。为 `true` 时 Schema 增加 `per_image` 数组（长度必须等于图片数量），每项包含 `index` / `score` / `comment`。
+
+返回 `GroupEvaluationResult` —— 按 `mode` 收窄的判别联合类型：
+
+```ts
+// mode: 'joint'
+interface GroupJointEvaluationResult {
+  imageUrls: string[];
+  mode: 'joint';
+  genre: Genre;
+  sceneType: string;
+  totalScore: number;
+  dimensions: Record<string, number>;
+  groupAnalysis: string;
+  critique: string;
+  suggestions: string;
+  arbitrationNotes: string;
+  perImage?: PerImageDetail[];        // 仅当 includePerImage: true
+  process: {
+    genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
+    proposal: AgentCallResult<GroupJointProposerResult>;
+    critique: AgentCallResult<CritiqueResult>;
+    revision?: AgentCallResult<GroupJointProposerResult>;
+    arbitration: AgentCallResult<GroupJointArbitrationResult>;
+  };
+  metadata: GroupEvaluationMetadata;
+}
+
+// mode: 'compare'
+interface GroupCompareEvaluationResult {
+  imageUrls: string[];
+  mode: 'compare';
+  genre: Genre;
+  ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
+  comparisonSummary: string;
+  suggestions: string;
+  arbitrationNotes: string;
+  perImage?: PerImageDetail[];        // 仅当 includePerImage: true
+  process: { /* 结构相同，结果类型为 GroupCompare* 系列 */ };
+  metadata: GroupEvaluationMetadata;
+}
+
+interface GroupEvaluationMetadata {
+  evaluatedAt: string;
+  durationMs: number;
+  rounds: 3 | 4;
+  imageCount: number;
+  includePerImage: boolean;
+  context?: EvaluationContext;
+}
+
+interface PerImageDetail {
+  index: number;    // 在输入 imageUrls 数组中的位置（从 0 开始）
+  score: number;
+  comment: string;
+}
+```
+
+`ranking` 与 `perImage` 中的 `index` 始终表示**输入 `imageUrls` 数组中从 0 开始的下标**，因此无论排名如何都能映射回原始顺序。
+
+### `engine.evaluateGroupStream(imageUrls, mode, options?): AsyncGenerator<GroupEvaluationStreamEvent>`
+
+流式组图评估。`GroupEvaluateStreamOptions` 在 `GroupEvaluateOptions` 基础上增加流式粒度：
+
+| 选项 | 类型 | 默认值 | 说明 |
+|--------|------|---------|-------------|
+| `genre` | `Genre \| null` | — | 预先指定门类（跳过自动检测） |
+| `context` | `EvaluationContext` | — | 附加评估上下文 |
+| `includePerImage` | `boolean` | `false` | 是否要求逐图明细 |
+| `mode` | `'values' \| 'updates'` | `'values'` | 流式粒度模式（组图模式是第二个位置参数，二者互不冲突） |
+
+| 事件类型 | 说明 |
+|------------|-------------|
+| `group_evaluation_start` | 组图评估已开始（`{ imageUrls, mode, genre }`） |
+| `genre_detected` | 整组的门类自动检测结果 |
+| `agent_call` | 某个智能体轮次开始 |
+| `reasoning_chunk` | 实时推理文本（仅 `updates` 模式） |
+| `result_chunk` | 增量 JSON 片段（仅 `updates` 模式） |
+| `agent_complete` | 某个智能体轮次完成（含结果 + 推理） |
+| `group_evaluation_complete` | 最终 `GroupEvaluationResult` 就绪 |
+| `error` | 发生错误（图片数量越界也走此事件） |
+
+事件顺序：第 0 轮 `agent_call` / `agent_complete` 与 `genre_detected`（仅在自动检测门类时）→ `group_evaluation_start` → 各轮 `agent_call` / `agent_complete` → `group_evaluation_complete`。失败（包括图片数量不在 2–10 范围内）以末尾的 `error` 事件形式产出，而不是抛出异常。
+
+```ts
+for await (const event of engine.evaluateGroupStream(imageUrls, 'compare')) {
+  if (event.type === 'group_evaluation_complete') {
+    console.log(event.data.ranking);
+  }
+}
+```
+
 ## Schema 与门类工具
 
 ### `GenreEnum`
@@ -413,6 +534,21 @@ import type {
   EvaluationStreamEvent,
   EvaluateStreamOptions,
   StreamMode,
+
+  // 组图评估类型
+  GroupEvaluationMode,
+  GroupEvaluateOptions,
+  GroupEvaluateStreamOptions,
+  GroupEvaluationResult,
+  GroupJointEvaluationResult,
+  GroupCompareEvaluationResult,
+  GroupEvaluationMetadata,
+  GroupEvaluationStreamEvent,
+  GroupJointProposerResult,
+  GroupCompareProposerResult,
+  GroupJointArbitrationResult,
+  GroupCompareArbitrationResult,
+  PerImageDetail,
   
   // 提供商类型
   LLMProvider,
@@ -460,6 +596,8 @@ import type {
   AdapterOptions,
   AdapterHooks,
   EvaluateParams,
+  GroupEvaluateParams,
+  GroupEvaluateRequestBody,
   MetadataResponse,
 } from '@theogony/venus-core';
 ```

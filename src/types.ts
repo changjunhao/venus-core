@@ -102,8 +102,7 @@ export type ResponseFormat =
 
 /** Content types for multi-modal messages */
 export type ChatContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
 
 /** Chat message */
 export interface ChatMessage {
@@ -311,6 +310,12 @@ export interface AdapterHooks {
    * override genre, switch streaming granularity, etc.
    */
   beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+
+  /**
+   * Called before a group evaluation starts (both sync and stream endpoints).
+   * Receives the validated group request params, can transform and return modified params.
+   */
+  beforeEvaluateGroup?: (params: GroupEvaluateParams) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
 }
 
 /** Options for creating an adapter */
@@ -351,3 +356,160 @@ export type EvaluationStreamEvent =
     }
   | { type: 'evaluation_complete'; data: EvaluationResult; timestamp: number }
   | { type: 'error'; error: { message: string; code?: string }; timestamp: number };
+
+// ─── Group Evaluation Types ──────────────────────────────
+
+/** 组图评估模式：joint（联合评估）| compare（对比评估） */
+export type GroupEvaluationMode = 'joint' | 'compare';
+
+/** Options for evaluateGroup */
+export interface GroupEvaluateOptions {
+  /** Pre-specified genre (skips auto-detection) */
+  genre?: Genre | null;
+  /** Additional evaluation context (EXIF data, etc.) */
+  context?: EvaluationContext;
+  /** Whether to include per-image details in the result (default: false) */
+  includePerImage?: boolean;
+}
+
+/** Options for evaluateGroupStream */
+export interface GroupEvaluateStreamOptions extends GroupEvaluateOptions {
+  /** Streaming granularity mode (default: 'values') */
+  mode?: StreamMode;
+}
+
+/** 单张图片的逐图评估明细 */
+export interface PerImageDetail {
+  /** 图片在输入数组中的下标（从 0 开始） */
+  index: number;
+  score: number;
+  comment: string;
+}
+
+/** 组图联合评估 — Proposer 原始输出（snake_case） */
+export interface GroupJointProposerResult {
+  scene_type: string;
+  total_score: number;
+  dimensions: Record<string, number>;
+  group_analysis: string;
+  critique: string;
+  suggestions: string;
+  per_image?: PerImageDetail[];
+}
+
+/** 组图对比评估 — Proposer 原始输出（snake_case） */
+export interface GroupCompareProposerResult {
+  ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
+  comparison_summary: string;
+  suggestions: string;
+  per_image?: PerImageDetail[];
+}
+
+/** 组图联合评估 — Arbiter 原始输出 */
+export type GroupJointArbitrationResult = GroupJointProposerResult & {
+  arbitration_notes: string;
+};
+
+/** 组图对比评估 — Arbiter 原始输出 */
+export type GroupCompareArbitrationResult = GroupCompareProposerResult & {
+  arbitration_notes: string;
+};
+
+/** 组图评估结果元数据 */
+export interface GroupEvaluationMetadata {
+  evaluatedAt: string;
+  durationMs: number;
+  rounds: 3 | 4;
+  imageCount: number;
+  includePerImage: boolean;
+  context?: EvaluationContext;
+}
+
+/** 组图联合评估最终结果 */
+export interface GroupJointEvaluationResult {
+  imageUrls: string[];
+  mode: 'joint';
+  genre: Genre;
+  sceneType: string;
+  totalScore: number;
+  dimensions: Record<string, number>;
+  groupAnalysis: string;
+  critique: string;
+  suggestions: string;
+  arbitrationNotes: string;
+  perImage?: PerImageDetail[];
+
+  process: {
+    genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
+    proposal: AgentCallResult<GroupJointProposerResult>;
+    critique: AgentCallResult<CritiqueResult>;
+    revision?: AgentCallResult<GroupJointProposerResult>;
+    arbitration: AgentCallResult<GroupJointArbitrationResult>;
+  };
+
+  metadata: GroupEvaluationMetadata;
+}
+
+/** 组图对比评估最终结果 */
+export interface GroupCompareEvaluationResult {
+  imageUrls: string[];
+  mode: 'compare';
+  genre: Genre;
+  ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
+  comparisonSummary: string;
+  suggestions: string;
+  arbitrationNotes: string;
+  perImage?: PerImageDetail[];
+
+  process: {
+    genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
+    proposal: AgentCallResult<GroupCompareProposerResult>;
+    critique: AgentCallResult<CritiqueResult>;
+    revision?: AgentCallResult<GroupCompareProposerResult>;
+    arbitration: AgentCallResult<GroupCompareArbitrationResult>;
+  };
+
+  metadata: GroupEvaluationMetadata;
+}
+
+/** 组图评估最终结果（判别联合，按 mode 收窄） */
+export type GroupEvaluationResult = GroupJointEvaluationResult | GroupCompareEvaluationResult;
+
+/** 组图流式评估事件（复用单图事件中与图片无关的成员形状） */
+export type GroupEvaluationStreamEvent =
+  | {
+      type: 'group_evaluation_start';
+      data: { imageUrls: string[]; mode: GroupEvaluationMode; genre: Genre };
+      timestamp: number;
+    }
+  | Extract<
+      EvaluationStreamEvent,
+      { type: 'genre_detected' | 'agent_call' | 'reasoning_chunk' | 'result_chunk' | 'agent_complete' | 'error' }
+    >
+  | { type: 'group_evaluation_complete'; data: GroupEvaluationResult; timestamp: number };
+
+/**
+ * Validated group evaluate request parameters passed through adapter hooks.
+ *
+ * Represents the normalized shape of an `/evaluate/group` (or stream variant)
+ * request body after Zod validation, ready to be forwarded to the engine.
+ */
+export interface GroupEvaluateParams {
+  imageUrls: string[];
+  mode: GroupEvaluationMode;
+  genre: Genre | null;
+  context?: EvaluationContext;
+  includePerImage?: boolean;
+  streamMode?: StreamMode;
+}
+
+/** Group evaluation request body (used by adapters) */
+export interface GroupEvaluateRequestBody {
+  imageUrls: string[];
+  mode: GroupEvaluationMode;
+  genre?: Genre;
+  context?: EvaluationContext;
+  includePerImage?: boolean;
+  /** Stream granularity for the streaming group endpoint */
+  streamMode?: StreamMode;
+}

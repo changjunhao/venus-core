@@ -29,7 +29,9 @@ import {
   mapErrorToResponse,
   handleEvaluate,
   handleMetadata,
+  handleGroupEvaluate,
   resolveStreamParamsWithHook,
+  resolveGroupStreamParamsWithHook,
   formatSSEError,
   formatJSONLError,
 } from './common.js';
@@ -105,6 +107,89 @@ export function createExpressAdapter(engine: VenusEngine, options?: AdapterOptio
 
       try {
         for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
+          res.write(`${JSON.stringify(event)}\n`);
+        }
+      } catch (err) {
+        res.write(formatJSONLError(err));
+      } finally {
+        res.end();
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /evaluate/group
+  router.post(`${prefix}/evaluate/group`, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await handleGroupEvaluate(engine, req.body, hooks);
+      if (!result.ok) {
+        res.status(result.status).json(result.body);
+        return;
+      }
+      res.json(result.data);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /evaluate/group/stream (SSE)
+  router.post(`${prefix}/evaluate/group/stream`, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = await resolveGroupStreamParamsWithHook(req.body, hooks);
+      if (!parsed.ok) {
+        res.status(parsed.status).json(parsed.body);
+        return;
+      }
+      const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      try {
+        for await (const event of engine.evaluateGroupStream(imageUrls, mode, {
+          genre,
+          context,
+          includePerImage,
+          mode: streamMode,
+        })) {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+      } catch (err) {
+        res.write(formatSSEError(err));
+      } finally {
+        res.end();
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /evaluate/group/stream/jsonl (Streamable HTTP - JSON Lines)
+  router.post(`${prefix}/evaluate/group/stream/jsonl`, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = await resolveGroupStreamParamsWithHook(req.body, hooks);
+      if (!parsed.ok) {
+        res.status(parsed.status).json(parsed.body);
+        return;
+      }
+      const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
+
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+
+      try {
+        for await (const event of engine.evaluateGroupStream(imageUrls, mode, {
+          genre,
+          context,
+          includePerImage,
+          mode: streamMode,
+        })) {
           res.write(`${JSON.stringify(event)}\n`);
         }
       } catch (err) {

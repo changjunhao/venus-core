@@ -36,17 +36,25 @@ export class BaseAgent {
     this.#maxRetries = config.maxRetries ?? 3;
   }
 
-  /** Build user content parts from prompt + image URL */
-  #buildUserContent(userPrompt: string, imageUrl: string): ChatContentPart[] {
+  /** Build user content parts from prompt + image URL(s) */
+  #buildUserContent(userPrompt: string, imageUrl: string | string[]): ChatContentPart[] {
     const parts: ChatContentPart[] = [{ type: 'text', text: userPrompt }];
-    if (imageUrl) {
-      parts.push({ type: 'image_url', image_url: { url: imageUrl } });
+    const urls = Array.isArray(imageUrl) ? imageUrl : [imageUrl];
+    for (const url of urls) {
+      if (url) {
+        parts.push({ type: 'image_url', image_url: { url } });
+      }
     }
     return parts;
   }
 
   /** Build the full message array for a provider call */
-  #buildMessages(systemPrompt: string, userPrompt: string, imageUrl: string, history?: ChatMessage[]): ChatMessage[] {
+  #buildMessages(
+    systemPrompt: string,
+    userPrompt: string,
+    imageUrl: string | string[],
+    history?: ChatMessage[],
+  ): ChatMessage[] {
     const userContent = this.#buildUserContent(userPrompt, imageUrl);
     return [
       { role: 'system' as const, content: systemPrompt },
@@ -100,7 +108,12 @@ export class BaseAgent {
    * Append error feedback messages to the conversation history so the
    * model can self-correct on the next retry attempt.
    */
-  #pushErrorHistory(history: ChatMessage[], userPrompt: string, imageUrl: string, errorMessage: string): void {
+  #pushErrorHistory(
+    history: ChatMessage[],
+    userPrompt: string,
+    imageUrl: string | string[],
+    errorMessage: string,
+  ): void {
     history.push({
       role: 'user' as const,
       content: this.#buildUserContent(userPrompt, imageUrl),
@@ -120,14 +133,14 @@ export class BaseAgent {
    *
    * @param systemPrompt - 系统提示词
    * @param userPrompt - 用户提示词
-   * @param imageUrl - 图片的 URL
+   * @param imageUrl - 单张图片的 URL，或多张图片的 URL 数组（按顺序注入）
    * @param schema - Zod schema 用于验证输出
    * @param callConfig - 可选的 per-call 配置覆盖
    */
   async call<T = unknown>(
     systemPrompt: string,
     userPrompt: string,
-    imageUrl: string,
+    imageUrl: string | string[],
     schema: ZodType,
     callConfig?: CallConfig,
   ): Promise<AgentCallResult<T>> {
@@ -206,12 +219,13 @@ export class BaseAgent {
    * 流式调用方法：使用 provider.chatStream 逐 chunk 产出，最终返回解析结果。
    * json_schema 模式下单次调用无重试，json_object 模式保留重试。
    *
+   * @param imageUrl - 单张图片的 URL，或多张图片的 URL 数组（按顺序注入）
    * @returns AsyncGenerator yielding StreamChunk, returning AgentCallResult<T>
    */
   async *callStream<T = unknown>(
     systemPrompt: string,
     userPrompt: string,
-    imageUrl: string,
+    imageUrl: string | string[],
     schema: ZodType,
     callConfig?: CallConfig,
   ): AsyncGenerator<StreamChunk, AgentCallResult<T>, unknown> {

@@ -78,6 +78,127 @@ Streaming evaluation that yields events at each stage:
 | `values` | Emits milestone events only: `agent_call`, `agent_complete`, `evaluation_start`, `genre_detected`, `evaluation_complete`, `error` |
 | `updates` | All of `values` plus real-time `reasoning_chunk` and `result_chunk` events for incremental UI updates |
 
+## Group Evaluation
+
+Group evaluation runs the same adversarial pipeline (genre detection → Proposer → Critic → optional Revision → Arbiter) over **2 to 10 images at once**. Every round receives the whole image set, so the agents judge the group as a group instead of aggregating independent single-image scores.
+
+Two modes are available:
+
+| Mode | Meaning | Output focus |
+|------|---------|--------------|
+| `joint` | Evaluate the images as one series/photo essay | Group-level `sceneType`, `totalScore`, genre `dimensions`, plus `groupAnalysis` on narrative and consistency |
+| `compare` | Compare the images against each other | Full `ranking` (rank + score + rationale per image) plus `comparisonSummary` |
+
+### `engine.evaluateGroup(imageUrls, mode, options?): Promise<GroupEvaluationResult>`
+
+Run a full group evaluation. Returns when all rounds complete.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `imageUrls` | `string[]` | URLs of the images to evaluate — **2 to 10 entries**; outside that range throws `ValidationError` |
+| `mode` | `'joint' \| 'compare'` | Group evaluation mode |
+| `options` | `GroupEvaluateOptions` | Optional settings (see below) |
+
+`GroupEvaluateOptions`:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `genre` | `Genre \| null` | — | Pre-specified genre for the whole group (skips auto-detection) |
+| `context` | `EvaluationContext` | — | Additional evaluation context (EXIF data, user notes, custom metadata) |
+| `includePerImage` | `boolean` | `false` | Whether to also request per-image details (`perImage`) |
+
+**`includePerImage` and token cost**: the flag is enforced at **both the prompt and the JSON Schema layer**. When it is `false` (the default) the prompts do not ask for per-image output and the schema has no `per_image` field, so the model never generates those tokens — the saving is real, not a post-hoc filter. When it is `true` the schema adds a `per_image` array whose length must equal the image count, and each entry carries `index` / `score` / `comment`.
+
+Returns `GroupEvaluationResult` — a discriminated union narrowed by `mode`:
+
+```ts
+// mode: 'joint'
+interface GroupJointEvaluationResult {
+  imageUrls: string[];
+  mode: 'joint';
+  genre: Genre;
+  sceneType: string;
+  totalScore: number;
+  dimensions: Record<string, number>;
+  groupAnalysis: string;
+  critique: string;
+  suggestions: string;
+  arbitrationNotes: string;
+  perImage?: PerImageDetail[];        // only when includePerImage: true
+  process: {
+    genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
+    proposal: AgentCallResult<GroupJointProposerResult>;
+    critique: AgentCallResult<CritiqueResult>;
+    revision?: AgentCallResult<GroupJointProposerResult>;
+    arbitration: AgentCallResult<GroupJointArbitrationResult>;
+  };
+  metadata: GroupEvaluationMetadata;
+}
+
+// mode: 'compare'
+interface GroupCompareEvaluationResult {
+  imageUrls: string[];
+  mode: 'compare';
+  genre: Genre;
+  ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
+  comparisonSummary: string;
+  suggestions: string;
+  arbitrationNotes: string;
+  perImage?: PerImageDetail[];        // only when includePerImage: true
+  process: { /* same shape, with GroupCompare* result types */ };
+  metadata: GroupEvaluationMetadata;
+}
+
+interface GroupEvaluationMetadata {
+  evaluatedAt: string;
+  durationMs: number;
+  rounds: 3 | 4;
+  imageCount: number;
+  includePerImage: boolean;
+  context?: EvaluationContext;
+}
+
+interface PerImageDetail {
+  index: number;    // position in the input imageUrls array (0-based)
+  score: number;
+  comment: string;
+}
+```
+
+`index` in `ranking` and `perImage` always refers to the **0-based position in the input `imageUrls` array**, so results can be mapped back to the original order regardless of ranking.
+
+### `engine.evaluateGroupStream(imageUrls, mode, options?): AsyncGenerator<GroupEvaluationStreamEvent>`
+
+Streaming group evaluation. `GroupEvaluateStreamOptions` extends `GroupEvaluateOptions` with the streaming granularity:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `genre` | `Genre \| null` | — | Pre-specified genre (skips auto-detection) |
+| `context` | `EvaluationContext` | — | Additional evaluation context |
+| `includePerImage` | `boolean` | `false` | Whether to request per-image details |
+| `mode` | `'values' \| 'updates'` | `'values'` | Streaming granularity mode (the group mode is the positional second argument, so the two never collide) |
+
+| Event Type | Description |
+|------------|-------------|
+| `group_evaluation_start` | Group evaluation has begun (`{ imageUrls, mode, genre }`) |
+| `genre_detected` | Genre auto-detection result for the whole group |
+| `agent_call` | An agent round is starting |
+| `reasoning_chunk` | Real-time reasoning text (only in `updates` mode) |
+| `result_chunk` | Incremental JSON partial (only in `updates` mode) |
+| `agent_complete` | An agent round has finished (includes result + reasoning) |
+| `group_evaluation_complete` | Final `GroupEvaluationResult` available |
+| `error` | An error occurred (also used for out-of-range image counts) |
+
+Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Failures — including an image count outside 2–10 — are reported as a final `error` event instead of a thrown exception.
+
+```ts
+for await (const event of engine.evaluateGroupStream(imageUrls, 'compare')) {
+  if (event.type === 'group_evaluation_complete') {
+    console.log(event.data.ranking);
+  }
+}
+```
+
 ## Schema & Genre Utilities
 
 ### `GenreEnum`
@@ -417,6 +538,21 @@ import type {
   EvaluationStreamEvent,
   EvaluateStreamOptions,
   StreamMode,
+
+  // Group evaluation types
+  GroupEvaluationMode,
+  GroupEvaluateOptions,
+  GroupEvaluateStreamOptions,
+  GroupEvaluationResult,
+  GroupJointEvaluationResult,
+  GroupCompareEvaluationResult,
+  GroupEvaluationMetadata,
+  GroupEvaluationStreamEvent,
+  GroupJointProposerResult,
+  GroupCompareProposerResult,
+  GroupJointArbitrationResult,
+  GroupCompareArbitrationResult,
+  PerImageDetail,
   
   // Provider types
   LLMProvider,
@@ -464,6 +600,8 @@ import type {
   AdapterOptions,
   AdapterHooks,
   EvaluateParams,
+  GroupEvaluateParams,
+  GroupEvaluateRequestBody,
   MetadataResponse,
 } from '@theogony/venus-core';
 ```

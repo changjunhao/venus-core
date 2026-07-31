@@ -6,7 +6,13 @@
  */
 import { z } from 'zod';
 import type { VenusEngine } from '../engine.js';
-import type { AdapterHooks, EvaluateParams, EvaluationResult } from '../types.js';
+import type {
+  AdapterHooks,
+  EvaluateParams,
+  EvaluationResult,
+  GroupEvaluateParams,
+  GroupEvaluationResult,
+} from '../types.js';
 import { GenreEnum, EvaluationContextSchema, getMetadata } from '../schema/index.js';
 import { VenusError, ValidationError } from '../utils/errors.js';
 
@@ -82,6 +88,44 @@ function parseEvaluateRequest(
   return { ok: true, data: parsed.data };
 }
 
+/**
+ * Group evaluation request schema.
+ *
+ * Note: `mode` is the group evaluation mode (`joint` | `compare`); the streaming
+ * granularity is carried by `streamMode` (`values` | `updates`) to avoid a name
+ * clash with the single-image endpoints where `mode` means granularity.
+ */
+export const groupEvaluateRequestSchema = z.object({
+  imageUrls: z
+    .array(
+      z.url().refine(isAllowedImageUrl, {
+        message: 'imageUrl must not target a private or reserved host',
+      }),
+    )
+    .min(2)
+    .max(10),
+  mode: z.enum(['joint', 'compare']),
+  genre: GenreEnum.optional(),
+  context: EvaluationContextOptionalSchema,
+  includePerImage: z.boolean().optional(),
+  streamMode: z.enum(['values', 'updates']).optional(),
+});
+
+type ValidatedGroupEvaluateRequest = z.infer<typeof groupEvaluateRequestSchema>;
+
+/** Parse and validate a group evaluate request body, returning parsed data or a 400 error */
+function parseGroupEvaluateRequest(
+  body: unknown,
+):
+  | { ok: true; data: ValidatedGroupEvaluateRequest }
+  | { ok: false; status: 400; body: { error: { code: string; message: string } } } {
+  const parsed = groupEvaluateRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return { ok: false, status: 400, body: { error: { code: 'VALIDATION_ERROR', message: parsed.error.message } } };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 /** Build a stream error event object (format-agnostic) */
 function buildErrorEvent(err: unknown): { type: 'error'; error: { message: string }; timestamp: number } {
   const message = err instanceof Error ? err.message : 'Internal server error';
@@ -139,6 +183,49 @@ export async function handleEvaluate(
 export { getMetadata as handleMetadata };
 
 /**
+ * Apply the optional `beforeEvaluateGroup` hook to validated group params.
+ *
+ * Returns the params unchanged when no hook is configured, otherwise awaits
+ * the hook (sync or async) and returns its transformed result.
+ */
+export async function applyBeforeEvaluateGroupHook(
+  params: GroupEvaluateParams,
+  hooks?: AdapterHooks,
+): Promise<GroupEvaluateParams> {
+  if (!hooks?.beforeEvaluateGroup) return params;
+  return await hooks.beforeEvaluateGroup(params);
+}
+
+/** Shared POST /evaluate/group handler: validate body → apply hook → call engine.evaluateGroup */
+export async function handleGroupEvaluate(
+  engine: VenusEngine,
+  body: unknown,
+  hooks?: AdapterHooks,
+): Promise<
+  | { ok: true; data: GroupEvaluationResult }
+  | { ok: false; status: 400; body: { error: { code: string; message: string } } }
+> {
+  const parsed = parseGroupEvaluateRequest(body);
+  if (!parsed.ok) return parsed;
+  const params = await applyBeforeEvaluateGroupHook(
+    {
+      imageUrls: parsed.data.imageUrls,
+      mode: parsed.data.mode,
+      genre: parsed.data.genre ?? null,
+      context: parsed.data.context,
+      includePerImage: parsed.data.includePerImage,
+    },
+    hooks,
+  );
+  const result = await engine.evaluateGroup(params.imageUrls, params.mode, {
+    genre: params.genre,
+    context: params.context,
+    includePerImage: params.includePerImage,
+  });
+  return { ok: true, data: result };
+}
+
+/**
  * Resolve stream params and apply the optional `beforeEvaluate` hook.
  *
  * On success the returned `data` is already in engine-ready shape
@@ -160,6 +247,37 @@ export async function resolveStreamParamsWithHook(
       genre: parsed.data.genre ?? null,
       context: parsed.data.context,
       mode: parsed.data.mode,
+    },
+    hooks,
+  );
+  return { ok: true, data: params };
+}
+
+/**
+ * Resolve group stream params and apply the optional `beforeEvaluateGroup` hook.
+ *
+ * On success the returned `data` is already in engine-ready shape
+ * (`genre: Genre | null`, `streamMode` defaulted from request, hook
+ * transformations applied). On validation failure returns a 400 error shape
+ * with a `VALIDATION_ERROR` code.
+ */
+export async function resolveGroupStreamParamsWithHook(
+  body: unknown,
+  hooks?: AdapterHooks,
+): Promise<
+  | { ok: true; data: GroupEvaluateParams }
+  | { ok: false; status: 400; body: { error: { code: string; message: string } } }
+> {
+  const parsed = parseGroupEvaluateRequest(body);
+  if (!parsed.ok) return parsed;
+  const params = await applyBeforeEvaluateGroupHook(
+    {
+      imageUrls: parsed.data.imageUrls,
+      mode: parsed.data.mode,
+      genre: parsed.data.genre ?? null,
+      context: parsed.data.context,
+      includePerImage: parsed.data.includePerImage,
+      streamMode: parsed.data.streamMode,
     },
     hooks,
   );

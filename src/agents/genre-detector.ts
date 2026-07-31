@@ -26,9 +26,10 @@ export class GenreDetectorAgent extends BaseAgent {
 
   /**
    * 检测照片所属门类（非流式）
+   * @param imageUrl - 单张图片的 URL，或组图场景下的 URL 数组
    * @returns AgentCallResult 包含检测结果和可选思维链
    */
-  async detect(imageUrl: string): Promise<AgentCallResult<GenreDetectionResult>> {
+  async detect(imageUrl: string | string[]): Promise<AgentCallResult<GenreDetectionResult>> {
     return await this.call<GenreDetectionResult>(
       getGenreDetectorSystemPrompt(),
       getGenreDetectorUserPrompt(),
@@ -39,9 +40,10 @@ export class GenreDetectorAgent extends BaseAgent {
 
   /**
    * 检测照片所属门类（流式）
+   * @param imageUrl - 单张图片的 URL，或组图场景下的 URL 数组
    * @returns AsyncGenerator yielding StreamChunk，最终返回 AgentCallResult
    */
-  detectStream(imageUrl: string): AsyncGenerator<StreamChunk, AgentCallResult<GenreDetectionResult>, unknown> {
+  detectStream(imageUrl: string | string[]): AsyncGenerator<StreamChunk, AgentCallResult<GenreDetectionResult>, unknown> {
     return this.callStream<GenreDetectionResult>(
       getGenreDetectorSystemPrompt(),
       getGenreDetectorUserPrompt(),

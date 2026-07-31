@@ -548,4 +548,90 @@ describe('BaseAgent', () => {
       expect(capturedParams!.reasoning).toBeUndefined();
     });
   });
+
+  // ── 多图 imageUrl 支持（string | string[]）──
+  describe('Multi-image imageUrl support', () => {
+    const URLS = ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg'];
+
+    function makeCapturingProvider() {
+      let capturedParams: ChatParams | null = null;
+      const provider = defineProvider({
+        name: 'capture-provider',
+        capabilities: { vision: true },
+        chat: async (params) => {
+          capturedParams = params;
+          return { content: VALID_JSON, reasoning: null };
+        },
+      });
+      return { provider, getParams: () => capturedParams };
+    }
+
+    function extractImageParts(params: ChatParams) {
+      const userMsg = params.messages.find((m) => m.role === 'user')!;
+      const parts = userMsg.content as Exclude<typeof userMsg.content, string>;
+      return {
+        parts,
+        imageParts: parts.filter((p) => p.type === 'image_url') as Array<{
+          type: 'image_url';
+          image_url: { url: string };
+        }>,
+      };
+    }
+
+    it('should push one image_url part per URL in input order when imageUrl is an array', async () => {
+      const { provider, getParams } = makeCapturingProvider();
+      const agent = makeAgent(provider);
+
+      await agent.call('system', 'user', URLS, testSchema);
+
+      const { parts, imageParts } = extractImageParts(getParams()!);
+      expect(parts[0]).toEqual({ type: 'text', text: 'user' });
+      expect(imageParts).toHaveLength(3);
+      expect(imageParts.map((p) => p.image_url.url)).toEqual(URLS);
+    });
+
+    it('should skip empty-string URLs in the array (truthy-only push preserved)', async () => {
+      const { provider, getParams } = makeCapturingProvider();
+      const agent = makeAgent(provider);
+
+      await agent.call('system', 'user', [URLS[0]!, '', URLS[2]!], testSchema);
+
+      const { imageParts } = extractImageParts(getParams()!);
+      expect(imageParts).toHaveLength(2);
+      expect(imageParts.map((p) => p.image_url.url)).toEqual([URLS[0]!, URLS[2]!]);
+    });
+
+    it('should keep single-string behavior unchanged (exactly one image part)', async () => {
+      const { provider, getParams } = makeCapturingProvider();
+      const agent = makeAgent(provider);
+
+      await agent.call('system', 'user', IMAGE_URL, testSchema);
+
+      const { imageParts } = extractImageParts(getParams()!);
+      expect(imageParts).toHaveLength(1);
+      expect(imageParts[0]!.image_url.url).toBe(IMAGE_URL);
+    });
+
+    it('callStream should include all image parts in order when imageUrl is an array', async () => {
+      let capturedParams: ChatParams | null = null;
+      const streamProvider = defineProvider({
+        name: 'capture-stream-provider',
+        capabilities: { vision: true, streaming: true },
+        chatStream: async function* (params) {
+          capturedParams = params;
+          yield { content: VALID_JSON };
+        },
+        chat: async () => ({ content: VALID_JSON, reasoning: null }),
+      });
+      const agent = makeAgent(streamProvider);
+
+      for await (const _ of agent.callStream('system', 'user', URLS, testSchema)) {
+        /* drain */
+      }
+
+      const { imageParts } = extractImageParts(capturedParams!);
+      expect(imageParts).toHaveLength(3);
+      expect(imageParts.map((p) => p.image_url.url)).toEqual(URLS);
+    });
+  });
 });
