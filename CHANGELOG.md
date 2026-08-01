@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Group evaluation**: new `engine.evaluateGroup(imageUrls, mode, options?)` and
+  `engine.evaluateGroupStream(imageUrls, mode, options?)` run the same
+  adversarial pipeline (genre detection → Proposer → Critic → conditional
+  Revision → Arbiter) over 2 to 10 images at once, passing the whole image set
+  into every round so the agents judge the group as a group instead of
+  aggregating independent single-image scores. Two modes are supported:
+  `joint` evaluates the images as one series (group-level `sceneType`,
+  `totalScore`, genre `dimensions` and `groupAnalysis`), while `compare` ranks
+  the images against each other (`ranking` with rank / score / rationale per
+  image, plus `comparisonSummary`). Image counts outside 2–10 raise
+  `ValidationError` (surfaced as a terminal `error` event when streaming).
+- **`includePerImage` option**: opt-in per-image details (`perImage`) for both
+  group modes, enforced at the prompt *and* JSON Schema layer — when disabled
+  (the default) the schema has no `per_image` field at all, so those tokens are
+  never generated rather than filtered after the fact.
+- **Group schema factories**: `getGroupJointSchemas(genre, includePerImage, imageCount)`
+  and `getGroupCompareSchemas(imageCount, includePerImage)` are exported for
+  consumer-side validation and custom adapters, both cached per parameter
+  combination. `ranking` and `per_image` are validated as fixed-length arrays
+  with unique indices, and `rank` values must form a permutation of
+  `1..imageCount`.
+- **Group adapter endpoints**: Hono and Express adapters expose
+  `POST /evaluate/group`, `POST /evaluate/group/stream` (SSE) and
+  `POST /evaluate/group/stream/jsonl` (JSON Lines), sharing one
+  `groupEvaluateRequestSchema` validation path, plus a new
+  `beforeEvaluateGroup` lifecycle hook that can rewrite every field of
+  `GroupEvaluateParams` on all three endpoints.
+- **Group streaming events**: `group_evaluation_start` and
+  `group_evaluation_complete` event types alongside the existing `agent_call`,
+  `agent_complete`, `genre_detected`, `reasoning_chunk`, `result_chunk` and
+  `error` events.
+
 ## [0.12.0] - 2026-07-29
 
 ### Added

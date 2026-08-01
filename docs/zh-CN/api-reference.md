@@ -225,6 +225,70 @@ const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
 
 返回 `{ proposalSchema, critiqueSchema, arbiterSchema }` — 指定门类的 Zod Schema。
 
+### `getGroupJointSchemas(genre, includePerImage, imageCount)`
+
+返回 `{ proposalSchema, arbiterSchema }` — `joint` 组图评估的 Zod Schema。批判轮直接复用 `getSchemas()` 中的通用 `critiqueSchema`，因此不包含在返回值中。
+
+| 参数 | 类型 | 说明 |
+|-----------|------|-------------|
+| `genre` | `Genre` | 决定场景子类型枚举与评分维度的门类 |
+| `includePerImage` | `boolean` | 为 `true` 时 Schema 增加 `per_image` 数组；为 `false` 时完全不含该字段 |
+| `imageCount` | `number` | 组内图片数量 — 决定 `per_image` 数组的固定长度及 `index` 的取值范围 |
+
+```ts
+import { getGroupJointSchemas } from '@theogony/venus-core';
+
+const { proposalSchema, arbiterSchema } = getGroupJointSchemas('portrait', true, 3);
+proposalSchema.parse({
+  scene_type: 'wedding',
+  total_score: 8.4,
+  dimensions: { facial_expression: 8.5 /* ... */ },
+  group_analysis: '...',
+  critique: '...',
+  suggestions: '...',
+  per_image: [
+    { index: 0, score: 8.2, comment: '...' },
+    { index: 1, score: 8.6, comment: '...' },
+    { index: 2, score: 8.4, comment: '...' },
+  ],
+});
+```
+
+### `getGroupCompareSchemas(imageCount, includePerImage)`
+
+返回 `{ proposalSchema, arbiterSchema }` — `compare` 组图评估的 Zod Schema。注意**参数顺序与 joint 版本不同**：`compare` 的输出与门类无关，因此没有 `genre` 参数。
+
+| 参数 | 类型 | 说明 |
+|-----------|------|-------------|
+| `imageCount` | `number` | 组内图片数量 — 决定 `ranking`（以及 `per_image`）数组的固定长度 |
+| `includePerImage` | `boolean` | 为 `true` 时 Schema 增加 `per_image` 数组 |
+
+```ts
+import { getGroupCompareSchemas } from '@theogony/venus-core';
+
+const { proposalSchema } = getGroupCompareSchemas(3, false);
+proposalSchema.parse({
+  ranking: [
+    { index: 0, rank: 2, score: 8.2, rationale: '...' },
+    { index: 1, rank: 1, score: 8.8, rationale: '...' },
+    { index: 2, rank: 3, score: 7.9, rationale: '...' },
+  ],
+  comparison_summary: '...',
+  suggestions: '...',
+});
+```
+
+两个工厂函数都按参数组合缓存结果，相同参数的重复调用会返回同一个 Schema 实例。`arbiterSchema` 即 `proposalSchema` 的结构再加上必填的 `arbitration_notes` 字符串。
+
+两者共同强制的校验规则：
+
+| 规则 | 适用字段 |
+|------|-----------|
+| 数组长度必须等于 `imageCount` | `ranking`、`per_image` |
+| `index` 必须是 `0..imageCount - 1` 范围内的整数，且各项不得重复 | `ranking`、`per_image` |
+| `rank` 必须是整数，且构成 `1..imageCount` 的一个无重复排列 | `ranking` |
+| 文本字段（`rationale`、`comment`、`comparison_summary`、`group_analysis`、`critique`、`suggestions`）不得为空 | 两种模式 |
+
 ### `getProposerResultSchema(genre: Genre)`
 
 返回指定门类的完整评估结果 Zod Schema,包括所有嵌套的 `process` 和 `metadata` 字段。适用于验证自定义评估结果或构建自定义适配器。

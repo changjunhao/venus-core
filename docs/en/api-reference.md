@@ -225,6 +225,70 @@ const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
 
 Returns `{ proposalSchema, critiqueSchema, arbiterSchema }` — Zod schemas for the given genre.
 
+### `getGroupJointSchemas(genre, includePerImage, imageCount)`
+
+Returns `{ proposalSchema, arbiterSchema }` — Zod schemas for `joint` group evaluation. The Critic round reuses the shared `critiqueSchema` from `getSchemas()`, so it is not part of the returned set.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `genre` | `Genre` | Genre driving the scene subtype enum and scoring dimensions |
+| `includePerImage` | `boolean` | When `true`, the schema gains a `per_image` array; when `false` the field is absent entirely |
+| `imageCount` | `number` | Number of images in the group — fixes the `per_image` array length and the valid `index` range |
+
+```ts
+import { getGroupJointSchemas } from '@theogony/venus-core';
+
+const { proposalSchema, arbiterSchema } = getGroupJointSchemas('portrait', true, 3);
+proposalSchema.parse({
+  scene_type: 'wedding',
+  total_score: 8.4,
+  dimensions: { facial_expression: 8.5 /* ... */ },
+  group_analysis: '...',
+  critique: '...',
+  suggestions: '...',
+  per_image: [
+    { index: 0, score: 8.2, comment: '...' },
+    { index: 1, score: 8.6, comment: '...' },
+    { index: 2, score: 8.4, comment: '...' },
+  ],
+});
+```
+
+### `getGroupCompareSchemas(imageCount, includePerImage)`
+
+Returns `{ proposalSchema, arbiterSchema }` — Zod schemas for `compare` group evaluation. Note the **argument order differs from the joint variant**: `compare` output is genre-independent, so there is no `genre` parameter.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `imageCount` | `number` | Number of images in the group — fixes the `ranking` (and `per_image`) array length |
+| `includePerImage` | `boolean` | When `true`, the schema gains a `per_image` array |
+
+```ts
+import { getGroupCompareSchemas } from '@theogony/venus-core';
+
+const { proposalSchema } = getGroupCompareSchemas(3, false);
+proposalSchema.parse({
+  ranking: [
+    { index: 0, rank: 2, score: 8.2, rationale: '...' },
+    { index: 1, rank: 1, score: 8.8, rationale: '...' },
+    { index: 2, rank: 3, score: 7.9, rationale: '...' },
+  ],
+  comparison_summary: '...',
+  suggestions: '...',
+});
+```
+
+Both factories cache their result per parameter combination, so repeated calls with the same arguments return the same schema instance. The `arbiterSchema` is the `proposalSchema` shape plus a required `arbitration_notes` string.
+
+Validation rules enforced by both:
+
+| Rule | Applies to |
+|------|-----------|
+| Array length must equal `imageCount` | `ranking`, `per_image` |
+| `index` must be an integer in `0..imageCount - 1`, unique across entries | `ranking`, `per_image` |
+| `rank` must be an integer forming a permutation of `1..imageCount` without duplicates | `ranking` |
+| Text fields (`rationale`, `comment`, `comparison_summary`, `group_analysis`, `critique`, `suggestions`) must be non-empty | both modes |
+
 ### `getProposerResultSchema(genre: Genre)`
 
 Returns the complete evaluation result Zod schema for the given genre, including all nested `process` and `metadata` fields. Useful for validating custom evaluation results or building custom adapters.

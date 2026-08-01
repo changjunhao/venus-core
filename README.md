@@ -34,7 +34,7 @@ graph LR
 | 3 | **Revision** _(conditional)_ | If the critique severity is `HIGH`, the proposer revises its assessment |
 | 4 | **Arbiter** | Makes the final ruling, synthesizing all preceding evidence |
 
-The engine supports **8 photography genres**, each with genre-specific scoring dimensions, scene subtypes, and professional evaluation standards.
+The engine supports **8 photography genres**, each with genre-specific scoring dimensions, scene subtypes, and professional evaluation standards. The same pipeline also powers **group evaluation** over 2 to 10 images at once.
 
 ## Features
 
@@ -46,6 +46,7 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **Native Anthropic & Gemini Providers** — Claude Messages API with extended thinking and Google Gemini Interactions API, both with strict JSON Schema structured output; the Anthropic provider also drives DashScope and Zhipu Anthropic-compatible endpoints out of the box
 - **Structured Output Modes** — `json_schema` providers get single-call schema-guaranteed output; `json_object` providers keep Zod validation with automatic repair retries
 - **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming
+- **Group Evaluation** — Score 2 to 10 images in one run with `evaluateGroup()` / `evaluateGroupStream()`: `joint` mode judges them as a single series, `compare` mode ranks them against each other, and `includePerImage` toggles per-image details at the schema level to save tokens
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth
 - **Event System** — `onEvent` callback for real-time observability into each pipeline stage
@@ -100,6 +101,32 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 }
 ```
 
+To evaluate a set of 2 to 10 images, use `evaluateGroup()` with either group mode. The result is a discriminated union narrowed by `mode`:
+
+```ts
+const images = [
+  'https://example.com/photo-1.jpg',
+  'https://example.com/photo-2.jpg',
+  'https://example.com/photo-3.jpg',
+];
+
+// 'joint' — judge the images as one series
+const joint = await engine.evaluateGroup(images, 'joint');
+if (joint.mode === 'joint') {
+  console.log(joint.totalScore);     // 8.4
+  console.log(joint.groupAnalysis);  // Narrative and consistency across the set
+}
+
+// 'compare' — rank the images against each other
+const compare = await engine.evaluateGroup(images, 'compare', { includePerImage: true });
+if (compare.mode === 'compare') {
+  console.log(compare.ranking);      // [{ index: 2, rank: 1, score: 8.8, rationale: '...' }, ...]
+  console.log(compare.perImage);     // Per-image details, only present with includePerImage
+}
+```
+
+`index` always refers to the 0-based position in the input array, so results map back to the original order.
+
 ---
 
 ## Documentation
@@ -107,7 +134,7 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 | Document | Description |
 |----------|-------------|
 | [API Reference](./docs/en/api-reference.md) | Complete type signatures for engine, providers, schemas, and errors |
-| [Usage Guide](./docs/en/usage-guide.md) | Streaming, web framework integration, adapter hooks, context extension, event system |
+| [Usage Guide](./docs/en/usage-guide.md) | Streaming, group evaluation, web framework integration, adapter hooks, context extension, event system |
 | [Configuration](./docs/en/configuration.md) | `VenusEngineConfig` full reference and reasoning configuration |
 
 ---

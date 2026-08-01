@@ -34,7 +34,7 @@ graph LR
 | 3 | **修正** _(条件触发)_ | 当批判严重程度为 `HIGH` 时，提案者修正其评估 |
 | 4 | **仲裁者** | 综合所有证据做出最终裁决 |
 
-引擎支持 **8 大摄影门类**，每个门类均有专属的评分维度、场景子类型和专业评审标准。
+引擎支持 **8 大摄影门类**，每个门类均有专属的评分维度、场景子类型和专业评审标准。同一套管线也支撑**组图评估**，可一次处理 2 到 10 张图片。
 
 ## 特性
 
@@ -46,6 +46,7 @@ graph LR
 - **原生 Anthropic 与 Gemini 提供商** — Claude Messages API（支持扩展思考）与 Google Gemini Interactions API，均支持严格 JSON Schema 结构化输出；Anthropic 提供商还可直接对接阿里云百炼（DashScope）和智谱的 Anthropic 兼容端点
 - **结构化输出双模式** — `json_schema` 提供商单次调用即获得 schema 保证的输出；`json_object` 提供商保留 Zod 校验与自动修复重试
 - **双模式评估 API** — `evaluate()` 同步返回结果，`evaluateStream()` 支持 SSE 流式输出
+- **组图评估** — 通过 `evaluateGroup()` / `evaluateGroupStream()` 一次评估 2 到 10 张图片：`joint` 模式把整组当作一个系列评判，`compare` 模式让组内图片相互排名，`includePerImage` 在 Schema 层面控制是否输出逐图明细以节省 token
 - **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时推理 + JSON 增量）
 - **上下文扩展** — 丰富的 `EvaluationContext`，支持 EXIF 元数据、用户备注和自定义数据，按门类智能注入
 - **事件系统** — `onEvent` 回调实现对每个管线阶段的实时可观测性
@@ -100,6 +101,32 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 }
 ```
 
+评估 2 到 10 张图片时使用 `evaluateGroup()`，并指定组图模式。返回值是按 `mode` 收窄的判别联合类型：
+
+```ts
+const images = [
+  'https://example.com/photo-1.jpg',
+  'https://example.com/photo-2.jpg',
+  'https://example.com/photo-3.jpg',
+];
+
+// 'joint' — 把整组当作一个系列评判
+const joint = await engine.evaluateGroup(images, 'joint');
+if (joint.mode === 'joint') {
+  console.log(joint.totalScore);     // 8.4
+  console.log(joint.groupAnalysis);  // 整组的叙事性与一致性分析
+}
+
+// 'compare' — 组内图片相互排名
+const compare = await engine.evaluateGroup(images, 'compare', { includePerImage: true });
+if (compare.mode === 'compare') {
+  console.log(compare.ranking);      // [{ index: 2, rank: 1, score: 8.8, rationale: '...' }, ...]
+  console.log(compare.perImage);     // 逐图明细，仅在 includePerImage 为 true 时存在
+}
+```
+
+`index` 始终表示输入数组中从 0 开始的下标，因此结果可映射回原始顺序。
+
 ---
 
 ## 文档
@@ -107,7 +134,7 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg')
 | 文档 | 说明 |
 |----------|-------------|
 | [API 参考](./docs/zh-CN/api-reference.md) | 引擎、提供商、Schema 和错误的完整类型签名 |
-| [使用指南](./docs/zh-CN/usage-guide.md) | 流式评估、Web 框架集成、适配器钩子、上下文扩展、事件系统 |
+| [使用指南](./docs/zh-CN/usage-guide.md) | 流式评估、组图评估、Web 框架集成、适配器钩子、上下文扩展、事件系统 |
 | [配置参考](./docs/zh-CN/configuration.md) | `VenusEngineConfig` 完整参考和推理配置 |
 
 ---
