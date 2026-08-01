@@ -81,15 +81,21 @@ const imageUrls = [
 
 // Joint evaluation — the group as one body of work
 const joint = await engine.evaluateGroup(imageUrls, 'joint', { genre: 'portrait' });
-console.log(joint.totalScore);     // 8.4
-console.log(joint.groupAnalysis);  // narrative / consistency analysis of the series
+if (joint.mode === 'joint') {
+  console.log(joint.totalScore);     // 8.4
+  console.log(joint.groupAnalysis);  // narrative / consistency analysis of the series
+}
 
 // Compare evaluation — rank the images against each other
 const compare = await engine.evaluateGroup(imageUrls, 'compare');
-for (const item of compare.ranking) {
-  console.log(`#${item.rank} → image ${item.index} (${item.score}): ${item.rationale}`);
+if (compare.mode === 'compare') {
+  for (const item of compare.ranking) {
+    console.log(`#${item.rank} → image ${item.index} (${item.score}): ${item.rationale}`);
+  }
 }
 ```
+
+The return type is the `GroupEvaluationResult` union, so TypeScript requires narrowing on `mode` before reading mode-specific fields such as `totalScore`, `groupAnalysis` or `ranking`. Fields shared by both modes — `imageUrls`, `mode`, `genre`, `suggestions`, `arbitrationNotes`, `perImage`, `process`, `metadata` — are accessible without a guard.
 
 Fewer than 2 or more than 10 URLs throws `ValidationError`. `index` in `ranking` (and in `perImage`) is the 0-based position in the input `imageUrls` array.
 

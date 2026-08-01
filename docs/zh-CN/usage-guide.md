@@ -81,15 +81,21 @@ const imageUrls = [
 
 // 联合评估 — 把整组当作一件作品
 const joint = await engine.evaluateGroup(imageUrls, 'joint', { genre: 'portrait' });
-console.log(joint.totalScore);     // 8.4
-console.log(joint.groupAnalysis);  // 系列的叙事 / 一致性分析
+if (joint.mode === 'joint') {
+  console.log(joint.totalScore);     // 8.4
+  console.log(joint.groupAnalysis);  // 系列的叙事 / 一致性分析
+}
 
 // 对比评估 — 组内图片相互排名
 const compare = await engine.evaluateGroup(imageUrls, 'compare');
-for (const item of compare.ranking) {
-  console.log(`第 ${item.rank} 名 → 第 ${item.index} 张图（${item.score} 分）：${item.rationale}`);
+if (compare.mode === 'compare') {
+  for (const item of compare.ranking) {
+    console.log(`第 ${item.rank} 名 → 第 ${item.index} 张图（${item.score} 分）：${item.rationale}`);
+  }
 }
 ```
+
+返回类型是 `GroupEvaluationResult` 联合类型，因此读取 `totalScore`、`groupAnalysis`、`ranking` 等模式特有字段前，TypeScript 要求先基于 `mode` 收窄。两种模式共有的字段 — `imageUrls`、`mode`、`genre`、`suggestions`、`arbitrationNotes`、`perImage`、`process`、`metadata` — 可直接访问，无需守卫。
 
 少于 2 张或多于 10 张会抛出 `ValidationError`。`ranking`（以及 `perImage`）中的 `index` 是输入 `imageUrls` 数组中从 0 开始的下标。
 
