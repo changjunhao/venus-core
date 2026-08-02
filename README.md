@@ -50,7 +50,7 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth
 - **Event System** — `onEvent` callback for real-time observability into each pipeline stage
-- **Web Framework Adapters** — First-class Hono and Express integration with shared Zod validation and lifecycle hooks
+- **Web Framework Adapters** — First-class Hono, Express, and Nitro (h3) integration with shared Zod validation and lifecycle hooks
 - **Chain-of-Thought** — Per-agent reasoning effort and token budget with cross-provider auto-adaptation
 - **Dynamic Zod Schemas** — Per-genre schema generation with caching for input and output validation
 - **Structured Errors** — Fine-grained error hierarchy with provider-level error codes
@@ -172,12 +172,14 @@ Core dependencies (`openai`, `@anthropic-ai/sdk`, `@google/genai`, `zod`, `vecto
 |----------------------------|----------|-------|
 | `hono` ^4.12               | Optional | For Hono adapter (`@theogony/venus-core/hono`) |
 | `express` ^5.2             | Optional | For Express adapter (`@theogony/venus-core/express`) |
+| `h3` ^1.15                 | Optional | For Nitro adapter (`@theogony/venus-core/nitro`) |
 
 ### Runtime Support
 
 - **Node.js** >= 22.0.0
 - **Bun** (recommended for development/testing)
 - **Deno**, **Cloudflare Workers** (Hono adapter)
+- **Nitro / Nuxt** server routes (Nitro adapter)
 
 ---
 

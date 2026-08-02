@@ -50,7 +50,7 @@ graph LR
 - **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时推理 + JSON 增量）
 - **上下文扩展** — 丰富的 `EvaluationContext`，支持 EXIF 元数据、用户备注和自定义数据，按门类智能注入
 - **事件系统** — `onEvent` 回调实现对每个管线阶段的实时可观测性
-- **Web 框架适配器** — 一流的 Hono 和 Express 集成，共享 Zod 校验与生命周期钩子
+- **Web 框架适配器** — 一流的 Hono、Express 和 Nitro（h3）集成，共享 Zod 校验与生命周期钩子
 - **推理链支持** — 按智能体配置推理 effort 级别和 token 预算，跨提供商自动适配
 - **动态 Zod Schema** — 按门类生成 Schema 并缓存，用于输入输出校验
 - **结构化错误** — 细粒度错误层级，含提供商级别错误码
@@ -172,12 +172,14 @@ deno add jsr:@theogony/venus-core
 |----------------------------|----------|-------|
 | `hono` ^4.12               | 可选 | 用于 Hono 适配器（`@theogony/venus-core/hono`） |
 | `express` ^5.2             | 可选 | 用于 Express 适配器（`@theogony/venus-core/express`） |
+| `h3` ^1.15                 | 可选 | 用于 Nitro 适配器（`@theogony/venus-core/nitro`） |
 
 ### 运行时支持
 
 - **Node.js** >= 22.0.0
 - **Bun**（推荐用于开发/测试）
 - **Deno**、**Cloudflare Workers**（Hono 适配器）
+- **Nitro / Nuxt** 服务端路由（Nitro 适配器）
 
 ---
 

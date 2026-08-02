@@ -195,7 +195,34 @@ app.use('/api', createExpressAdapter(engine, {
 app.listen(3000);
 ```
 
-Both adapters expose the same endpoints:
+### Nitro (h3)
+
+```ts
+// server/routes/api/[...].ts (Nuxt / Nitro server route)
+import { useBase } from 'h3';
+import { createVenusEngine, createOpenAIChatProvider } from '@theogony/venus-core';
+import { createNitroAdapter } from '@theogony/venus-core/nitro';
+
+const engine = createVenusEngine({
+  provider: createOpenAIChatProvider({
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: process.env.API_KEY!,
+  }),
+});
+
+const venus = createNitroAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // Transform validated params before evaluation
+      return params;
+    },
+  },
+});
+
+export default useBase('/api', venus.handler);
+```
+
+All three adapters expose the same endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -506,7 +533,7 @@ console.log(result.metadata.context?.userNotes);  // '2026 National Athletics ..
 
 ### Passing Context via Web Framework Adapters
 
-Adapters (Hono / Express) transparently pass `context` from the request body to the engine:
+Adapters (Hono / Express / Nitro) transparently pass `context` from the request body to the engine:
 
 ```bash
 curl -X POST http://localhost:3000/api/evaluate \

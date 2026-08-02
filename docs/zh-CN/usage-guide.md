@@ -195,7 +195,34 @@ app.use('/api', createExpressAdapter(engine, {
 app.listen(3000);
 ```
 
-两种适配器暴露相同的端点：
+### Nitro（h3）
+
+```ts
+// server/routes/api/[...].ts（Nuxt / Nitro 服务端路由）
+import { useBase } from 'h3';
+import { createVenusEngine, createOpenAIChatProvider } from '@theogony/venus-core';
+import { createNitroAdapter } from '@theogony/venus-core/nitro';
+
+const engine = createVenusEngine({
+  provider: createOpenAIChatProvider({
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: process.env.API_KEY!,
+  }),
+});
+
+const venus = createNitroAdapter(engine, {
+  hooks: {
+    beforeEvaluate: async (params) => {
+      // 在评估前转换已验证的参数
+      return params;
+    },
+  },
+});
+
+export default useBase('/api', venus.handler);
+```
+
+三种适配器暴露相同的端点：
 
 | 方法 | 路径 | 说明 |
 |--------|------|-------------|
@@ -506,7 +533,7 @@ console.log(result.metadata.context?.userNotes);  // '2026 National Athletics ..
 
 ### 通过 Web 框架适配器传递上下文
 
-适配器（Hono / Express）会透明地将请求体中的 `context` 传递给引擎：
+适配器（Hono / Express / Nitro）会透明地将请求体中的 `context` 传递给引擎：
 
 ```bash
 curl -X POST http://localhost:3000/api/evaluate \

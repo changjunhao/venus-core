@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Nitro (h3) adapter**: new `createNitroAdapter(engine, options?)` exported
+  from `@theogony/venus-core/nitro` returns an h3 `Router` usable in Nitro /
+  Nuxt server routes (mount via `useBase('/api', venus.handler)`). It exposes
+  the same seven endpoints as the Hono and Express adapters — `POST /evaluate`,
+  `POST /evaluate/stream` (SSE), `POST /evaluate/stream/jsonl` (JSON Lines),
+  `POST /evaluate/group`, `POST /evaluate/group/stream`,
+  `POST /evaluate/group/stream/jsonl`, and `GET /metadata` — sharing the same
+  Zod validation path and the `beforeEvaluate` / `beforeEvaluateGroup`
+  lifecycle hooks.
+- **`h3` optional peer dependency**: `h3` ^1.15 is declared as an optional peer
+  dependency for the Nitro adapter sub-path; install it only when using
+  `@theogony/venus-core/nitro`.
+
 ## [0.13.0] - 2026-08-01
 
 ### Added
