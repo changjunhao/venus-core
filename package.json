@@ -37,6 +37,16 @@
         "types": "./dist/adapters/express.d.cts",
         "default": "./dist/adapters/express.cjs"
       }
+    },
+    "./nitro": {
+      "import": {
+        "types": "./dist/adapters/nitro.d.ts",
+        "default": "./dist/adapters/nitro.js"
+      },
+      "require": {
+        "types": "./dist/adapters/nitro.d.cts",
+        "default": "./dist/adapters/nitro.cjs"
+      }
     }
   },
   "files": [
@@ -49,9 +59,9 @@
   ],
   "scripts": {
     "build": "bun run build:esm && bun run build:cjs && bun run build:types",
-    "build:esm": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts --outdir ./dist --target node --format esm --splitting --packages external",
-    "build:cjs": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts --outdir ./dist --target node --format cjs --entry-naming '[dir]/[name].cjs' --chunk-naming '[name]-[hash].cjs' --packages external",
-    "build:types": "tsc -p tsconfig.build.json && cp dist/index.d.ts dist/index.d.cts && cp dist/adapters/hono.d.ts dist/adapters/hono.d.cts && cp dist/adapters/express.d.ts dist/adapters/express.d.cts",
+    "build:esm": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts ./src/adapters/nitro.ts --outdir ./dist --target node --format esm --splitting --packages external",
+    "build:cjs": "bun build ./src/index.ts ./src/adapters/hono.ts ./src/adapters/express.ts ./src/adapters/nitro.ts --outdir ./dist --target node --format cjs --entry-naming '[dir]/[name].cjs' --chunk-naming '[name]-[hash].cjs' --packages external",
+    "build:types": "tsc -p tsconfig.build.json && cp dist/index.d.ts dist/index.d.cts && cp dist/adapters/hono.d.ts dist/adapters/hono.d.cts && cp dist/adapters/express.d.ts dist/adapters/express.d.cts && cp dist/adapters/nitro.d.ts dist/adapters/nitro.d.cts",
     "typecheck": "tsc --noEmit",
     "generate:endpoints": "bun scripts/generate-endpoint-hosts.ts",
     "test": "bun test",
@@ -71,13 +81,17 @@
   },
   "peerDependencies": {
     "hono": "^4.12.32",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "h3": "^1.15.0"
   },
   "peerDependenciesMeta": {
     "hono": {
       "optional": true
     },
     "express": {
+      "optional": true
+    },
+    "h3": {
       "optional": true
     }
   },
@@ -88,6 +102,7 @@
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "express": "^5.2.1",
+    "h3": "^1.15.0",
     "hono": "^4.12.32",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
