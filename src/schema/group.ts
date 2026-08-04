@@ -28,6 +28,8 @@ import type {
   GroupJointArbitrationResult,
   GroupCompareProposerResult,
   GroupCompareArbitrationResult,
+  GroupJointEvaluationResult,
+  GroupCompareEvaluationResult,
 } from '../types.js';
 
 // ============================================================
@@ -181,12 +183,21 @@ function buildGroupMetadataSchema(imageCount: number, includePerImage: boolean) 
   });
 }
 
-const agentCallResult = (schema: z.ZodTypeAny) => z.object({ result: schema, reasoning: z.string().nullable() });
+function agentCallResult<T>(schema: z.ZodType<T>): z.ZodType<{ result: T; reasoning: string | null }> {
+  return z.object({ result: schema, reasoning: z.string().nullable() });
+}
 
-const genreDetectionResult = z.object({ genre: GenreEnum, confidence: z.number().min(0).max(1) });
+const genreDetectionResult: z.ZodType<{ genre: Genre; confidence: number }> = z.object({
+  genre: GenreEnum,
+  confidence: z.number().min(0).max(1),
+});
 
 /** Final joint result schema. Top-level fields are camelCase; process agent outputs remain snake_case. */
-export function getGroupJointResultSchema(genre: Genre, includePerImage: boolean, imageCount: number) {
+export function getGroupJointResultSchema(
+  genre: Genre,
+  includePerImage: boolean,
+  imageCount: number,
+): z.ZodType<GroupJointEvaluationResult> {
   const { proposalSchema, arbiterSchema } = getGroupJointSchemas(genre, includePerImage, imageCount);
   const baseShape = {
     imageUrls: z.array(z.string()).length(imageCount),
@@ -212,7 +223,10 @@ export function getGroupJointResultSchema(genre: Genre, includePerImage: boolean
 }
 
 /** Final compare result schema. Top-level fields are camelCase; process agent outputs remain snake_case. */
-export function getGroupCompareResultSchema(includePerImage: boolean, imageCount: number) {
+export function getGroupCompareResultSchema(
+  includePerImage: boolean,
+  imageCount: number,
+): z.ZodType<GroupCompareEvaluationResult> {
   const { proposalSchema, arbiterSchema } = getGroupCompareSchemas(imageCount, includePerImage);
   const baseShape = {
     imageUrls: z.array(z.string()).length(imageCount),

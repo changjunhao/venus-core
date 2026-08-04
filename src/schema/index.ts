@@ -2,6 +2,7 @@
 // Copyright 2026 Venus Contributors
 
 import { z } from 'zod';
+import type { ArbitrationDecision, ArbitrationNotes, RawArbitrationNotes } from '../types.js';
 
 /** Genre configuration metadata */
 export interface GenreConfig {
@@ -249,7 +250,7 @@ const GENRE_CONFIG = {
 export const scoreField = (): z.ZodNumber => z.number().min(0).max(10).multipleOf(0.1);
 
 /** One independently renderable suggestion. Numbering and list markers belong to the UI. */
-export const SuggestionSchema = z
+export const SuggestionSchema: z.ZodType<string> = z
   .string()
   .trim()
   .min(1)
@@ -257,23 +258,23 @@ export const SuggestionSchema = z
   .refine((value) => !/[\r\n]/.test(value), 'Suggestion must be a single line');
 
 /** Structured suggestions shared by single, joint, and compare evaluations. */
-export const SuggestionsSchema = z.array(SuggestionSchema).min(1).max(8);
+export const SuggestionsSchema: z.ZodType<string[]> = z.array(SuggestionSchema).min(1).max(8);
 
-export const ArbitrationDecisionSchema = z.object({
+export const ArbitrationDecisionSchema: z.ZodType<ArbitrationDecision> = z.object({
   target: z.string().trim().min(1).max(100),
   decision: z.enum(['accept', 'partial', 'reject', 'consensus']),
   reason: z.string().trim().min(1).max(1000),
 });
 
 /** Agent-facing arbitration notes (snake_case). */
-export const RawArbitrationNotesSchema = z.object({
+export const RawArbitrationNotesSchema: z.ZodType<RawArbitrationNotes> = z.object({
   scene_type_ruling: z.string().trim().min(1).max(1000),
   decisions: z.array(ArbitrationDecisionSchema).max(16),
   final_rationale: z.string().trim().min(1).max(2000),
 });
 
 /** Final engine result arbitration notes (camelCase). */
-export const ArbitrationNotesSchema = z.object({
+export const ArbitrationNotesSchema: z.ZodType<ArbitrationNotes> = z.object({
   sceneTypeRuling: z.string().trim().min(1).max(1000),
   decisions: z.array(ArbitrationDecisionSchema).max(16),
   finalRationale: z.string().trim().min(1).max(2000),
