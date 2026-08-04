@@ -12,7 +12,7 @@ const SAMPLE_PROPOSAL: ProposerResult = {
   total_score: 7.5,
   dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
   critique: 'Good portrait.',
-  suggestions: 'Try different lighting.',
+  suggestions: ['Try different lighting.'],
 };
 
 const SAMPLE_CRITIQUE: CritiqueResult = {
@@ -40,7 +40,7 @@ const SAMPLE_REVISION: ProposerResult = {
   total_score: 7.0,
   dimensions: makeDimensions(PORTRAIT_DIMS, 7.0),
   critique: 'Revised assessment.',
-  suggestions: 'Focus on expressions.',
+  suggestions: ['Focus on expressions.'],
 };
 
 describe('Arbiter Prompts', () => {
@@ -75,9 +75,13 @@ describe('Arbiter Prompts', () => {
       }
     });
 
-    it('should include JSON output format with arbitration_notes', () => {
+    it('should require structured suggestions and arbitration notes', () => {
       const prompt = getArbiterSystemPrompt('portrait');
-      expect(prompt).toContain('arbitration_notes');
+      expect(prompt).toContain('"suggestions": [');
+      expect(prompt).toContain('"arbitration_notes": {');
+      expect(prompt).toContain('"scene_type_ruling"');
+      expect(prompt).toContain('accept|partial|reject|consensus');
+      expect(prompt).toContain('decisions 必须是空数组');
       expect(prompt).toContain('scene_type');
       expect(prompt).toContain('total_score');
     });

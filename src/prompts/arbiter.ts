@@ -47,7 +47,7 @@ ${standard}
 - **如果批判者指出了子类型识别错误，你要独立判断正确的子类型**
 - 如果批判者的质疑有理有据，采纳其建议
 - 如果提案者的原始评分合理，维持原判
-- 你的 arbitration_notes 中必须说明你采纳或驳回了哪些质疑，以及理由
+- 你的 arbitration_notes 必须按结构记录场景判定、真实争议的逐条裁决与最终理由
 - **核心理念：在该子类型中评价照片的优劣，而非用统一的最高标准比较所有照片**
 - **效率原则：当批判者严重程度为 LOW 时，说明双方意见基本一致，你应快速确认最终评分，无需逐条反复审议**
 
@@ -60,12 +60,38 @@ ${standard}
 ${dimensionsExample}
   },
   "critique": "<最终的专业点评>",
-  "suggestions": "<最终的改进建议>",
-  "arbitration_notes": "<裁决说明：你采纳或驳回了哪些质疑（包括子类型的判断），理由是什么>"
+  "suggestions": [
+    "<不带编号的一条最终改进建议>",
+    "<不带编号的另一条最终改进建议>"
+  ],
+  "arbitration_notes": {
+    "scene_type_ruling": "<最终子类型判断及其评价重点>",
+    "decisions": [
+      {
+        "target": "<被质疑的维度、scene_type 或其他争议目标>",
+        "decision": "<accept|partial|reject|consensus>",
+        "reason": "<裁决成立的具体理由>"
+      }
+    ],
+    "final_rationale": "<最终评分成立的整体理由>"
+  }
 }
 
 scene_type 取值说明：
 ${subtypeExplanation}
+
+suggestions 输出规则：
+- 输出 1-8 条具体、可执行且互不重复的建议（通常为 3-5 条）
+- 每个数组元素只能包含一条建议，不得带编号、项目符号或换行
+- 明确调整对象和动作，不得重复 critique 中已经完整表达的内容
+
+arbitration_notes 输出规则：
+- scene_type_ruling：说明最终子类型判断，以及该子类型下最重要的评价重点
+- decisions：只记录实际出现的争议；target 使用被质疑的维度键、scene_type 或其他明确目标
+- decision 只能是 accept、partial、reject、consensus
+- reason 必须说明采纳、部分采纳、驳回或确认共识的证据与理由
+- final_rationale：概括最终评分为何成立，不得重复逐条 decisions
+- 当批判严重程度为 LOW 且没有实质争议时，decisions 必须是空数组，不得虚构争议
 
 ## 语言要求
 你的思考过程和所有自然语言文本（包括 critique、suggestions、arbitration_notes 等字段的内容）必须全程使用中文。JSON 的键名和枚举值请严格遵循上述输出格式中的定义。`;

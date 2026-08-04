@@ -37,7 +37,7 @@ function makeJointProposalJSON(opts: { score?: number; perImage?: boolean } = {}
     dimensions: makeDimensions(PORTRAIT_DIMS, score),
     group_analysis: '组照叙事完整，风格高度统一。',
     critique: '整体完成度较高的组照。',
-    suggestions: '可以加强收尾照片的表现力。',
+    suggestions: ['可以加强收尾照片的表现力。'],
   };
   if (opts.perImage) base.per_image = makePerImage(3, score);
   return JSON.stringify(base);
@@ -50,8 +50,12 @@ function makeJointArbiterJSON(opts: { perImage?: boolean } = {}) {
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
     group_analysis: '最终认定该组照叙事完整。',
     critique: '组照整体质量良好。',
-    suggestions: '建议统一后期色调。',
-    arbitration_notes: '采纳了批判者关于表现力的部分质疑。',
+    suggestions: ['建议统一后期色调。'],
+    arbitration_notes: {
+      scene_type_ruling: '场景判定明确。',
+      decisions: [],
+      final_rationale: '采纳了批判者关于表现力的部分质疑。',
+    },
   };
   if (opts.perImage) base.per_image = makePerImage(3, 7.2);
   return JSON.stringify(base);
@@ -67,7 +71,7 @@ function makeCompareProposalJSON(opts: { perImage?: boolean } = {}) {
   const base: Record<string, unknown> = {
     ranking: COMPARE_RANKING,
     comparison_summary: '第 2 张明显优于其余两张，共性问题是背景杂乱。',
-    suggestions: '统一拍摄机位与曝光参数。',
+    suggestions: ['统一拍摄机位与曝光参数。'],
   };
   if (opts.perImage) base.per_image = makePerImage(3, 7.0);
   return JSON.stringify(base);
@@ -77,8 +81,12 @@ function makeCompareArbiterJSON(opts: { perImage?: boolean } = {}) {
   const base: Record<string, unknown> = {
     ranking: COMPARE_RANKING,
     comparison_summary: '维持提案者的排名结论。',
-    suggestions: '最终建议：统一拍摄机位与曝光参数。',
-    arbitration_notes: '排名依据充分，驳回批判者的排名调整请求。',
+    suggestions: ['最终建议：统一拍摄机位与曝光参数。'],
+    arbitration_notes: {
+      scene_type_ruling: '场景判定明确。',
+      decisions: [],
+      final_rationale: '排名依据充分，驳回批判者的排名调整请求。',
+    },
   };
   if (opts.perImage) base.per_image = makePerImage(3, 7.0);
   return JSON.stringify(base);
@@ -156,8 +164,12 @@ describe('Engine Layer — Group Evaluation', () => {
       expect(result.dimensions).toEqual(makeDimensions(PORTRAIT_DIMS, 7.2));
       expect(result.groupAnalysis).toBe('最终认定该组照叙事完整。');
       expect(result.critique).toBe('组照整体质量良好。');
-      expect(result.suggestions).toBe('建议统一后期色调。');
-      expect(result.arbitrationNotes).toBe('采纳了批判者关于表现力的部分质疑。');
+      expect(result.suggestions).toEqual(['建议统一后期色调。']);
+      expect(result.arbitrationNotes).toEqual({
+        sceneTypeRuling: '场景判定明确。',
+        decisions: [],
+        finalRationale: '采纳了批判者关于表现力的部分质疑。',
+      });
 
       // metadata
       expect(result.metadata.rounds).toBe(3);
@@ -235,8 +247,12 @@ describe('Engine Layer — Group Evaluation', () => {
       expect(result.mode).toBe('compare');
       expect(result.ranking).toEqual(COMPARE_RANKING);
       expect(result.comparisonSummary).toBe('维持提案者的排名结论。');
-      expect(result.suggestions).toBe('最终建议：统一拍摄机位与曝光参数。');
-      expect(result.arbitrationNotes).toBe('排名依据充分，驳回批判者的排名调整请求。');
+      expect(result.suggestions).toEqual(['最终建议：统一拍摄机位与曝光参数。']);
+      expect(result.arbitrationNotes).toEqual({
+        sceneTypeRuling: '场景判定明确。',
+        decisions: [],
+        finalRationale: '排名依据充分，驳回批判者的排名调整请求。',
+      });
       expect(result.metadata.rounds).toBe(3);
       expect('perImage' in result).toBe(false);
       expect(result.process.proposal.result.ranking).toEqual(COMPARE_RANKING);
@@ -269,11 +285,7 @@ describe('Engine Layer — Group Evaluation', () => {
 
     it('should include per_image in schema and expose perImage in result when includePerImage=true', async () => {
       const { provider, captured } = createCapturingProvider(
-        [
-          makeJointProposalJSON({ perImage: true }),
-          makeCritiqueJSON('LOW'),
-          makeJointArbiterJSON({ perImage: true }),
-        ],
+        [makeJointProposalJSON({ perImage: true }), makeCritiqueJSON('LOW'), makeJointArbiterJSON({ perImage: true })],
         { structuredOutput: 'json_schema' },
       );
 
@@ -558,6 +570,38 @@ describe('Engine Layer — Group Evaluation', () => {
 
   // ── 异常处理（非流式）──
   describe('evaluateGroup() — error handling', () => {
+    it('joint should fail fast when the assembled final result violates its schema', async () => {
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeJointProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('LOW') }],
+        arbiterResponses: [{ content: makeJointArbiterJSON() }],
+        onEvent: (event) => {
+          if (event.type === 'agent_complete' && event.agent === 'arbiter') {
+            // Mutate only after the agent output passed its own schema, proving the final result is validated independently.
+            (event.data as any).result.suggestions = 'legacy string suggestion';
+          }
+        },
+      });
+
+      await expect(engine.evaluateGroup(GROUP_IMAGES, 'joint', { genre: 'portrait' })).rejects.toThrow();
+    });
+
+    it('compare should fail fast when the assembled final result violates its schema', async () => {
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeCompareProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('LOW') }],
+        arbiterResponses: [{ content: makeCompareArbiterJSON() }],
+        onEvent: (event) => {
+          if (event.type === 'agent_complete' && event.agent === 'arbiter') {
+            // Mutate only after the agent output passed its own schema, proving the final result is validated independently.
+            (event.data as any).result.arbitration_notes = 'legacy string arbitration notes';
+          }
+        },
+      });
+
+      await expect(engine.evaluateGroup(GROUP_IMAGES, 'compare', { genre: 'portrait' })).rejects.toThrow();
+    });
+
     it('should emit error event and rethrow when provider fails', async () => {
       const events: EvaluationEvent[] = [];
       const errorProvider = defineProvider({

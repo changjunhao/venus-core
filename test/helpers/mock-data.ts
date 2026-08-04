@@ -50,8 +50,8 @@ export const MOCK_EVALUATION_RESULT: EvaluationResult = {
     composition_focus: 7.5,
   },
   critique: 'Great portrait.',
-  suggestions: 'Try different lighting.',
-  arbitrationNotes: 'Balanced evaluation.',
+  suggestions: ['Try different lighting.'],
+  arbitrationNotes: { sceneTypeRuling: '场景判定明确。', decisions: [], finalRationale: 'Balanced evaluation.' },
   process: {
     proposal: { result: {} as any, reasoning: null },
     critique: { result: {} as any, reasoning: null },

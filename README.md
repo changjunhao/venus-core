@@ -78,12 +78,14 @@ const engine = createVenusEngine({
 });
 
 const result = await engine.evaluate('https://example.com/photo.jpg');
-console.log(result.totalScore);        // 8.2
-console.log(result.genre);             // 'landscape'
-console.log(result.dimensions);        // { composition_depth: 8.5, ... }
-console.log(result.critique);          // Detailed textual critique
-console.log(result.suggestions);       // Improvement suggestions
-console.log(result.arbitrationNotes);  // Arbiter's rationale
+console.log(result.totalScore);                         // 8.2
+console.log(result.genre);                              // 'landscape'
+console.log(result.dimensions);                         // { composition_depth: 8.5, ... }
+console.log(result.critique);                           // Detailed textual critique
+console.log(result.suggestions);                        // ['Improve ...', 'Consider ...']
+console.log(result.arbitrationNotes.sceneTypeRuling);   // Scene-type ruling
+console.log(result.arbitrationNotes.decisions);         // Structured arbitration decisions
+console.log(result.arbitrationNotes.finalRationale);    // Final rationale
 ```
 
 You can also stream evaluation progress for real-time updates:
@@ -124,6 +126,8 @@ if (compare.mode === 'compare') {
   console.log(compare.perImage);     // Per-image details, only present with includePerImage
 }
 ```
+
+Both group modes expose `suggestions` as `string[]` and `arbitrationNotes` as the same structured object shown in the single-image example.
 
 `index` always refers to the 0-based position in the input array, so results map back to the original order.
 

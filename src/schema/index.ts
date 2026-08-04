@@ -37,14 +37,7 @@ export const GenreEnum: z.ZodType<Genre> = z.enum([
 
 /** 门类键名联合类型 */
 export type Genre =
-  | 'portrait'
-  | 'landscape'
-  | 'documentary'
-  | 'fine_art'
-  | 'commercial'
-  | 'architecture'
-  | 'nature'
-  | 'sports';
+  'portrait' | 'landscape' | 'documentary' | 'fine_art' | 'commercial' | 'architecture' | 'nature' | 'sports';
 
 /** 从 GENRE_CONFIG 推导的精确子类型（如 portrait → "studio" | "environmental" | "wedding"） */
 export type SubtypeForGenre<G extends Genre = Genre> = G extends 'portrait'
@@ -77,12 +70,11 @@ export type DimensionForGenre<G extends Genre = Genre> = G extends 'portrait'
         : G extends 'commercial'
           ? 'subject_presentation' | 'lighting_technique' | 'styling_composition' | 'color_branding' | 'market_appeal'
           : G extends 'architecture'
-            ?
-                | 'perspective_geometry'
-                | 'spatial_expression'
-                | 'light_material'
-                | 'contextual_harmony'
-                | 'architectural_narrative'
+            ? | 'perspective_geometry'
+              | 'spatial_expression'
+              | 'light_material'
+              | 'contextual_harmony'
+              | 'architectural_narrative'
             : G extends 'nature'
               ? 'subject_capture' | 'focus_sharpness' | 'habitat_context' | 'technical_mastery' | 'natural_wonder'
               : G extends 'sports'
@@ -256,6 +248,37 @@ const GENRE_CONFIG = {
 // ============================================================
 export const scoreField = (): z.ZodNumber => z.number().min(0).max(10).multipleOf(0.1);
 
+/** One independently renderable suggestion. Numbering and list markers belong to the UI. */
+export const SuggestionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine((value) => !/[\r\n]/.test(value), 'Suggestion must be a single line');
+
+/** Structured suggestions shared by single, joint, and compare evaluations. */
+export const SuggestionsSchema = z.array(SuggestionSchema).min(1).max(8);
+
+export const ArbitrationDecisionSchema = z.object({
+  target: z.string().trim().min(1).max(100),
+  decision: z.enum(['accept', 'partial', 'reject', 'consensus']),
+  reason: z.string().trim().min(1).max(1000),
+});
+
+/** Agent-facing arbitration notes (snake_case). */
+export const RawArbitrationNotesSchema = z.object({
+  scene_type_ruling: z.string().trim().min(1).max(1000),
+  decisions: z.array(ArbitrationDecisionSchema).max(16),
+  final_rationale: z.string().trim().min(1).max(2000),
+});
+
+/** Final engine result arbitration notes (camelCase). */
+export const ArbitrationNotesSchema = z.object({
+  sceneTypeRuling: z.string().trim().min(1).max(1000),
+  decisions: z.array(ArbitrationDecisionSchema).max(16),
+  finalRationale: z.string().trim().min(1).max(2000),
+});
+
 // ============================================================
 // 4. 子类型枚举注册表（缓存）
 // ============================================================
@@ -290,14 +313,14 @@ function createProposalSchema(genre: Genre): z.ZodType<{
   total_score: number;
   dimensions: Record<string, number>;
   critique: string;
-  suggestions: string;
+  suggestions: string[];
 }> {
   return z.object({
     scene_type: getSubtypeEnum(genre),
     total_score: scoreField(),
     dimensions: buildDimensionsSchema(genre),
     critique: z.string().min(1),
-    suggestions: z.string().min(1),
+    suggestions: SuggestionsSchema,
   });
 }
 
@@ -307,16 +330,24 @@ function createArbiterSchema(genre: Genre): z.ZodType<{
   total_score: number;
   dimensions: Record<string, number>;
   critique: string;
-  suggestions: string;
-  arbitration_notes: string;
+  suggestions: string[];
+  arbitration_notes: {
+    scene_type_ruling: string;
+    decisions: Array<{
+      target: string;
+      decision: 'accept' | 'partial' | 'reject' | 'consensus';
+      reason: string;
+    }>;
+    final_rationale: string;
+  };
 }> {
   return z.object({
     scene_type: getSubtypeEnum(genre),
     total_score: scoreField(),
     dimensions: buildDimensionsSchema(genre),
     critique: z.string().min(1),
-    suggestions: z.string().min(1),
-    arbitration_notes: z.string().min(1),
+    suggestions: SuggestionsSchema,
+    arbitration_notes: RawArbitrationNotesSchema,
   });
 }
 
@@ -463,8 +494,8 @@ function buildProposerResultSchema(genre: Genre) {
     totalScore: scoreField(),
     dimensions: buildDimensionsSchema(genre),
     critique: z.string(),
-    suggestions: z.string(),
-    arbitrationNotes: z.string(),
+    suggestions: SuggestionsSchema,
+    arbitrationNotes: ArbitrationNotesSchema,
     // process 内嵌套保持 snake_case（agent 原始输出）
     process: z.object({
       genreDetection: agentCallResult(genreDetectionResult).optional(),
@@ -477,6 +508,7 @@ function buildProposerResultSchema(genre: Genre) {
       evaluatedAt: z.string(),
       durationMs: z.number(),
       rounds: z.union([z.literal(3), z.literal(4)]),
+      context: EvaluationContextSchema.optional(),
     }),
   });
 }

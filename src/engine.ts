@@ -30,15 +30,17 @@ import type {
   GroupJointArbitrationResult,
   GroupCompareArbitrationResult,
   GroupEvaluationStreamEvent,
+  RawArbitrationNotes,
+  ArbitrationNotes,
 } from './types.js';
 import { ProposerAgent } from './agents/proposer.js';
 import { CriticAgent } from './agents/critic.js';
 import { ArbiterAgent } from './agents/arbiter.js';
 import { GenreDetectorAgent } from './agents/genre-detector.js';
 import { getProposerResultSchema, getGenreConfig } from './schema/index.js';
+import { getGroupJointResultSchema, getGroupCompareResultSchema } from './schema/group.js';
 import { VenusError, ValidationError } from './utils/errors.js';
 import { createLogger } from './utils/logger.js';
-import { z } from 'zod';
 
 /** 组图评估的图片数量下限 */
 const MIN_GROUP_IMAGES = 2;
@@ -50,6 +52,15 @@ type GroupProposerOutput = GroupJointProposerResult | GroupCompareProposerResult
 
 /** 组图 Arbiter 输出联合类型（joint | compare） */
 type GroupArbitrationOutput = GroupJointArbitrationResult | GroupCompareArbitrationResult;
+
+/** Convert agent-facing snake_case arbitration notes into the public camelCase contract. */
+function mapArbitrationNotes(notes: RawArbitrationNotes): ArbitrationNotes {
+  return {
+    sceneTypeRuling: notes.scene_type_ruling,
+    decisions: notes.decisions.map((decision) => ({ ...decision })),
+    finalRationale: notes.final_rationale,
+  };
+}
 
 /**
  * #runStreamRound 实际产出的事件联合（agent_call / reasoning_chunk / result_chunk / agent_complete）。
@@ -160,7 +171,7 @@ export class VenusEngine {
       dimensions: arb.dimensions,
       critique: arb.critique,
       suggestions: arb.suggestions,
-      arbitrationNotes: arb.arbitration_notes,
+      arbitrationNotes: mapArbitrationNotes(arb.arbitration_notes),
       process: {
         genreDetection: genreDetectionOut,
         proposal: proposalOut,
@@ -176,20 +187,9 @@ export class VenusEngine {
       },
     };
 
-    // Schema validation
-    try {
-      const resultSchema = getProposerResultSchema(detectedGenre);
-      resultSchema.parse(result);
-      this.#logger.info(`结果验证通过 (genre=${detectedGenre}, score=${result.totalScore})`);
-    } catch (e) {
-      const detail =
-        e instanceof z.ZodError
-          ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
-          : (e as Error).message;
-      this.#logger.warn(`结果验证失败: ${detail}`);
-    }
-
-    return result;
+    const validated = getProposerResultSchema(detectedGenre).parse(result) as EvaluationResult;
+    this.#logger.info(`结果验证通过 (genre=${detectedGenre}, score=${validated.totalScore})`);
+    return validated;
   }
 
   /** Get the provider for a specific agent role */
@@ -704,7 +704,7 @@ export class VenusEngine {
         groupAnalysis: arb.group_analysis,
         critique: arb.critique,
         suggestions: arb.suggestions,
-        arbitrationNotes: arb.arbitration_notes,
+        arbitrationNotes: mapArbitrationNotes(arb.arbitration_notes),
         process: {
           genreDetection: genreDetectionOut,
           proposal: proposalOut as AgentCallResult<GroupJointProposerResult>,
@@ -717,7 +717,9 @@ export class VenusEngine {
       if (includePerImage && arb.per_image) {
         result.perImage = arb.per_image;
       }
-      return result;
+      return getGroupJointResultSchema(detectedGenre, includePerImage, imageUrls.length).parse(
+        result,
+      ) as GroupJointEvaluationResult;
     }
 
     const arb = arbitrationOut.result as GroupCompareArbitrationResult;
@@ -728,7 +730,7 @@ export class VenusEngine {
       ranking: arb.ranking,
       comparisonSummary: arb.comparison_summary,
       suggestions: arb.suggestions,
-      arbitrationNotes: arb.arbitration_notes,
+      arbitrationNotes: mapArbitrationNotes(arb.arbitration_notes),
       process: {
         genreDetection: genreDetectionOut,
         proposal: proposalOut as AgentCallResult<GroupCompareProposerResult>,
@@ -741,7 +743,7 @@ export class VenusEngine {
     if (includePerImage && arb.per_image) {
       result.perImage = arb.per_image;
     }
-    return result;
+    return getGroupCompareResultSchema(includePerImage, imageUrls.length).parse(result) as GroupCompareEvaluationResult;
   }
 
   /** Run a full group evaluation (joint or compare) on a set of images */

@@ -12,7 +12,7 @@ function makeProposalJSON(score: number = 7.5) {
     total_score: score,
     dimensions: makeDimensions(PORTRAIT_DIMS, score),
     critique: 'Good portrait with nice lighting.',
-    suggestions: 'Consider adjusting the background.',
+    suggestions: ['Consider adjusting the background.'],
   });
 }
 
@@ -58,7 +58,7 @@ describe('ProposerAgent', () => {
         total_score: 8.0,
         dimensions: makeDimensions(PORTRAIT_DIMS, 8.0),
         critique: 'Original assessment.',
-        suggestions: 'Original suggestions.',
+        suggestions: ['Original suggestions.'],
       };
 
       const critiqueResult = {
@@ -118,7 +118,7 @@ describe('ProposerAgent', () => {
           total_score: 8.0,
           dimensions: makeDimensions(PORTRAIT_DIMS, 8.0),
           critique: 'Original.',
-          suggestions: 'Fix.',
+          suggestions: ['Fix.'],
         },
         {
           scene_type_review: { proposer_scene: 'studio', is_correct: true, correct_scene: null, reason: 'OK.' },

@@ -78,12 +78,14 @@ const engine = createVenusEngine({
 });
 
 const result = await engine.evaluate('https://example.com/photo.jpg');
-console.log(result.totalScore);        // 8.2
-console.log(result.genre);             // 'landscape'
-console.log(result.dimensions);        // { composition_depth: 8.5, ... }
-console.log(result.critique);          // 详细文字点评
-console.log(result.suggestions);       // 改进建议
-console.log(result.arbitrationNotes);  // 仲裁者裁定理由
+console.log(result.totalScore);                         // 8.2
+console.log(result.genre);                              // 'landscape'
+console.log(result.dimensions);                         // { composition_depth: 8.5, ... }
+console.log(result.critique);                           // 详细文字点评
+console.log(result.suggestions);                        // ['改进……', '建议……']
+console.log(result.arbitrationNotes.sceneTypeRuling);   // 场景类型裁定
+console.log(result.arbitrationNotes.decisions);         // 结构化仲裁决定
+console.log(result.arbitrationNotes.finalRationale);    // 最终裁定理由
 ```
 
 你也可以流式获取评估进度，适合实时更新：
@@ -124,6 +126,8 @@ if (compare.mode === 'compare') {
   console.log(compare.perImage);     // 逐图明细，仅在 includePerImage 为 true 时存在
 }
 ```
+
+两种组图模式同样以 `string[]` 返回 `suggestions`，并以单图示例中的结构化对象返回 `arbitrationNotes`。
 
 `index` 始终表示输入数组中从 0 开始的下标，因此结果可映射回原始顺序。
 

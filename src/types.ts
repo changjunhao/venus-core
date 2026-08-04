@@ -205,6 +205,32 @@ export interface CallConfig {
 }
 
 // ─── Evaluation Result Types ──────────────────────────────
+
+/** Structured, independently renderable improvement suggestions */
+export type Suggestions = string[];
+
+/** Arbiter decision applied to a challenged dimension, scene classification, or ranking */
+export type ArbitrationDecisionType = 'accept' | 'partial' | 'reject' | 'consensus';
+
+export interface ArbitrationDecision {
+  target: string;
+  decision: ArbitrationDecisionType;
+  reason: string;
+}
+
+/** Raw arbitration notes emitted by an agent (snake_case) */
+export interface RawArbitrationNotes {
+  scene_type_ruling: string;
+  decisions: ArbitrationDecision[];
+  final_rationale: string;
+}
+
+/** Public arbitration notes exposed by final engine results (camelCase) */
+export interface ArbitrationNotes {
+  sceneTypeRuling: string;
+  decisions: ArbitrationDecision[];
+  finalRationale: string;
+}
 // G 默认为 Genre 时保持宽松（Record<string, number> / string），兼容引擎内部跨门类通用代码；
 // 显式指定门类（如 ProposerResult<'portrait'>）获得精确的维度键名和子类型约束。
 
@@ -215,12 +241,12 @@ export type ProposerResult<G extends Genre = Genre> = {
   total_score: number;
   dimensions: [G] extends [Genre] ? Record<string, number> : Record<DimensionForGenre<G>, number>;
   critique: string;
-  suggestions: string;
+  suggestions: Suggestions;
 };
 
 /** Arbitration result — extends ProposerResult with arbitration notes */
 export type ArbitrationResult<G extends Genre = Genre> = ProposerResult<G> & {
-  arbitration_notes: string;
+  arbitration_notes: RawArbitrationNotes;
 };
 
 /** Complete evaluation result from the engine */
@@ -231,8 +257,8 @@ export interface EvaluationResult {
   totalScore: number;
   dimensions: Record<string, number>;
   critique: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
 
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
@@ -393,7 +419,7 @@ export interface GroupJointProposerResult {
   dimensions: Record<string, number>;
   group_analysis: string;
   critique: string;
-  suggestions: string;
+  suggestions: Suggestions;
   per_image?: PerImageDetail[];
 }
 
@@ -401,18 +427,18 @@ export interface GroupJointProposerResult {
 export interface GroupCompareProposerResult {
   ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
   comparison_summary: string;
-  suggestions: string;
+  suggestions: Suggestions;
   per_image?: PerImageDetail[];
 }
 
 /** 组图联合评估 — Arbiter 原始输出 */
 export type GroupJointArbitrationResult = GroupJointProposerResult & {
-  arbitration_notes: string;
+  arbitration_notes: RawArbitrationNotes;
 };
 
 /** 组图对比评估 — Arbiter 原始输出 */
 export type GroupCompareArbitrationResult = GroupCompareProposerResult & {
-  arbitration_notes: string;
+  arbitration_notes: RawArbitrationNotes;
 };
 
 /** 组图评估结果元数据 */
@@ -435,8 +461,8 @@ export interface GroupJointEvaluationResult {
   dimensions: Record<string, number>;
   groupAnalysis: string;
   critique: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   perImage?: PerImageDetail[];
 
   process: {
@@ -457,8 +483,8 @@ export interface GroupCompareEvaluationResult {
   genre: Genre;
   ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
   comparisonSummary: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   perImage?: PerImageDetail[];
 
   process: {

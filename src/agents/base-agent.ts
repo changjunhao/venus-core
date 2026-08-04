@@ -150,7 +150,7 @@ export class BaseAgent {
     const useJsonSchema = responseFormat.type === 'json_schema';
 
     if (useJsonSchema) {
-      // json_schema mode: single call, API guarantees schema compliance
+      // json_schema mode: single provider call followed by local Zod validation
       const requestMessages = this.#buildMessages(systemPrompt, userPrompt, imageUrl);
 
       this.logger.info('调用中...');
@@ -166,16 +166,11 @@ export class BaseAgent {
         reasoning: reasoningParams,
       });
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(response.content);
-      } catch (e) {
-        this.logger.warn('json_schema 模式解析失败：provider 声明的 schema 保证未兑现，不会重试');
-        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, provider.name, 'parse_error');
-      }
-
+      // Provider-side strict mode is not a substitute for local runtime validation:
+      // capabilities differ and some providers omit JSON Schema constraints.
+      const result = this.#parseResponse<T>(response.content, schema, response.reasoning ?? null, provider.name);
       this.logger.info('调用完成');
-      return { result: parsed as T, reasoning: response.reasoning ?? null };
+      return result;
     }
 
     // json_object mode: retain existing Zod validation + retry logic
@@ -241,7 +236,7 @@ export class BaseAgent {
     const useJsonSchema = responseFormat.type === 'json_schema';
 
     if (useJsonSchema) {
-      // json_schema mode: single stream call, API guarantees schema compliance
+      // json_schema mode: single provider stream followed by local Zod validation
       const requestMessages = this.#buildMessages(systemPrompt, userPrompt, imageUrl);
 
       this.logger.info('流式调用中...');
@@ -264,16 +259,9 @@ export class BaseAgent {
         yield chunk;
       }
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(finalContent);
-      } catch (e) {
-        this.logger.warn('json_schema 模式流式解析失败：provider 声明的 schema 保证未兑现，不会重试');
-        throw new ProviderError(`JSON parse failed: ${(e as Error).message}`, provider.name, 'parse_error');
-      }
-
+      const result = this.#parseResponse<T>(finalContent, schema, reasoning || null, provider.name, '流式');
       this.logger.info('流式调用完成');
-      return { result: parsed as T, reasoning: reasoning || null };
+      return result;
     }
 
     // json_object mode: retain existing Zod validation + retry logic

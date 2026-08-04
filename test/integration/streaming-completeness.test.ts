@@ -39,7 +39,7 @@ function makeProposalJSON(): string {
     total_score: 7.5,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
     critique: 'Good portrait with nice lighting and composition.',
-    suggestions: 'Consider adjusting the background for better contrast.',
+    suggestions: ['Consider adjusting the background for better contrast.'],
   });
 }
 
@@ -71,8 +71,12 @@ function makeArbiterJSON(): string {
     total_score: 7.2,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
     critique: 'Well-executed studio portrait.',
-    suggestions: 'Coach subjects for more relaxed expressions.',
-    arbitration_notes: 'Adjusted scores after weighing both arguments.',
+    suggestions: ['Coach subjects for more relaxed expressions.'],
+    arbitration_notes: {
+      scene_type_ruling: '场景判定明确。',
+      decisions: [],
+      final_rationale: 'Adjusted scores after weighing both arguments.',
+    },
   });
 }
 
@@ -276,8 +280,8 @@ describe('Mock - Streaming completeness rules', () => {
     expect(streamResult.totalScore).toBe(evaluateResult.totalScore);
     expect(streamResult.dimensions).toEqual(evaluateResult.dimensions);
     expect(streamResult.critique).toBe(evaluateResult.critique);
-    expect(streamResult.suggestions).toBe(evaluateResult.suggestions);
-    expect(streamResult.arbitrationNotes).toBe(evaluateResult.arbitrationNotes);
+    expect(streamResult.suggestions).toEqual(evaluateResult.suggestions);
+    expect(streamResult.arbitrationNotes).toEqual(evaluateResult.arbitrationNotes);
     expect(streamResult.metadata.rounds).toBe(evaluateResult.metadata.rounds);
 
     // 顶层字段集合应一致

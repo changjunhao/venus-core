@@ -58,12 +58,14 @@ describe('Proposer Prompts', () => {
       }
     });
 
-    it('should include JSON output format requirements', () => {
+    it('should require structured suggestions without display markers', () => {
       const prompt = getProposerSystemPrompt('portrait');
       expect(prompt).toContain('JSON');
       expect(prompt).toContain('scene_type');
       expect(prompt).toContain('total_score');
       expect(prompt).toContain('dimensions');
+      expect(prompt).toContain('"suggestions": [');
+      expect(prompt).toContain('不得包含编号、项目符号或换行');
     });
 
     it('should include subtype explanation', () => {
@@ -130,7 +132,7 @@ describe('Proposer Prompts', () => {
         composition_focus: 8.0,
       },
       critique: 'Great portrait.',
-      suggestions: 'Minor improvements.',
+      suggestions: ['Minor improvements.'],
     };
 
     const critiqueResult: CritiqueResult = {

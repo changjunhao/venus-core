@@ -35,6 +35,11 @@ export type {
 // ─── Schema ───────────────────────────────────────────────
 export {
   GenreEnum,
+  SuggestionSchema,
+  SuggestionsSchema,
+  ArbitrationDecisionSchema,
+  RawArbitrationNotesSchema,
+  ArbitrationNotesSchema,
   ExifDataSchema,
   EvaluationContextSchema,
   getSchemas,
@@ -42,7 +47,12 @@ export {
   getMetadata,
   getAllGenres,
 } from './schema/index.js';
-export { getGroupJointSchemas, getGroupCompareSchemas } from './schema/group.js';
+export {
+  getGroupJointSchemas,
+  getGroupCompareSchemas,
+  getGroupJointResultSchema,
+  getGroupCompareResultSchema,
+} from './schema/group.js';
 export type { SubtypeForGenre, DimensionForGenre } from './schema/index.js';
 
 // ─── Errors ───────────────────────────────────────────────

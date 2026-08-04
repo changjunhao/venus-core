@@ -28,8 +28,8 @@ export const MOCK_GROUP_JOINT_RESULT: GroupJointEvaluationResult = {
   },
   groupAnalysis: 'Consistent series.',
   critique: 'Great group.',
-  suggestions: 'Tighten the sequencing.',
-  arbitrationNotes: 'Balanced group evaluation.',
+  suggestions: ['Tighten the sequencing.'],
+  arbitrationNotes: { sceneTypeRuling: '场景判定明确。', decisions: [], finalRationale: 'Balanced group evaluation.' },
   process: {
     proposal: { result: {} as any, reasoning: null },
     critique: { result: {} as any, reasoning: null },
@@ -54,8 +54,8 @@ export const MOCK_GROUP_COMPARE_RESULT: GroupCompareEvaluationResult = {
     { index: 0, rank: 2, score: 7.5, rationale: 'Flatter expression.' },
   ],
   comparisonSummary: 'The second frame leads.',
-  suggestions: 'Reshoot the first frame.',
-  arbitrationNotes: 'Ranking upheld.',
+  suggestions: ['Reshoot the first frame.'],
+  arbitrationNotes: { sceneTypeRuling: '场景判定明确。', decisions: [], finalRationale: 'Ranking upheld.' },
   process: {
     proposal: { result: {} as any, reasoning: null },
     critique: { result: {} as any, reasoning: null },
@@ -116,9 +116,7 @@ export function createMockEngine(overrides?: MockAdapterEngineOverrides): VenusE
     evaluateGroup:
       overrides?.evaluateGroup ??
       (async (imageUrls: string[], mode: 'joint' | 'compare') =>
-        mode === 'compare'
-          ? { ...MOCK_GROUP_COMPARE_RESULT, imageUrls }
-          : { ...MOCK_GROUP_JOINT_RESULT, imageUrls }),
+        mode === 'compare' ? { ...MOCK_GROUP_COMPARE_RESULT, imageUrls } : { ...MOCK_GROUP_JOINT_RESULT, imageUrls }),
     evaluateGroupStream:
       overrides?.evaluateGroupStream ??
       async function* () {

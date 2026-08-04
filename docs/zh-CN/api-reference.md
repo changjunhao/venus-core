@@ -23,6 +23,20 @@
 返回 `EvaluationResult`：
 
 ```ts
+type Suggestions = string[];
+
+interface ArbitrationDecision {
+  target: string;
+  decision: 'accept' | 'partial' | 'reject' | 'consensus';
+  reason: string;
+}
+
+interface ArbitrationNotes {
+  sceneTypeRuling: string;
+  decisions: ArbitrationDecision[];
+  finalRationale: string;
+}
+
 interface EvaluationResult {
   imageUrl: string;
   genre: Genre;
@@ -30,8 +44,8 @@ interface EvaluationResult {
   totalScore: number;
   dimensions: Record<string, number>;
   critique: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
     proposal: AgentCallResult<ProposerResult>;
@@ -122,8 +136,8 @@ interface GroupJointEvaluationResult {
   dimensions: Record<string, number>;
   groupAnalysis: string;
   critique: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   perImage?: PerImageDetail[];        // 仅当 includePerImage: true
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
@@ -142,8 +156,8 @@ interface GroupCompareEvaluationResult {
   genre: Genre;
   ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
   comparisonSummary: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   perImage?: PerImageDetail[];        // 仅当 includePerImage: true
   process: { /* 结构相同，结果类型为 GroupCompare* 系列 */ };
   metadata: GroupEvaluationMetadata;
@@ -245,7 +259,7 @@ proposalSchema.parse({
   dimensions: { facial_expression: 8.5 /* ... */ },
   group_analysis: '...',
   critique: '...',
-  suggestions: '...',
+  suggestions: ['...'],
   per_image: [
     { index: 0, score: 8.2, comment: '...' },
     { index: 1, score: 8.6, comment: '...' },
@@ -274,11 +288,11 @@ proposalSchema.parse({
     { index: 2, rank: 3, score: 7.9, rationale: '...' },
   ],
   comparison_summary: '...',
-  suggestions: '...',
+  suggestions: ['...'],
 });
 ```
 
-两个工厂函数都按参数组合缓存结果，相同参数的重复调用会返回同一个 Schema 实例。`arbiterSchema` 即 `proposalSchema` 的结构再加上必填的 `arbitration_notes` 字符串。
+两个工厂函数都按参数组合缓存结果，相同参数的重复调用会返回同一个 Schema 实例。`arbiterSchema` 即 `proposalSchema` 的结构再加上必填的结构化 `arbitration_notes` 对象（`scene_type_ruling`、`decisions`、`final_rationale`）。
 
 两者共同强制的校验规则：
 
@@ -287,7 +301,9 @@ proposalSchema.parse({
 | 数组长度必须等于 `imageCount` | `ranking`、`per_image` |
 | `index` 必须是 `0..imageCount - 1` 范围内的整数，且各项不得重复 | `ranking`、`per_image` |
 | `rank` 必须是整数，且构成 `1..imageCount` 的一个无重复排列 | `ranking` |
-| 文本字段（`rationale`、`comment`、`comparison_summary`、`group_analysis`、`critique`、`suggestions`）不得为空 | 两种模式 |
+| 文本字段（`rationale`、`comment`、`comparison_summary`、`group_analysis`、`critique`）不得为空 | 两种模式 |
+| `suggestions` 必须是包含 1–8 个非空单行字符串的数组 | 两种模式 |
+| `arbitration_notes` 必须包含场景判定、裁决数组和最终理由 | 仲裁 Schema |
 
 ### `getProposerResultSchema(genre: Genre)`
 

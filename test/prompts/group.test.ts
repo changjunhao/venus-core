@@ -41,7 +41,7 @@ const JOINT_PROPOSAL: GroupJointProposerResult = {
   },
   group_analysis: '整体叙事完整。',
   critique: '组照完成度较高。',
-  suggestions: '收尾可更有力。',
+  suggestions: ['收尾可更有力。'],
 };
 
 const COMPARE_PROPOSAL: GroupCompareProposerResult = {
@@ -51,7 +51,7 @@ const COMPARE_PROPOSAL: GroupCompareProposerResult = {
     { index: 2, rank: 3, score: 6.5, rationale: '主体模糊。' },
   ],
   comparison_summary: '第 1 张综合最优。',
-  suggestions: '统一后期风格。',
+  suggestions: ['统一后期风格。'],
 };
 
 const CRITIQUE_LOW: CritiqueResult = {
@@ -240,12 +240,23 @@ describe('Group Prompts', () => {
 
   // ── Arbiter ──
   describe('getGroupArbiterSystemPrompt()', () => {
-    it('should require arbitration_notes in the output structure for both modes', () => {
+    it('should require structured suggestions and arbitration notes for both modes', () => {
       for (const mode of ['joint', 'compare'] as const) {
         const prompt = getGroupArbiterSystemPrompt(mode, 'portrait', 3, false);
-        expect(prompt).toContain('arbitration_notes');
+        expect(prompt).toContain('"suggestions": [');
+        expect(prompt).toContain('"arbitration_notes": {');
+        expect(prompt).toContain('accept|partial|reject|consensus');
+        expect(prompt).toContain('decisions 必须是空数组');
         expect(prompt).toContain('必须且只能输出一个严格的 JSON 对象');
       }
+    });
+
+    it('compare prompt distinguishes zero-based index from one-based rank', () => {
+      const prompt = getGroupArbiterSystemPrompt('compare', 'portrait', 3, false);
+      expect(prompt).toContain('index 从 0 开始');
+      expect(prompt).toContain('rank 1 为最佳');
+      expect(prompt).toContain('排名整体争议使用 ranking');
+      expect(prompt).toContain('ranking[].rationale');
     });
 
     it('should include the image reference protocol', () => {

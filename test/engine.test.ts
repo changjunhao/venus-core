@@ -13,7 +13,7 @@ function makeProposalJSON(opts: { severity?: string; score?: number } = {}) {
     total_score: opts.score ?? 7.5,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
     critique: 'Good portrait with nice lighting and composition.',
-    suggestions: 'Consider adjusting the background for better contrast.',
+    suggestions: ['Consider adjusting the background for better contrast.'],
   });
 }
 
@@ -45,9 +45,19 @@ function makeArbiterJSON() {
     total_score: 7.2,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
     critique: 'Well-executed studio portrait with good technical quality.',
-    suggestions: 'Work on capturing more natural expressions in future shoots.',
-    arbitration_notes:
-      'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+    suggestions: ['Work on capturing more natural expressions in future shoots.'],
+    arbitration_notes: {
+      scene_type_ruling: 'Studio portrait classification is upheld.',
+      decisions: [
+        {
+          target: 'facial_expression',
+          decision: 'accept',
+          reason: 'The critic identified visible tension in the jaw area.',
+        },
+      ],
+      final_rationale:
+        'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+    },
   });
 }
 
@@ -57,7 +67,7 @@ function makeRevisionJSON() {
     total_score: 7.0,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.0),
     critique: 'Revised assessment accounting for expression concerns.',
-    suggestions: 'Focus on coaching subjects for more relaxed expressions.',
+    suggestions: ['Focus on coaching subjects for more relaxed expressions.'],
   });
 }
 
@@ -80,10 +90,19 @@ describe('Engine Layer', () => {
       expect(result.totalScore).toBe(7.2);
       expect(result.dimensions).toEqual(makeDimensions(PORTRAIT_DIMS, 7.2));
       expect(result.critique).toBe('Well-executed studio portrait with good technical quality.');
-      expect(result.suggestions).toBe('Work on capturing more natural expressions in future shoots.');
-      expect(result.arbitrationNotes).toBe(
-        'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
-      );
+      expect(result.suggestions).toEqual(['Work on capturing more natural expressions in future shoots.']);
+      expect(result.arbitrationNotes).toEqual({
+        sceneTypeRuling: 'Studio portrait classification is upheld.',
+        decisions: [
+          {
+            target: 'facial_expression',
+            decision: 'accept',
+            reason: 'The critic identified visible tension in the jaw area.',
+          },
+        ],
+        finalRationale:
+          'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+      });
       expect(result.metadata.rounds).toBe(3);
       expect(result.metadata.durationMs).toBeGreaterThanOrEqual(0);
       expect(result.metadata.evaluatedAt).toBeTruthy();
@@ -95,7 +114,7 @@ describe('Engine Layer', () => {
           total_score: 7.5,
           dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
           critique: 'Good portrait with nice lighting and composition.',
-          suggestions: 'Consider adjusting the background for better contrast.',
+          suggestions: ['Consider adjusting the background for better contrast.'],
         },
         reasoning: 'Proposer reasoning...',
       });
@@ -128,9 +147,19 @@ describe('Engine Layer', () => {
           total_score: 7.2,
           dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
           critique: 'Well-executed studio portrait with good technical quality.',
-          suggestions: 'Work on capturing more natural expressions in future shoots.',
-          arbitration_notes:
-            'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+          suggestions: ['Work on capturing more natural expressions in future shoots.'],
+          arbitration_notes: {
+            scene_type_ruling: 'Studio portrait classification is upheld.',
+            decisions: [
+              {
+                target: 'facial_expression',
+                decision: 'accept',
+                reason: 'The critic identified visible tension in the jaw area.',
+              },
+            ],
+            final_rationale:
+              'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+          },
         },
         reasoning: 'Arbiter reasoning...',
       });
@@ -171,7 +200,7 @@ describe('Engine Layer', () => {
           total_score: 7.0,
           dimensions: makeDimensions(PORTRAIT_DIMS, 7.0),
           critique: 'Revised assessment accounting for expression concerns.',
-          suggestions: 'Focus on coaching subjects for more relaxed expressions.',
+          suggestions: ['Focus on coaching subjects for more relaxed expressions.'],
         },
         reasoning: 'Revised after critique...',
       });
@@ -385,7 +414,7 @@ describe('Engine Layer', () => {
             total_score: 7.5,
             dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
             critique: 'Good portrait with nice lighting and composition.',
-            suggestions: 'Consider adjusting the background for better contrast.',
+            suggestions: ['Consider adjusting the background for better contrast.'],
           },
           reasoning: null,
         });
@@ -397,9 +426,19 @@ describe('Engine Layer', () => {
             total_score: 7.2,
             dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
             critique: 'Well-executed studio portrait with good technical quality.',
-            suggestions: 'Work on capturing more natural expressions in future shoots.',
-            arbitration_notes:
-              'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+            suggestions: ['Work on capturing more natural expressions in future shoots.'],
+            arbitration_notes: {
+              scene_type_ruling: 'Studio portrait classification is upheld.',
+              decisions: [
+                {
+                  target: 'facial_expression',
+                  decision: 'accept',
+                  reason: 'The critic identified visible tension in the jaw area.',
+                },
+              ],
+              final_rationale:
+                'After reviewing both proposer and critic arguments, adjusted scores to reflect valid concerns about expression naturalness.',
+            },
           },
           reasoning: null,
         });
@@ -421,7 +460,7 @@ describe('Engine Layer', () => {
               total_score: 7.5,
               dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
               critique: 'Good.',
-              suggestions: 'Improve.',
+              suggestions: ['Improve.'],
             }),
           };
         },
@@ -473,6 +512,22 @@ describe('Engine Layer', () => {
           proposer: errorProvider,
           critic: errorProvider,
           arbiter: errorProvider,
+        },
+      });
+
+      await expect(engine.evaluate(TEST_IMAGE, 'portrait')).rejects.toThrow();
+    });
+
+    it('evaluate() should fail fast when the assembled final result violates its schema', async () => {
+      const engine = createMockEngine({
+        proposerResponses: [{ content: makeProposalJSON() }],
+        criticResponses: [{ content: makeCritiqueJSON('LOW') }],
+        arbiterResponses: [{ content: makeArbiterJSON() }],
+        onEvent: (event) => {
+          if (event.type === 'agent_complete' && event.agent === 'arbiter') {
+            // Mutate only after the agent output passed its own schema, proving the final result is validated independently.
+            (event.data as any).result.suggestions = 'legacy string suggestion';
+          }
         },
       });
 

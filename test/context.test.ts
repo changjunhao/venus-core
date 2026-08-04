@@ -20,7 +20,7 @@ function makeProposalJSON(score = 7.5) {
     total_score: score,
     dimensions: makeDimensions(PORTRAIT_DIMS, score),
     critique: 'Good portrait.',
-    suggestions: 'Try different lighting.',
+    suggestions: ['Try different lighting.'],
   });
 }
 
@@ -52,8 +52,12 @@ function makeArbiterJSON() {
     total_score: 7.2,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
     critique: 'Well-executed studio portrait.',
-    suggestions: 'Work on natural expressions.',
-    arbitration_notes: 'Balanced evaluation after review.',
+    suggestions: ['Work on natural expressions.'],
+    arbitration_notes: {
+      scene_type_ruling: '场景判定明确。',
+      decisions: [],
+      final_rationale: 'Balanced evaluation after review.',
+    },
   });
 }
 
@@ -136,7 +140,7 @@ describe('Context Extension — EXIF Injection', () => {
       total_score: 7.5,
       dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
       critique: 'Good.',
-      suggestions: 'Improve.',
+      suggestions: ['Improve.'],
     };
     const prompt = getCriticUserPrompt('portrait', proposalResult, null, { exif: SAMPLE_EXIF });
 
@@ -152,7 +156,7 @@ describe('Context Extension — EXIF Injection', () => {
         total_score: 7.5,
         dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
         critique: 'Good.',
-        suggestions: 'Improve.',
+        suggestions: ['Improve.'],
       },
       {
         scene_type_review: { proposer_scene: 'studio', is_correct: true, correct_scene: null, reason: 'OK.' },
@@ -194,7 +198,7 @@ describe('Context Extension — User Notes Injection', () => {
         total_score: 7.5,
         dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
         critique: 'Good.',
-        suggestions: 'Improve.',
+        suggestions: ['Improve.'],
       },
       null,
       { userNotes: notes },
@@ -212,7 +216,7 @@ describe('Context Extension — User Notes Injection', () => {
         total_score: 7.5,
         dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
         critique: 'Good.',
-        suggestions: 'Improve.',
+        suggestions: ['Improve.'],
       },
       {
         scene_type_review: { proposer_scene: 'studio', is_correct: true, correct_scene: null, reason: 'OK.' },

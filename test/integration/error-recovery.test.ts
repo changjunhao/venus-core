@@ -27,7 +27,7 @@ function makeProposalContent(score = 7.5) {
     total_score: score,
     dimensions: makeDimensions(PORTRAIT_DIMS, score),
     critique: 'Solid portrait with balanced exposure.',
-    suggestions: 'Slightly soften the key light.',
+    suggestions: ['Slightly soften the key light.'],
   });
 }
 
@@ -59,8 +59,12 @@ function makeArbiterContent() {
     total_score: 7.2,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
     critique: 'Professional studio portrait.',
-    suggestions: 'Coach for more relaxed expressions.',
-    arbitration_notes: 'Adjusted scores after weighing critic concerns.',
+    suggestions: ['Coach for more relaxed expressions.'],
+    arbitration_notes: {
+      scene_type_ruling: '场景判定明确。',
+      decisions: [],
+      final_rationale: 'Adjusted scores after weighing critic concerns.',
+    },
   });
 }
 

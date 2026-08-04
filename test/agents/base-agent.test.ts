@@ -290,21 +290,21 @@ describe('BaseAgent', () => {
       expect(typeof fmt.schema).toBe('object');
     });
 
-    it('should NOT apply Zod validation in json_schema mode (schema-invalid JSON passes)', async () => {
-      // Return JSON that is parseable but does NOT match testSchema (score is string, comment is number)
+    it('should apply local Zod validation in json_schema mode without retry', async () => {
+      let callCount = 0;
       const invalidSchemaJSON = JSON.stringify({ score: 'not-a-number', comment: 123 });
       const jsonSchemaProvider = defineProvider({
         name: 'json-schema-provider',
         capabilities: { vision: true, structuredOutput: 'json_schema' },
         chat: async () => {
+          callCount++;
           return { content: invalidSchemaJSON, reasoning: null };
         },
       });
       const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
 
-      // In json_schema mode, Zod validation is skipped — so this should NOT throw
-      const { result } = await agent.call('system', 'user', IMAGE_URL, testSchema);
-      expect(result).toEqual({ score: 'not-a-number', comment: 123 });
+      await expect(agent.call('system', 'user', IMAGE_URL, testSchema)).rejects.toThrow();
+      expect(callCount).toBe(1);
     });
 
     it('should still throw on unparseable JSON in json_schema mode (no retry)', async () => {
@@ -375,30 +375,27 @@ describe('BaseAgent', () => {
       expect(fmt.strict).toBe(true);
     });
 
-    it('callStream should NOT apply Zod validation in json_schema mode', async () => {
+    it('callStream should apply local Zod validation in json_schema mode without retry', async () => {
+      let callCount = 0;
       const invalidSchemaJSON = JSON.stringify({ score: 'wrong', comment: 999 });
       const jsonSchemaProvider = defineProvider({
         name: 'json-schema-stream',
         capabilities: { vision: true, streaming: true, structuredOutput: 'json_schema' },
         chatStream: async function* () {
+          callCount++;
           yield { content: invalidSchemaJSON };
         },
         chat: async () => ({ content: VALID_JSON, reasoning: null }),
       });
       const agent = new BaseAgent('test', jsonSchemaProvider, { model: 'test', maxRetries: 3 });
 
-      let finalResult: unknown;
-      const gen = agent.callStream('system', 'user', IMAGE_URL, testSchema);
-      while (true) {
-        const { value, done } = await gen.next();
-        if (done) {
-          finalResult = value;
-          break;
+      const consume = async () => {
+        for await (const _ of agent.callStream('system', 'user', IMAGE_URL, testSchema)) {
+          // drain
         }
-      }
-
-      // Schema-invalid result passes through without Zod throwing
-      expect((finalResult as any).result).toEqual({ score: 'wrong', comment: 999 });
+      };
+      await expect(consume()).rejects.toThrow();
+      expect(callCount).toBe(1);
     });
   });
 

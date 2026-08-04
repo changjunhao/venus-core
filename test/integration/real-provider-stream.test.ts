@@ -62,8 +62,11 @@ function assertEvaluationResultShape(result: EvaluationResult): void {
   expect(typeof result.genre).toBe('string');
   expect(typeof result.sceneType).toBe('string');
   expect(typeof result.critique).toBe('string');
-  expect(typeof result.suggestions).toBe('string');
-  expect(typeof result.arbitrationNotes).toBe('string');
+  expect(Array.isArray(result.suggestions)).toBe(true);
+  expect(typeof result.arbitrationNotes).toBe('object');
+  expect(typeof result.arbitrationNotes.sceneTypeRuling).toBe('string');
+  expect(Array.isArray(result.arbitrationNotes.decisions)).toBe(true);
+  expect(typeof result.arbitrationNotes.finalRationale).toBe('string');
 
   // totalScore 在 0-10 范围
   expect(typeof result.totalScore).toBe('number');

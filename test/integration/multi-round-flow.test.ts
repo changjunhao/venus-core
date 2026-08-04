@@ -24,7 +24,7 @@ function makeProposalContent(score = 7.5) {
     total_score: score,
     dimensions: makeDimensions(PORTRAIT_DIMS, score),
     critique: 'Solid portrait with balanced exposure.',
-    suggestions: 'Slightly soften the key light to reduce shadow contrast.',
+    suggestions: ['Slightly soften the key light to reduce shadow contrast.'],
   });
 }
 
@@ -56,9 +56,19 @@ function makeArbiterContent() {
     total_score: 7.2,
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.2),
     critique: 'Professional studio portrait with strong technical execution.',
-    suggestions: 'Coach for more relaxed expressions in future sessions.',
-    arbitration_notes:
-      'Adjusted scores after weighing critic concerns about expression naturalness against proposer rationale.',
+    suggestions: ['Coach for more relaxed expressions in future sessions.'],
+    arbitration_notes: {
+      scene_type_ruling: 'Studio portrait classification is upheld.',
+      decisions: [
+        {
+          target: 'facial_expression',
+          decision: 'accept',
+          reason: 'The expression tension is visible and relevant to the final score.',
+        },
+      ],
+      final_rationale:
+        'Adjusted scores after weighing critic concerns about expression naturalness against proposer rationale.',
+    },
   });
 }
 

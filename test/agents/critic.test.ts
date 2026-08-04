@@ -39,7 +39,7 @@ const MOCK_PROPOSAL = {
     composition_focus: 8.0,
   },
   critique: 'Great portrait.',
-  suggestions: 'Minor improvements possible.',
+  suggestions: ['Minor improvements possible.'],
 };
 
 describe('CriticAgent', () => {

@@ -18,7 +18,7 @@ function validJointProposal(overrides: Record<string, unknown> = {}) {
     dimensions: makeDimensions(PORTRAIT_DIMS, 7.5),
     group_analysis: '整体叙事完整，风格统一。',
     critique: '组照完成度较高。',
-    suggestions: '可增强收尾照片的力度。',
+    suggestions: ['可增强收尾照片的力度。'],
     ...overrides,
   };
 }
@@ -40,7 +40,7 @@ function validCompareProposal(count: number, overrides: Record<string, unknown> 
   return {
     ranking: validRanking(count),
     comparison_summary: '整组照片水平接近，第 1 张最佳。',
-    suggestions: '统一后期风格。',
+    suggestions: ['统一后期风格。'],
     ...overrides,
   };
 }
@@ -70,8 +70,12 @@ describe('Group Schemas', () => {
     it('arbiterSchema should require arbitration_notes', () => {
       const { arbiterSchema } = getGroupJointSchemas('portrait', false, 3);
       expect(() => arbiterSchema.parse(validJointProposal())).toThrow();
-      const result = arbiterSchema.parse(validJointProposal({ arbitration_notes: '维持原判。' }));
-      expect(result.arbitration_notes).toBe('维持原判。');
+      const result = arbiterSchema.parse(
+        validJointProposal({
+          arbitration_notes: { scene_type_ruling: '场景判定明确。', decisions: [], final_rationale: '维持原判。' },
+        }),
+      );
+      expect(result.arbitration_notes.final_rationale).toBe('维持原判。');
     });
 
     it('should strip per_image when includePerImage=false (z.object strip semantics)', () => {
@@ -185,8 +189,85 @@ describe('Group Schemas', () => {
     it('arbiterSchema should require arbitration_notes', () => {
       const { arbiterSchema } = getGroupCompareSchemas(3, false);
       expect(() => arbiterSchema.parse(validCompareProposal(3))).toThrow();
-      const result = arbiterSchema.parse(validCompareProposal(3, { arbitration_notes: '采纳排名调整建议。' }));
-      expect(result.arbitration_notes).toContain('采纳');
+      const result = arbiterSchema.parse(
+        validCompareProposal(3, {
+          arbitration_notes: {
+            scene_type_ruling: '场景判定明确。',
+            decisions: [],
+            final_rationale: '采纳排名调整建议。',
+          },
+        }),
+      );
+      expect(result.arbitration_notes.final_rationale).toContain('采纳');
+    });
+  });
+
+  // ── 结构化迁移回归：suggestions / arbitration_notes 旧格式必须被拒绝 ──
+  describe('structured migration regressions', () => {
+    describe('joint', () => {
+      it('should reject legacy string suggestions', () => {
+        const { proposalSchema } = getGroupJointSchemas('portrait', false, 3);
+        expect(() => proposalSchema.parse(validJointProposal({ suggestions: '可增强收尾照片的力度。' }))).toThrow();
+      });
+
+      it('should reject suggestions array elements containing newlines', () => {
+        const { proposalSchema } = getGroupJointSchemas('portrait', false, 3);
+        expect(() => proposalSchema.parse(validJointProposal({ suggestions: ['第一行\n第二行'] }))).toThrow();
+      });
+
+      it('should reject legacy string arbitration_notes', () => {
+        const { arbiterSchema } = getGroupJointSchemas('portrait', false, 3);
+        expect(() => arbiterSchema.parse(validJointProposal({ arbitration_notes: '维持原判。' }))).toThrow();
+      });
+
+      it('should reject arbitration decision outside accept|partial|reject|consensus', () => {
+        const { arbiterSchema } = getGroupJointSchemas('portrait', false, 3);
+        expect(() =>
+          arbiterSchema.parse(
+            validJointProposal({
+              arbitration_notes: {
+                scene_type_ruling: '场景判定明确。',
+                decisions: [{ target: 'total_score', decision: 'maybe', reason: '非法枚举值。' }],
+                final_rationale: '维持原判。',
+              },
+            }),
+          ),
+        ).toThrow();
+      });
+    });
+
+    describe('compare', () => {
+      it('should reject legacy string suggestions', () => {
+        const { proposalSchema } = getGroupCompareSchemas(4, false);
+        expect(() => proposalSchema.parse(validCompareProposal(4, { suggestions: '统一后期风格。' }))).toThrow();
+      });
+
+      it('should reject suggestions array elements containing newlines', () => {
+        const { proposalSchema } = getGroupCompareSchemas(4, false);
+        expect(() => proposalSchema.parse(validCompareProposal(4, { suggestions: ['第一行\n第二行'] }))).toThrow();
+      });
+
+      it('should reject legacy string arbitration_notes', () => {
+        const { arbiterSchema } = getGroupCompareSchemas(4, false);
+        expect(() =>
+          arbiterSchema.parse(validCompareProposal(4, { arbitration_notes: '采纳排名调整建议。' })),
+        ).toThrow();
+      });
+
+      it('should reject arbitration decision outside accept|partial|reject|consensus', () => {
+        const { arbiterSchema } = getGroupCompareSchemas(4, false);
+        expect(() =>
+          arbiterSchema.parse(
+            validCompareProposal(4, {
+              arbitration_notes: {
+                scene_type_ruling: '场景判定明确。',
+                decisions: [{ target: 'ranking', decision: 'maybe', reason: '非法枚举值。' }],
+                final_rationale: '采纳排名调整建议。',
+              },
+            }),
+          ),
+        ).toThrow();
+      });
     });
   });
 

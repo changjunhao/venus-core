@@ -23,6 +23,20 @@ Run a full evaluation. Returns when all rounds complete.
 Returns `EvaluationResult`:
 
 ```ts
+type Suggestions = string[];
+
+interface ArbitrationDecision {
+  target: string;
+  decision: 'accept' | 'partial' | 'reject' | 'consensus';
+  reason: string;
+}
+
+interface ArbitrationNotes {
+  sceneTypeRuling: string;
+  decisions: ArbitrationDecision[];
+  finalRationale: string;
+}
+
 interface EvaluationResult {
   imageUrl: string;
   genre: Genre;
@@ -30,8 +44,8 @@ interface EvaluationResult {
   totalScore: number;
   dimensions: Record<string, number>;
   critique: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
     proposal: AgentCallResult<ProposerResult>;
@@ -122,8 +136,8 @@ interface GroupJointEvaluationResult {
   dimensions: Record<string, number>;
   groupAnalysis: string;
   critique: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   perImage?: PerImageDetail[];        // only when includePerImage: true
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
@@ -142,8 +156,8 @@ interface GroupCompareEvaluationResult {
   genre: Genre;
   ranking: Array<{ index: number; rank: number; score: number; rationale: string }>;
   comparisonSummary: string;
-  suggestions: string;
-  arbitrationNotes: string;
+  suggestions: Suggestions;
+  arbitrationNotes: ArbitrationNotes;
   perImage?: PerImageDetail[];        // only when includePerImage: true
   process: { /* same shape, with GroupCompare* result types */ };
   metadata: GroupEvaluationMetadata;
@@ -245,7 +259,7 @@ proposalSchema.parse({
   dimensions: { facial_expression: 8.5 /* ... */ },
   group_analysis: '...',
   critique: '...',
-  suggestions: '...',
+  suggestions: ['...'],
   per_image: [
     { index: 0, score: 8.2, comment: '...' },
     { index: 1, score: 8.6, comment: '...' },
@@ -274,11 +288,11 @@ proposalSchema.parse({
     { index: 2, rank: 3, score: 7.9, rationale: '...' },
   ],
   comparison_summary: '...',
-  suggestions: '...',
+  suggestions: ['...'],
 });
 ```
 
-Both factories cache their result per parameter combination, so repeated calls with the same arguments return the same schema instance. The `arbiterSchema` is the `proposalSchema` shape plus a required `arbitration_notes` string.
+Both factories cache their result per parameter combination, so repeated calls with the same arguments return the same schema instance. The `arbiterSchema` is the `proposalSchema` shape plus a required structured `arbitration_notes` object (`scene_type_ruling`, `decisions`, and `final_rationale`).
 
 Validation rules enforced by both:
 
@@ -287,7 +301,9 @@ Validation rules enforced by both:
 | Array length must equal `imageCount` | `ranking`, `per_image` |
 | `index` must be an integer in `0..imageCount - 1`, unique across entries | `ranking`, `per_image` |
 | `rank` must be an integer forming a permutation of `1..imageCount` without duplicates | `ranking` |
-| Text fields (`rationale`, `comment`, `comparison_summary`, `group_analysis`, `critique`, `suggestions`) must be non-empty | both modes |
+| Text fields (`rationale`, `comment`, `comparison_summary`, `group_analysis`, `critique`) must be non-empty | both modes |
+| `suggestions` must be an array of 1–8 non-empty single-line strings | both modes |
+| `arbitration_notes` must contain a scene ruling, decision array, and final rationale | arbiter schemas |
 
 ### `getProposerResultSchema(genre: Genre)`
 

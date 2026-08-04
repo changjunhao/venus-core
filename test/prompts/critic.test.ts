@@ -18,7 +18,7 @@ const SAMPLE_PROPOSAL: ProposerResult = {
     composition_focus: 8.0,
   },
   critique: 'Great portrait.',
-  suggestions: 'Minor improvements.',
+  suggestions: ['Minor improvements.'],
 };
 
 describe('Critic Prompts', () => {

@@ -38,7 +38,7 @@ describe('Schema Layer', () => {
       const config = getGenreConfig(genre);
 
       // Build a valid object to extract the dimensions shape
-      const dimShape = ((proposalSchema as any).shape).dimensions.shape;
+      const dimShape = (proposalSchema as any).shape.dimensions.shape;
       const schemaKeys = Object.keys(dimShape);
 
       expect(schemaKeys.sort()).toEqual([...config.dimensions].sort());
@@ -66,8 +66,8 @@ describe('Schema Layer', () => {
         totalScore: 7.5,
         dimensions: dims,
         critique: 'Good portrait work.',
-        suggestions: 'Try better lighting.',
-        arbitrationNotes: 'Balanced assessment.',
+        suggestions: ['Try better lighting.'],
+        arbitrationNotes: { sceneTypeRuling: '场景判定明确。', decisions: [], finalRationale: 'Balanced assessment.' },
         process: {
           proposal: {
             result: {
@@ -75,7 +75,7 @@ describe('Schema Layer', () => {
               total_score: 7.5,
               dimensions: dims,
               critique: 'Nice.',
-              suggestions: 'Improve.',
+              suggestions: ['Improve.'],
             },
             reasoning: null,
           },
@@ -100,8 +100,8 @@ describe('Schema Layer', () => {
               total_score: 7.5,
               dimensions: dims,
               critique: 'Final critique.',
-              suggestions: 'Final suggestions.',
-              arbitration_notes: 'Resolved.',
+              suggestions: ['Final suggestions.'],
+              arbitration_notes: { scene_type_ruling: '场景判定明确。', decisions: [], final_rationale: 'Resolved.' },
             },
             reasoning: null,
           },
@@ -118,6 +118,62 @@ describe('Schema Layer', () => {
       expect(parsed.sceneType).toBe('studio');
       expect(parsed.genre).toBe('portrait');
     });
+  });
+
+  it('rejects legacy string suggestions and arbitration notes', () => {
+    const { proposalSchema, arbiterSchema } = getSchemas('portrait');
+    const dims = Object.fromEntries(getGenreConfig('portrait').dimensions.map((dimension) => [dimension, 7.0]));
+    const base = {
+      scene_type: 'studio',
+      total_score: 7.0,
+      dimensions: dims,
+      critique: 'Valid critique.',
+    };
+
+    expect(() => proposalSchema.parse({ ...base, suggestions: 'Legacy suggestion string.' })).toThrow();
+    expect(() =>
+      arbiterSchema.parse({
+        ...base,
+        suggestions: ['Structured suggestion.'],
+        arbitration_notes: 'Legacy arbitration string.',
+      }),
+    ).toThrow();
+  });
+
+  it('validates suggestion items and arbitration decision enums', () => {
+    const { proposalSchema, arbiterSchema } = getSchemas('portrait');
+    const dims = Object.fromEntries(getGenreConfig('portrait').dimensions.map((dimension) => [dimension, 7.0]));
+    const base = {
+      scene_type: 'studio',
+      total_score: 7.0,
+      dimensions: dims,
+      critique: 'Valid critique.',
+    };
+
+    expect(() => proposalSchema.parse({ ...base, suggestions: [''] })).toThrow();
+    expect(() => proposalSchema.parse({ ...base, suggestions: ['First line\nSecond line'] })).toThrow();
+    expect(() =>
+      arbiterSchema.parse({
+        ...base,
+        suggestions: ['Structured suggestion.'],
+        arbitration_notes: {
+          scene_type_ruling: 'Studio classification is upheld.',
+          decisions: [{ target: 'lighting_quality', decision: 'maybe', reason: 'Invalid enum.' }],
+          final_rationale: 'Final score is supported.',
+        },
+      }),
+    ).toThrow();
+
+    const lowConsensus = arbiterSchema.parse({
+      ...base,
+      suggestions: ['Structured suggestion.'],
+      arbitration_notes: {
+        scene_type_ruling: 'Studio classification is upheld.',
+        decisions: [],
+        final_rationale: 'No substantive dispute was found.',
+      },
+    });
+    expect(lowConsensus.arbitration_notes.decisions).toEqual([]);
   });
 
   // ── getMetadata() 完整性 ──
