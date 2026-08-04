@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-04
+
+### Changed
+
+- **Structured evaluation feedback (breaking)**: `suggestions` is now a
+  `string[]`, and `arbitrationNotes` is now an object containing
+  `sceneTypeRuling`, structured `decisions`, and `finalRationale` across
+  single-image, joint-group, and compare-group results. Agent arbitration
+  output uses the equivalent snake_case fields.
+- **Strict result validation**: final results for all three evaluation modes are
+  validated against their Zod schemas and fail fast. Legacy string values for
+  `suggestions` and `arbitrationNotes` are no longer accepted or converted.
+- **Structured-output prompts**: proposer and arbiter prompts now request one to
+  eight concrete, actionable, non-duplicate suggestions and structured
+  arbitration notes matching the public result contract.
+
 ## [0.14.0] - 2026-08-02
 
 ### Added
