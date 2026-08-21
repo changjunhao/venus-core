@@ -7,9 +7,10 @@
  * Uses OpenAI's `/v1/responses` API with `text.format` json_schema
  * for structured output. Supports reasoning-capable models (o-series).
  *
- * Also works with Responses-compatible endpoints such as Volcano Ark (Doubao)
- * and Xiaomi MiMo. Endpoint behavior (reasoning parameter shape) is auto-detected
- * from `baseURL` at construction time via internal `detectEndpointBehavior`.
+ * Also works with Responses-compatible endpoints such as Volcano Ark (Doubao),
+ * Xiaomi MiMo, and DeepSeek. Endpoint behavior (reasoning parameter shape) is
+ * auto-detected from `baseURL` at construction time via internal
+ * `detectEndpointBehavior`.
  */
 
 import OpenAI from 'openai';
@@ -134,9 +135,7 @@ function convertContentParts(parts: ChatContentPart[], role: string): Array<{ ty
     if (part.type === 'text') {
       converted.push({ type: role === 'assistant' ? 'output_text' : 'input_text', text: part.text });
     } else if (part.type === 'image_url' && role !== 'assistant') {
-      const image: Record<string, unknown> = { type: 'input_image', image_url: part.image_url.url };
-      if (part.image_url.detail) image.detail = part.image_url.detail;
-      converted.push(image as { type: string; [key: string]: unknown });
+      converted.push({ type: 'input_image', image_url: part.image_url.url });
     }
   }
   return converted;
@@ -189,8 +188,13 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
   const behavior = detectEndpointBehavior(options.baseURL);
 
   // Single source of truth for structured output support:
-  // MiMo's text.format only supports json_object (no json_schema enforcement)
-  const structuredOutput = behavior === 'mimo' ? 'json_object' : 'json_schema';
+  // MiMo's text.format only supports json_object (no json_schema enforcement).
+  // DeepSeek accepts text.format json_schema but does NOT reliably enforce it in
+  // practice (observed on deepseek-v4-flash-vision-exp: responses pass Zod
+  // validation upstream yet violate the schema downstream, e.g. at the critic
+  // stage), so it also degrades to json_object to keep the engine-side Zod
+  // validation + retry loop active.
+  const structuredOutput = behavior === 'mimo' || behavior === 'deepseek' ? 'json_object' : 'json_schema';
 
   /** Build common request body for Responses API */
   function buildRequestBody(params: ChatParams, stream?: boolean): Record<string, unknown> {
@@ -231,7 +235,9 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
         body.text = { format };
       } else {
         if (params.response_format.type === 'json_schema') {
-          logger.warn(`response_format json_schema 未被 MiMo Responses API 支持，已降级为 json_object（schema "${params.response_format.name}" 被忽略）`);
+          logger.warn(
+            `response_format json_schema 未被该 Responses 端点强制执行（MiMo 仅支持 json_object；DeepSeek 实测未可靠约束输出），已降级为 json_object（schema "${params.response_format.name}" 被忽略）`,
+          );
         }
         body.text = { format: { type: 'json_object' } };
       }

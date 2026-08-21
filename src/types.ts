@@ -101,8 +101,7 @@ export type ResponseFormat =
 // ─── LLM Provider Types ──────────────────────────────────
 
 /** Content types for multi-modal messages */
-export type ChatContentPart =
-  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+export type ChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 
 /** Chat message */
 export interface ChatMessage {

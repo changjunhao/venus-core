@@ -80,10 +80,10 @@ The engine automatically adapts reasoning parameters to different provider APIs:
 - **Baidu Qianfan (ERNIE)**: Uses `enable_thinking: true`
 - **Grok (xAI)**: Uses `reasoning_effort` (none/low/medium/high; 5-level mapped: minimal→none, max→high)
 - **Gemini**: OpenAI-compatible endpoint uses `reasoning_effort` (same as OpenAI, internally mapped to thinking_level/thinking_budget); the native `createGeminiProvider` (Interactions API) maps effort directly to `generation_config.thinking_level` (none/minimal→minimal, high/max/xhigh→high) with `thinking_summaries: "auto"`
-- **DeepSeek**: Uses `reasoning_effort` + `thinking: { type: "enabled" }`
+- **DeepSeek**: Chat Completions uses the `thinking.type` toggle + `reasoning_effort` (only low/high/max supported; client-side mapping: none/minimal→thinking disabled, medium/xhigh→high); the Responses API endpoint (`https://api.deepseek.com` via `createOpenAIResponsesProvider`) uses nested `reasoning: { effort }` (none/low/high/max; `none` disables thinking, `reasoning.summary` is never sent). DeepSeek v4 models (including the vision model `deepseek-v4-flash-vision-exp`) default to thinking enabled — an explicit disable parameter is sent when reasoning is not configured
 - **OpenRouter**: Uses `reasoning: { effort, max_tokens, enabled: true }`
 
-> **Note**: When reasoning is not configured, the adapter explicitly disables thinking for endpoints whose models default to enabled (DashScope, Qianfan, Kimi, MIMO, Zhipu, MiniMax, Volcano Ark, Grok), ensuring predictable behavior.
+> **Note**: When reasoning is not configured, the adapter explicitly disables thinking for endpoints whose models default to enabled (DashScope, Qianfan, Kimi, MIMO, Zhipu, MiniMax, Volcano Ark, Grok, DeepSeek), ensuring predictable behavior.
 
 ### Doubao (Volcano Ark) Responses API
 
@@ -117,6 +117,39 @@ MiMo specifics handled automatically:
 - Streaming reasoning arrives via `response.reasoning_text.delta` events and is surfaced as regular `reasoning` chunks
 
 MiMo also accepts the `api-key` header as an alternative to `Authorization: Bearer`; the SDK's default Bearer auth works as-is, but you can switch via the `headers` option if needed.
+
+### DeepSeek Vision Model (deepseek-v4-flash-vision-exp)
+
+DeepSeek's vision model `deepseek-v4-flash-vision-exp` works over both the Chat Completions and the Responses API paths — endpoint behavior is auto-detected from `baseURL`.
+
+**Responses API**:
+
+```ts
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: process.env.DEEPSEEK_API_KEY!,
+  defaultModel: 'deepseek-v4-flash-vision-exp',
+});
+```
+
+**Chat Completions**:
+
+```ts
+const provider = createOpenAIChatProvider({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: process.env.DEEPSEEK_API_KEY!,
+  defaultModel: 'deepseek-v4-flash-vision-exp',
+});
+```
+
+DeepSeek specifics handled automatically:
+
+- **Structured output uniformly uses `json_object` + engine-side retries**: although the DeepSeek Responses API docs claim full `text.format` support, in practice `deepseek-v4-flash-vision-exp` does not reliably enforce `json_schema` constraints (responses may omit required fields), so `json_schema` is automatically degraded to `json_object` with a warning on both paths; engine-side Zod validation + automatic repair retries cover the gap (and DeepSeek JSON Output's probabilistic empty `content` responses)
+- **Thinking is enabled by default**: DeepSeek v4 models think at effort=high unless told otherwise. When reasoning is not configured, Chat Completions explicitly sends `thinking: { type: 'disabled' }` and the Responses API explicitly sends `reasoning: { effort: 'none' }`, keeping standard mode predictable and free of extra thinking tokens. To enable thinking, configure `reasoning` explicitly (client-side effort mapping: none/minimal→thinking disabled, medium/xhigh→high, low/high/max passed through)
+- `reasoning.summary` is never sent on the Responses API (DeepSeek accepts it but does not generate summaries); `temperature` has no effect in thinking mode (without erroring) and is omitted when reasoning is configured
+- Images are passed as standard `image_url` blocks (allowed in user messages only — the engine satisfies this by construction), supporting base64 data URLs and external http(s) URLs. Prefer URLs: the multi-agent pipeline resends images on every round, and URLs let DeepSeek fetch server-side instead of re-uploading base64 repeatedly. Note that each image's token consumption is capped (~384 tokens; DeepSeek auto-rescales images to ~800×800 equivalent pixels)
+
+DeepSeek image limits: 48 MiB request body, ≤32 MiB per image (base64/URL), JPEG/PNG/GIF/WebP formats, external URLs ≤8192 characters and downloadable within 60 seconds.
 
 ### Alibaba Cloud Model Studio (DashScope) Anthropic-Compatible Endpoint
 

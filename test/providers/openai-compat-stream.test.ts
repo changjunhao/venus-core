@@ -379,10 +379,7 @@ describe('OpenAI-Chat chatStream()', () => {
         total_tokens: 29,
       },
     };
-    const streamChunks = [
-      makeStreamChunk({ content: 'hello' }),
-      usageChunk,
-    ];
+    const streamChunks = [makeStreamChunk({ content: 'hello' }), usageChunk];
     mockParserInstance.getValue.mockReturnValue(undefined);
     mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
 
@@ -405,10 +402,7 @@ describe('OpenAI-Chat chatStream()', () => {
         completion_tokens_details: { reasoning_tokens: 20 },
       },
     };
-    const streamChunks = [
-      makeStreamChunk({ content: 'result' }),
-      usageChunk,
-    ];
+    const streamChunks = [makeStreamChunk({ content: 'result' }), usageChunk];
     mockParserInstance.getValue.mockReturnValue(undefined);
     mockCreate.mockResolvedValueOnce(asyncIterableFrom(streamChunks));
 
@@ -522,5 +516,115 @@ describe('OpenAI-Chat chatStream() — MiniMax reasoning_details', () => {
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual({ reasoning: 'analyzing...' });
     expect(result[1]).toEqual({ content: 'final answer' });
+  });
+});
+
+describe('OpenAI-Chat request body — DeepSeek endpoint (vision model adaptation)', () => {
+  let mockCreate: ReturnType<typeof mock>;
+  let createOpenAIChatProvider: typeof import('../../src/providers/openai-chat.js').createOpenAIChatProvider;
+
+  beforeEach(async () => {
+    mockCreate = mock();
+
+    mock.module('vectorjson', () => ({
+      createParser: mock(() => ({ feed: mock(), getValue: mock(() => undefined), destroy: mock() })),
+    }));
+
+    mock.module('openai', () => ({
+      default: class MockOpenAI {
+        chat = {
+          completions: {
+            create: mockCreate,
+          },
+        };
+      },
+    }));
+
+    const mod = await import('../../src/providers/openai-chat.js');
+    createOpenAIChatProvider = mod.createOpenAIChatProvider;
+  });
+
+  function makeDeepSeekProvider() {
+    return createOpenAIChatProvider({
+      baseURL: 'https://api.deepseek.com',
+      apiKey: 'test-key',
+    });
+  }
+
+  it('sends thinking disabled with temperature and passthrough image blocks when reasoning is not configured', async () => {
+    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: '{}' } }] });
+
+    const provider = makeDeepSeekProvider();
+    await provider.chat({
+      model: 'deepseek-v4-flash-vision-exp',
+      messages: [
+        { role: 'system' as const, content: 'You are a photography judge. Output JSON only.' },
+        {
+          role: 'user' as const,
+          content: [
+            { type: 'text' as const, text: 'Evaluate this photo. Output JSON.' },
+            { type: 'image_url' as const, image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+            { type: 'image_url' as const, image_url: { url: 'https://example.com/photo.jpg' } },
+          ],
+        },
+      ],
+      temperature: 0.3,
+      response_format: { type: 'json_schema', name: 'result', schema: { type: 'object' } },
+    });
+
+    const body = mockCreate.mock.calls[0]?.[0] as Record<string, any>;
+    expect(body).toBeDefined();
+    // DeepSeek v4 defaults to thinking enabled — standard mode must disable it explicitly
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.reasoning_effort).toBeUndefined();
+    // Thinking disabled → temperature takes effect and is forwarded
+    expect(body.temperature).toBe(0.3);
+    // json_schema degrades to json_object (DeepSeek JSON Output)
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    // image_url blocks pass through verbatim (DeepSeek vision wire format)
+    const userMessage = body.messages[1];
+    expect(userMessage.role).toBe('user');
+    expect(userMessage.content[1]).toEqual({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } });
+    expect(userMessage.content[2]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'https://example.com/photo.jpg' },
+    });
+  });
+
+  it('sends mapped reasoning_effort with thinking enabled and omits temperature when reasoning is configured', async () => {
+    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: '{}' } }] });
+
+    const provider = makeDeepSeekProvider();
+    await provider.chat({
+      model: 'deepseek-v4-flash-vision-exp',
+      messages: [{ role: 'user' as const, content: 'hi' }],
+      temperature: 0.3,
+      reasoning: { effort: 'medium' },
+    });
+
+    const body = mockCreate.mock.calls[0]?.[0] as Record<string, any>;
+    // Venus medium → DeepSeek high (official mapping)
+    expect(body.reasoning_effort).toBe('high');
+    expect(body.thinking).toEqual({ type: 'enabled' });
+    // DeepSeek reasoning models ignore temperature — skipped
+    expect(body.temperature).toBeUndefined();
+  });
+
+  it('still sends stream_options.include_usage in streaming mode for DeepSeek', async () => {
+    mockCreate.mockResolvedValueOnce(asyncIterableFrom([makeStreamChunk({ content: 'ok' })]));
+
+    const provider = makeDeepSeekProvider();
+    const stream = provider.chatStream!({
+      model: 'deepseek-v4-flash-vision-exp',
+      messages: [{ role: 'user' as const, content: 'hi' }],
+    });
+    for await (const _chunk of stream) {
+      // drain
+    }
+
+    const body = mockCreate.mock.calls[0]?.[0] as Record<string, any>;
+    expect(body.stream).toBe(true);
+    expect(body.stream_options).toEqual({ include_usage: true });
+    expect(body.thinking).toEqual({ type: 'disabled' });
   });
 });

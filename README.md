@@ -42,7 +42,7 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **8 Photography Genres** — Portrait, Landscape, Documentary, Fine Art, Commercial, Architecture, Nature, Sports
 - **Multi-Model Routing** — Per-agent model selection and per-agent custom LLM providers
 - **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope), Kimi (Moonshot), Xiaomi MIMO, StepFun, MiniMax, Doubao (Volcano Ark), Baidu Qianfan (ERNIE), Zhipu (BigModel), Grok (xAI), Gemini, DeepSeek, and OpenRouter
-- **OpenAI Responses API** — First-class `/v1/responses` provider for reasoning models (o-series, GPT-5) with strict JSON Schema structured output; auto-adapts to Doubao (Volcano Ark) and Xiaomi MiMo Responses endpoints
+- **OpenAI Responses API** — First-class `/v1/responses` provider for reasoning models (o-series, GPT-5) with strict JSON Schema structured output; auto-adapts to Doubao (Volcano Ark), Xiaomi MiMo, and DeepSeek Responses endpoints (including the `deepseek-v4-flash-vision-exp` vision model, with per-endpoint structured-output degradation)
 - **Native Anthropic & Gemini Providers** — Claude Messages API with extended thinking and Google Gemini Interactions API, both with strict JSON Schema structured output; the Anthropic provider also drives DashScope and Zhipu Anthropic-compatible endpoints out of the box
 - **Structured Output Modes** — `json_schema` providers get single-call schema-guaranteed output; `json_object` providers keep Zod validation with automatic repair retries
 - **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming

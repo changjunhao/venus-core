@@ -306,7 +306,7 @@ describe('OpenAI Responses Provider', () => {
             role: 'user',
             content: [
               { type: 'text', text: 'rate this photo' },
-              { type: 'image_url', image_url: { url: 'https://img.test/a.jpg', detail: 'high' } },
+              { type: 'image_url', image_url: { url: 'https://img.test/a.jpg' } },
             ],
           },
         ] as ChatMessage[],
@@ -317,23 +317,9 @@ describe('OpenAI Responses Provider', () => {
           role: 'user',
           content: [
             { type: 'input_text', text: 'rate this photo' },
-            { type: 'input_image', image_url: 'https://img.test/a.jpg', detail: 'high' },
+            { type: 'input_image', image_url: 'https://img.test/a.jpg' },
           ],
         },
-      ]);
-    });
-
-    it('omits detail on input_image when not provided', async () => {
-      const provider = makeProvider();
-      await provider.chat({
-        model: 'm',
-        messages: [
-          { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://img.test/b.jpg' } }] },
-        ] as ChatMessage[],
-      });
-
-      expect(lastRequestBody().input).toEqual([
-        { role: 'user', content: [{ type: 'input_image', image_url: 'https://img.test/b.jpg' }] },
       ]);
     });
 
@@ -731,6 +717,174 @@ describe('OpenAI Responses Provider', () => {
         { reasoning: 'thinking...' },
         { content: '{"score":9}' },
         { usage: { inputTokens: 57, outputTokens: 46, reasoningTokens: 12 } },
+      ]);
+    });
+  });
+
+  // ═════════════════════════════════════════════════════════════════════
+  // DeepSeek endpoint behavior (deepseek-v4-flash-vision-exp adaptation)
+  // ═════════════════════════════════════════════════════════════════════
+  describe('DeepSeek (deepseek) behavior', () => {
+    function makeDeepSeekProvider(overrides: Record<string, unknown> = {}) {
+      return createOpenAIResponsesProvider({
+        baseURL: 'https://api.deepseek.com',
+        apiKey: 'test-key',
+        ...overrides,
+      });
+    }
+
+    it('sends reasoning effort none when reasoning is not configured (v4 defaults to thinking enabled)', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+
+      const body = lastRequestBody();
+      expect(body.reasoning).toEqual({ effort: 'none' });
+      // DeepSeek Responses API uses reasoning.effort only — no thinking toggle
+      expect(body.thinking).toBeUndefined();
+    });
+
+    it('maps minimal effort to none', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'minimal' },
+      });
+
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'none' });
+    });
+
+    it('maps medium and xhigh effort to high (official mapping)', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'medium' },
+      });
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'high' });
+
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'xhigh' },
+      });
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'high' });
+    });
+
+    it('passes max effort through and never sends summary', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'max', summary: 'detailed' },
+      });
+
+      // DeepSeek accepts summary but never generates summaries — do not send it
+      expect(lastRequestBody().reasoning).toEqual({ effort: 'max' });
+    });
+
+    it('degrades json_schema text.format to json_object (DeepSeek does not reliably enforce schema)', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+        response_format: {
+          type: 'json_schema',
+          name: 'score',
+          schema: { type: 'object' },
+          strict: true,
+        },
+      });
+
+      expect(lastRequestBody().text).toEqual({ format: { type: 'json_object' } });
+    });
+
+    it('reports json_object structured output capability (schema enforcement falls back to engine-side Zod + retries)', () => {
+      expect(makeDeepSeekProvider().capabilities.structuredOutput).toBe('json_object');
+    });
+
+    it('converts image_url parts to input_image (DeepSeek vision)', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [
+          { role: 'system', content: 'You are a photography judge. Output JSON only.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Evaluate this photo. Output JSON.' },
+              { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+              { type: 'image_url', image_url: { url: 'https://img.test/a.jpg' } },
+            ],
+          },
+        ] as ChatMessage[],
+      });
+
+      const body = lastRequestBody();
+      expect(body.instructions).toBe('You are a photography judge. Output JSON only.');
+      expect(body.input).toEqual([
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Evaluate this photo. Output JSON.' },
+            { type: 'input_image', image_url: 'data:image/jpeg;base64,QUJD' },
+            { type: 'input_image', image_url: 'https://img.test/a.jpg' },
+          ],
+        },
+      ]);
+    });
+
+    it('omits temperature when reasoning is configured (thinking mode ignores it)', async () => {
+      const provider = makeDeepSeekProvider();
+      await provider.chat({
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.3,
+        reasoning: { effort: 'high' },
+      });
+
+      expect(lastRequestBody().temperature).toBeUndefined();
+    });
+
+    it('parses DeepSeek streaming events (reasoning_text delta, text delta, completed usage)', async () => {
+      mockParserInstance.getValue.mockReturnValue(undefined);
+
+      // Event shapes per the official DeepSeek Responses API streaming doc
+      mockFetch(async () =>
+        makeSSEResponse([
+          { type: 'response.created', response: { id: 'resp_1', object: 'response' }, sequence_number: 0 },
+          { type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning' }, sequence_number: 1 },
+          { type: 'response.reasoning_text.delta', delta: 'thinking...', content_index: 0, sequence_number: 2 },
+          { type: 'response.output_text.delta', delta: '{"score":8}', content_index: 0, sequence_number: 3 },
+          {
+            type: 'response.completed',
+            response: {
+              usage: {
+                input_tokens: 22,
+                output_tokens: 29,
+                total_tokens: 51,
+                output_tokens_details: { reasoning_tokens: 27 },
+              },
+            },
+            sequence_number: 4,
+          },
+        ]),
+      );
+
+      const provider = makeDeepSeekProvider();
+      const result = await collectStream(provider, {
+        model: 'deepseek-v4-flash-vision-exp',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        reasoning: { effort: 'high' },
+      });
+
+      expect(result).toEqual([
+        { reasoning: 'thinking...' },
+        { content: '{"score":8}' },
+        { usage: { inputTokens: 22, outputTokens: 29, reasoningTokens: 27 } },
       ]);
     });
   });

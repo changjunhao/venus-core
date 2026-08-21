@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **DeepSeek vision model support**: `deepseek-v4-flash-vision-exp` is now fully
+  adapted over both the Chat Completions and the Responses API endpoints at
+  `https://api.deepseek.com` (auto-detected from `baseURL`). Image inputs
+  (base64 data URLs and external URLs) flow through as standard `image_url` /
+  `input_image` blocks. Structured output degrades to `json_object` on both
+  paths (in practice DeepSeek does not reliably enforce `text.format`
+  json_schema for this model), with engine-side Zod validation and retries.
+
+### Removed
+
+- **`detail` option on `image_url` content parts (breaking)**: the field was
+  part of the `ChatContentPart` type but never settable through any public
+  surface — the engine builds image blocks internally without it. It is now
+  removed from the type and the Responses `input_image` conversion.
+
+### Changed
+
+- **DeepSeek thinking mode is now explicitly managed (behavior change)**:
+  DeepSeek v4 models default to thinking enabled at effort `high`. When
+  reasoning is not configured, the Chat Completions provider now sends
+  `thinking: { type: 'disabled' }` and the Responses provider sends
+  `reasoning: { effort: 'none' }` instead of omitting the field, keeping
+  standard mode predictable and free of extra thinking tokens. Reasoning
+  effort is normalized client-side to DeepSeek's supported domain
+  (none/minimal disable thinking; medium/xhigh map to high; low/high/max pass
+  through), and `reasoning.summary` is no longer sent on the Responses API
+  (DeepSeek accepts it but never generates summaries). Existing DeepSeek users
+  who rely on thinking should configure `reasoning` explicitly.
+
 ## [0.15.0] - 2026-08-04
 
 ### Changed

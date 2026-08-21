@@ -79,10 +79,10 @@ const engine = createVenusEngine({
 - **百度千帆（ERNIE）**：使用 `enable_thinking: true`
 - **Grok（xAI）**：使用 `reasoning_effort`（none/low/medium/high；五级映射：minimal→none，max→high）
 - **Gemini**：OpenAI 兼容端点使用 `reasoning_effort`（与 OpenAI 相同，内部映射为 thinking_level/thinking_budget）；原生 `createGeminiProvider`（Interactions API）将努力级别直接映射为 `generation_config.thinking_level`（none/minimal→minimal，high/max/xhigh→high）并设置 `thinking_summaries: "auto"`
-- **DeepSeek**：使用 `reasoning_effort` + `thinking: { type: "enabled" }`
+- **DeepSeek**：Chat Completions 使用 `thinking.type` 开关 + `reasoning_effort`（仅支持 low/high/max；客户端映射：none/minimal→关闭思考，medium/xhigh→high）；Responses API 端点（`createOpenAIResponsesProvider` 配合 `https://api.deepseek.com`）使用嵌套 `reasoning: { effort }`（none/low/high/max；`none` 关闭思考，不会发送 `reasoning.summary`）。DeepSeek v4 系列（含视觉模型 `deepseek-v4-flash-vision-exp`）默认开启思考，未配置推理时会显式发送禁用参数
 - **OpenRouter**：使用 `reasoning: { effort, max_tokens, enabled: true }`
 
-> **注意**：当未配置推理时，适配器会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、火山方舟、Grok）显式禁用推理，确保行为可预测。
+> **注意**：当未配置推理时，适配器会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、火山方舟、Grok、DeepSeek）显式禁用推理，确保行为可预测。
 
 ### 豆包（火山方舟）Responses API
 
@@ -116,6 +116,39 @@ const provider = createOpenAIResponsesProvider({
 - 流式推理通过 `response.reasoning_text.delta` 事件输出，会作为常规 `reasoning` 块透出
 
 MiMo 还支持 `api-key` 请求头作为 `Authorization: Bearer` 的替代认证方式；SDK 默认的 Bearer 认证开箱即用，如有需要可通过 `headers` 选项切换。
+
+### DeepSeek 视觉模型（deepseek-v4-flash-vision-exp）
+
+DeepSeek 的视觉模型 `deepseek-v4-flash-vision-exp` 同时支持 Chat Completions 与 Responses API 两条路径，端点行为从 `baseURL` 自动检测。
+
+**Responses API**：
+
+```ts
+const provider = createOpenAIResponsesProvider({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: process.env.DEEPSEEK_API_KEY!,
+  defaultModel: 'deepseek-v4-flash-vision-exp',
+});
+```
+
+**Chat Completions**：
+
+```ts
+const provider = createOpenAIChatProvider({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: process.env.DEEPSEEK_API_KEY!,
+  defaultModel: 'deepseek-v4-flash-vision-exp',
+});
+```
+
+自动处理的 DeepSeek 特性：
+
+- **结构化输出统一走 `json_object` + 引擎侧重试**：尽管 DeepSeek Responses API 文档声明完整支持 `text.format`，实测 `deepseek-v4-flash-vision-exp` 并不可靠地强制执行 `json_schema` 约束（输出可能缺失必需字段），因此两条路径的 `json_schema` 均自动降级为 `json_object` 并输出警告，由引擎侧 Zod 校验 + 自动修复重试兜底（同时覆盖 DeepSeek JSON Output 概率性返回空 content 的问题）
+- **思考模式默认开启**：DeepSeek v4 系列默认以 effort=high 思考。未配置推理时，Chat Completions 显式发送 `thinking: { type: 'disabled' }`，Responses API 显式发送 `reasoning: { effort: 'none' }`，保证标准模式行为可预测、不产生额外思考 token。如需思考，显式配置 `reasoning`（effort 客户端映射：none/minimal→关闭思考，medium/xhigh→high，low/high/max 原样）
+- Responses API 不发送 `reasoning.summary`（DeepSeek 接受但不生成摘要）；思考模式下 `temperature` 不生效但不报错，配置推理时会省略
+- 图片以标准 `image_url` 块传入（仅允许出现在 user 消息，引擎天然满足），支持 base64 data URL 与外部 http(s) URL。建议优先传 URL：多智能体管线每轮会重复发送图片，URL 由 DeepSeek 服务端下载，避免 base64 重复上传。注意每张图片的 token 消耗存在上限（约 384，DeepSeek 会自动将图片缩放到约 800×800 等效像素）
+
+DeepSeek 图片限制：请求体最大 48 MiB、单张图片（base64/URL）≤32 MiB、支持 JPEG/PNG/GIF/WebP、外部 URL ≤8192 字符且需在 60 秒内可下载。
 
 ### 阿里云百炼（DashScope）Anthropic 兼容端点
 

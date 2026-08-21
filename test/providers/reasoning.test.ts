@@ -63,6 +63,10 @@ describe('reasoning', () => {
         expect(adaptReasoningParams(undefined, 'volcanoark')).toEqual({ thinking: { type: 'disabled' } });
       });
 
+      it('returns thinking disabled for deepseek endpoint (v4 defaults to thinking enabled)', () => {
+        expect(adaptReasoningParams(undefined, 'deepseek')).toEqual({ thinking: { type: 'disabled' } });
+      });
+
       it('returns enable_thinking=false for dashscope endpoint', () => {
         expect(adaptReasoningParams(undefined, 'dashscope')).toEqual({ enable_thinking: false });
       });
@@ -105,6 +109,39 @@ describe('reasoning', () => {
         reasoning_effort: 'high',
         thinking: { type: 'enabled' },
       });
+    });
+
+    it('passes low/max effort through for deepseek (supported domain)', () => {
+      expect(adaptReasoningParams({ effort: 'low' }, 'deepseek')).toEqual({
+        reasoning_effort: 'low',
+        thinking: { type: 'enabled' },
+      });
+      expect(adaptReasoningParams({ effort: 'max' }, 'deepseek')).toEqual({
+        reasoning_effort: 'max',
+        thinking: { type: 'enabled' },
+      });
+    });
+
+    it('maps medium to high for deepseek (official server-side mapping)', () => {
+      expect(adaptReasoningParams({ effort: 'medium' }, 'deepseek')).toEqual({
+        reasoning_effort: 'high',
+        thinking: { type: 'enabled' },
+      });
+    });
+
+    it('maps xhigh to high for deepseek (official server-side mapping)', () => {
+      expect(adaptReasoningParams({ effort: 'xhigh' }, 'deepseek')).toEqual({
+        reasoning_effort: 'high',
+        thinking: { type: 'enabled' },
+      });
+    });
+
+    it('produces thinking disabled without reasoning_effort for deepseek none effort', () => {
+      expect(adaptReasoningParams({ effort: 'none' }, 'deepseek')).toEqual({ thinking: { type: 'disabled' } });
+    });
+
+    it('produces thinking disabled without reasoning_effort for deepseek minimal effort', () => {
+      expect(adaptReasoningParams({ effort: 'minimal' }, 'deepseek')).toEqual({ thinking: { type: 'disabled' } });
     });
 
     it('produces dashscope enable_thinking without thinking_budget when omitted', () => {
@@ -348,6 +385,58 @@ describe('reasoning', () => {
       });
     });
 
+    describe('deepseek behavior', () => {
+      it('returns reasoning effort none when reasoning is undefined (v4 defaults to thinking enabled)', () => {
+        expect(adaptResponsesReasoningParams(undefined, 'deepseek')).toEqual({ reasoning: { effort: 'none' } });
+      });
+
+      it('returns reasoning effort none for none effort', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'none' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'none' },
+        });
+      });
+
+      it('maps minimal effort to none (disables thinking)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'minimal' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'none' },
+        });
+      });
+
+      it('passes low/high/max effort through (DeepSeek Responses domain)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'low' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'low' },
+        });
+        expect(adaptResponsesReasoningParams({ effort: 'high' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'high' },
+        });
+        expect(adaptResponsesReasoningParams({ effort: 'max' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'max' },
+        });
+      });
+
+      it('maps medium effort to high (official server-side mapping)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'medium' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'high' },
+        });
+      });
+
+      it('maps xhigh effort to high (official server-side mapping)', () => {
+        expect(adaptResponsesReasoningParams({ effort: 'xhigh' }, 'deepseek')).toEqual({
+          reasoning: { effort: 'high' },
+        });
+      });
+
+      it('never includes summary (DeepSeek accepts it but does not generate summaries)', () => {
+        const result = adaptResponsesReasoningParams({ effort: 'high', summary: 'detailed' }, 'deepseek');
+        expect(result).toEqual({ reasoning: { effort: 'high' } });
+      });
+
+      it('never includes the thinking toggle (DeepSeek Responses uses reasoning.effort only)', () => {
+        expect(adaptResponsesReasoningParams(undefined, 'deepseek')).not.toHaveProperty('thinking');
+        expect(adaptResponsesReasoningParams({ effort: 'high' }, 'deepseek')).not.toHaveProperty('thinking');
+      });
+    });
+
     describe('openai behavior (default Responses shape)', () => {
       it('returns empty object when reasoning is undefined', () => {
         expect(adaptResponsesReasoningParams(undefined, 'openai')).toEqual({});
@@ -391,9 +480,7 @@ describe('reasoning', () => {
     });
 
     it('detects dashscope from eu-central-1 workspace-dedicated maas.aliyuncs.com baseURL', () => {
-      expect(detectEndpointBehavior('https://ws-1234.eu-central-1.maas.aliyuncs.com/apps/anthropic')).toBe(
-        'dashscope',
-      );
+      expect(detectEndpointBehavior('https://ws-1234.eu-central-1.maas.aliyuncs.com/apps/anthropic')).toBe('dashscope');
     });
 
     it('detects deepseek from api.deepseek.com baseURL', () => {
@@ -579,34 +666,22 @@ describe('reasoning', () => {
     });
 
     it('extracts first chunk delta from cumulative text', () => {
-      const result = extractMiniMaxStreamReasoning(
-        { reasoning_details: [{ text: 'thinking step 1' }] },
-        0,
-      );
+      const result = extractMiniMaxStreamReasoning({ reasoning_details: [{ text: 'thinking step 1' }] }, 0);
       expect(result).toEqual({ text: 'thinking step 1', cumulativeLength: 15 });
     });
 
     it('extracts incremental delta from cumulative text', () => {
-      const result = extractMiniMaxStreamReasoning(
-        { reasoning_details: [{ text: 'thinking step 1 and step 2' }] },
-        15,
-      );
+      const result = extractMiniMaxStreamReasoning({ reasoning_details: [{ text: 'thinking step 1 and step 2' }] }, 15);
       expect(result).toEqual({ text: ' and step 2', cumulativeLength: 26 });
     });
 
     it('returns null when cumulative text has not grown', () => {
-      const result = extractMiniMaxStreamReasoning(
-        { reasoning_details: [{ text: 'same text' }] },
-        9,
-      );
+      const result = extractMiniMaxStreamReasoning({ reasoning_details: [{ text: 'same text' }] }, 9);
       expect(result).toBeNull();
     });
 
     it('returns null when reasoning_details item has no text field', () => {
-      const result = extractMiniMaxStreamReasoning(
-        { reasoning_details: [{ type: 'thinking' }] },
-        0,
-      );
+      const result = extractMiniMaxStreamReasoning({ reasoning_details: [{ type: 'thinking' }] }, 0);
       expect(result).toBeNull();
     });
   });

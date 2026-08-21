@@ -31,7 +31,20 @@ import { ENDPOINT_HOSTS } from './endpoint-hosts.js';
  * Exported as a type only for the generated `endpoint-hosts.ts` table —
  * consumers use `createOpenAIChatProvider` which auto-detects.
  */
-export type EndpointBehavior = 'openai' | 'dashscope' | 'deepseek' | 'gemini' | 'grok' | 'kimi' | 'mimo' | 'minimax' | 'openrouter' | 'qianfan' | 'stepfun' | 'volcanoark' | 'zhipu';
+export type EndpointBehavior =
+  | 'openai'
+  | 'dashscope'
+  | 'deepseek'
+  | 'gemini'
+  | 'grok'
+  | 'kimi'
+  | 'mimo'
+  | 'minimax'
+  | 'openrouter'
+  | 'qianfan'
+  | 'stepfun'
+  | 'volcanoark'
+  | 'zhipu';
 
 /**
  * Default token budget for each reasoning effort level.
@@ -51,14 +64,36 @@ export function getDefaultBudget(effort: ReasoningEffort): number {
 }
 
 /**
+ * Map Venus's 7-level effort onto DeepSeek's supported effort domain.
+ *
+ * DeepSeek accepts `low` / `high` / `max` (chat completions) and
+ * `none` / `low` / `high` / `max` (Responses API). Official server-side
+ * mapping: medium → high, xhigh → high. `none` / `minimal` mean "disable
+ * thinking" and are signaled by returning `null`.
+ * Shared by the chat and Responses adapters as the single source of truth.
+ */
+function mapDeepSeekEffort(effort: ReasoningEffort): 'low' | 'high' | 'max' | null {
+  switch (effort) {
+    case 'none':
+    case 'minimal':
+      return null;
+    case 'medium':
+    case 'xhigh':
+      return 'high';
+    default:
+      return effort;
+  }
+}
+
+/**
  * Translate Venus's reasoning params into endpoint-specific request fields.
  *
  * Handles both the "reasoning configured" and "reasoning not configured" cases:
  * - When reasoning IS configured → sends endpoint-specific enable fields
  * - When reasoning is NOT configured → sends endpoint-specific disable fields
  *   for endpoints whose models default to thinking enabled (DashScope, Qianfan,
- *   Kimi, MIMO, Zhipu, MiniMax, Volcano Ark), ensuring predictable engine
- *   behavior regardless of model defaults.
+ *   Kimi, MIMO, Zhipu, MiniMax, Volcano Ark, DeepSeek), ensuring predictable
+ *   engine behavior regardless of model defaults.
  *
  * The returned object should be merged into the request body via `Object.assign`.
  */
@@ -74,7 +109,9 @@ export function adaptReasoningParams(
       case 'zhipu':
       case 'minimax':
       case 'volcanoark':
-        // Volcano Ark (Doubao) also defaults to thinking enabled when `thinking` is omitted.
+      case 'deepseek':
+        // DeepSeek v4 models default to thinking enabled (effort high), so standard
+        // mode must explicitly send the disable toggle. Same shape as Volcano Ark.
         return { thinking: { type: 'disabled' as const } };
       case 'dashscope':
       case 'qianfan':
@@ -108,13 +145,20 @@ export function adaptReasoningParams(
         ...(reasoning.budgetTokens ? { thinking_budget: reasoning.budgetTokens } : {}),
       };
 
-    case 'deepseek':
+    case 'deepseek': {
       // DeepSeek native API uses top-level `thinking` parameter (not `extra_body`,
       // which is an OpenAI SDK method-level parameter, not a request body field).
+      // Effort is normalized client-side to the supported low/high/max domain
+      // (none/minimal disable thinking; medium/xhigh → high, see mapDeepSeekEffort).
+      const effort = mapDeepSeekEffort(reasoning.effort);
+      if (effort === null) {
+        return { thinking: { type: 'disabled' as const } };
+      }
       return {
-        reasoning_effort: reasoning.effort,
+        reasoning_effort: effort,
         thinking: { type: 'enabled' as const },
       };
+    }
 
     case 'kimi':
     case 'mimo':
@@ -156,7 +200,8 @@ export function adaptReasoningParams(
       // StepFun (阶跃星辰) supports reasoning_effort: low | medium | high.
       // Map Venus 5-level effort to StepFun 3-level: minimal→low, max→high.
       return {
-        reasoning_effort: reasoning.effort === 'minimal' ? 'low' : reasoning.effort === 'max' ? 'high' : reasoning.effort,
+        reasoning_effort:
+          reasoning.effort === 'minimal' ? 'low' : reasoning.effort === 'max' ? 'high' : reasoning.effort,
       };
 
     case 'qianfan':
@@ -174,8 +219,8 @@ export function adaptReasoningParams(
  *
  * Unlike `adaptReasoningParams` (Chat Completions field shapes, e.g. top-level
  * `reasoning_effort`), the Responses API nests effort under `reasoning: { effort }`.
- * Volcano Ark (Doubao) and Xiaomi MiMo need endpoint-specific handling; every
- * other endpoint uses the OpenAI Responses shape.
+ * Volcano Ark (Doubao), Xiaomi MiMo, and DeepSeek need endpoint-specific handling;
+ * every other endpoint uses the OpenAI Responses shape.
  *
  * The returned object should be merged into the request body via `Object.assign`.
  */
@@ -209,6 +254,20 @@ export function adaptResponsesReasoningParams(
         effort: reasoning.effort === 'max' || reasoning.effort === 'xhigh' ? 'high' : reasoning.effort,
       },
     };
+  }
+
+  if (behavior === 'deepseek') {
+    // DeepSeek v4 models default to thinking enabled (effort high), so standard
+    // mode explicitly sends `reasoning.effort: 'none'` (DeepSeek Responses uses
+    // effort 'none' to disable thinking; there is no `thinking` toggle here).
+    // Effort is normalized to the supported none/low/high/max domain via the
+    // shared mapDeepSeekEffort. `summary` is never sent — DeepSeek accepts it
+    // but does not generate summaries, which would mislead consumers.
+    const effort = reasoning ? mapDeepSeekEffort(reasoning.effort) : null;
+    if (effort === null) {
+      return { reasoning: { effort: 'none' } };
+    }
+    return { reasoning: { effort } };
   }
 
   if (!reasoning) return {};
@@ -259,7 +318,9 @@ export function extractReasoningContent(message: Record<string, unknown> | null 
   // MiniMax: reasoning_details is an array of { text: string } when reasoning_split=true
   if (Array.isArray(message.reasoning_details) && message.reasoning_details.length > 0) {
     const texts = message.reasoning_details
-      .filter((d: unknown) => typeof d === 'object' && d !== null && typeof (d as Record<string, unknown>).text === 'string')
+      .filter(
+        (d: unknown) => typeof d === 'object' && d !== null && typeof (d as Record<string, unknown>).text === 'string',
+      )
       .map((d: Record<string, unknown>) => d.text as string);
     if (texts.length > 0) return texts.join('');
   }
