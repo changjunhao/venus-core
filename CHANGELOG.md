@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-16
+
+### Fixed
+
+- **JSR exports**: added the `./nitro` subpath export to `jsr.json` so JSR
+  consumers can import `@theogony/venus-core/nitro`, keeping the JSR entry map
+  consistent with `package.json`. No runtime or source changes.
+
 ## [0.17.0] - 2026-10-16
 
 ### Added

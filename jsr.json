@@ -1,10 +1,11 @@
 {
   "name": "@theogony/venus-core",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "exports": {
     ".": "./src/index.ts",
     "./hono": "./src/adapters/hono.ts",
-    "./express": "./src/adapters/express.ts"
+    "./express": "./src/adapters/express.ts",
+    "./nitro": "./src/adapters/nitro.ts"
   },
   "publish": {
     "include": [
