@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-16
+
+### Added
+
+- **End-to-end request cancellation**: new `CancellationOptions` with an optional
+  `AbortSignal` flows through single-image and group evaluations, all agent
+  rounds (including revision), and all four built-in providers. Pass it as the
+  fourth argument to `evaluate()` or in the existing options object for
+  `evaluateStream()`, `evaluateGroup()`, and `evaluateGroupStream()`.
+- **Cancellation errors and observability**: exported `AbortError` (`ABORTED`)
+  and `isAbortError()` distinguish cancellation from provider and validation
+  failures. Active evaluations emit at most one `cancelled` observation through
+  `onEvent`; cancellation does not emit an `error` or synthetic completion
+  stream event. Original abort reasons remain local in `reason` / `cause` and
+  are not serialized in adapter error responses.
+- **Cancellation-aware adapter hooks**: `beforeEvaluate` and
+  `beforeEvaluateGroup` receive an optional second `CancellationOptions`
+  argument. Existing one-argument hooks remain compatible; custom hooks and
+  providers must forward the signal to their own I/O to interrupt it.
+- Cancellation regression coverage for the engine, providers, adapters, and
+  stream lifecycle, plus an isolated SDK transport verification script.
+
+### Changed
+
+- **Stream and HTTP request lifecycle**: early iterator return or `for await`
+  termination cancels unfinished upstream work. Express, Hono, and Nitro
+  propagate client disconnects and stop writing stream frames after cancellation.
+  Cancellation before response headers maps to HTTP `499 ABORTED` when a response
+  can still be sent; disconnected clients may receive no response. Concurrent
+  requests remain independent unless the caller deliberately shares a signal.
+- **Gemini transport retries and deadlines**: the provider manages the initial
+  attempt plus up to four retries for HTTP 408/409/429/5xx, connection errors,
+  and request timeouts. Each attempt has an independent deadline, retained
+  through stream consumption; backoff is cancellable. User cancellation never
+  retries, and established streams are not reconnected or replayed. Provider
+  timeouts remain separate from an overall evaluation deadline.
+- Dependency updates: `openai` ^7.34.0, `@google/genai` ^2.30.0,
+  `@anthropic-ai/sdk` ^0.134.0, and `zod` ^4.6.7; optional peer requirements
+  updated to `hono` ^4.13.13 and `express` ^5.3.0, alongside development tooling.
+
+### Fixed
+
+- Bilingual README and guides now match current API behavior: local Zod
+  validation still runs in `json_schema` mode, `maxRetries` counts total agent
+  attempts, and engine examples explicitly configure a model. Corrected group
+  response shapes, public type/schema references, and cancellation examples,
+  including timer cleanup and signal propagation through custom providers and
+  hooks.
+
 ## [0.16.0] - 2026-08-21
 
 ### Added
