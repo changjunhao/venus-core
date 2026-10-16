@@ -18,6 +18,19 @@ export class VenusError extends Error {
   }
 }
 
+/** 请求取消；原始原因仅保留在本地，不拼接到对外消息。 */
+export class AbortError extends VenusError {
+  public readonly reason: unknown;
+  public override readonly cause: unknown;
+
+  constructor(reason?: unknown) {
+    super('Operation aborted', 'ABORTED');
+    this.name = 'AbortError';
+    this.reason = reason;
+    this.cause = reason;
+  }
+}
+
 /** Error thrown when input validation fails */
 export class ValidationError extends VenusError {
   constructor(message: string) {

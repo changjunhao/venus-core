@@ -17,6 +17,8 @@ import OpenAI from 'openai';
 import type { LLMProvider, ChatParams, ChatResponse, StreamChunk } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
 import { classifyProviderError } from './provider-errors.js';
+import { awaitWithSignal, closeStream, rethrowAbort, throwIfAborted } from '../utils/cancellation.js';
+import { abortableChunks, cancellableStream } from '../utils/cancellable-stream.js';
 import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
@@ -97,7 +99,9 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     // may pass json_schema through for endpoints verified to support it.
     if (params.response_format) {
       if (params.response_format.type === 'json_schema') {
-        logger.warn(`response_format json_schema 未被 Chat Completions provider 强制执行，已降级为 json_object（schema "${params.response_format.name}" 被忽略）`);
+        logger.warn(
+          `response_format json_schema 未被 Chat Completions provider 强制执行，已降级为 json_object（schema "${params.response_format.name}" 被忽略）`,
+        );
       }
       body.response_format = { type: 'json_object' };
     }
@@ -133,12 +137,18 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
+      throwIfAborted(params.signal);
       try {
         const requestBody = buildRequestBody(params);
 
-        const response = await client.chat.completions.create(
-          requestBody as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+        const response = await awaitWithSignal(
+          () =>
+            client.chat.completions.create(requestBody as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming, {
+              signal: params.signal,
+            }),
+          params.signal,
         );
+        throwIfAborted(params.signal);
 
         const choice = response.choices[0];
         if (!choice?.message) {
@@ -157,66 +167,81 @@ export function createOpenAIChatProvider(options: OpenAIChatProviderOptions): LL
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
+        rethrowAbort(error, params.signal);
         throw classifyProviderError(error, provider.name);
       }
     },
 
-    async *chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
-      // Classify initial request failures (network / timeout / auth) like chat()
-      let completion: AsyncIterable<OpenAI.ChatCompletionChunk>;
-      try {
-        const requestBody = buildRequestBody(params, true);
-        completion = await client.chat.completions.create(
-          requestBody as unknown as OpenAI.ChatCompletionCreateParamsStreaming,
-        );
-      } catch (error) {
-        throw classifyProviderError(error, provider.name);
-      }
-
-      const parser = createParser();
-      // MiniMax streaming reasoning: track cumulative text length for delta computation
-      let miniMaxReasoningLen = 0;
-
-      try {
-        for await (const chunk of completion) {
-          // Extract token usage from the final chunk (enabled by stream_options.include_usage)
-          const chunkUsage = extractTokenUsage(chunk);
-          if (chunkUsage) {
-            yield { usage: chunkUsage };
-          }
-
-          const delta = chunk.choices[0]?.delta;
-          if (!delta) continue;
-
-          const message = delta as unknown as Record<string, unknown>;
-
-          if (behavior === 'minimax') {
-            // MiniMax uses cumulative reasoning_details; compute delta
-            const mmReasoning = extractMiniMaxStreamReasoning(message, miniMaxReasoningLen);
-            if (mmReasoning !== null) {
-              miniMaxReasoningLen = mmReasoning.cumulativeLength;
-              yield { reasoning: mmReasoning.text };
-            }
-          } else {
-            const reasoningDelta = extractStreamReasoning(message);
-            if (reasoningDelta !== null) {
-              yield { reasoning: reasoningDelta };
-            }
-          }
-
-          // Yield content and incremental JSON partials
-          if (typeof message.content === 'string') {
-            yield makeContentChunk(parser, message.content);
-          }
+    chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
+      return cancellableStream(async function* (signal) {
+        params = { ...params, signal };
+        throwIfAborted(signal);
+        // Classify initial request failures (network / timeout / auth) like chat()
+        let completion: AsyncIterable<OpenAI.ChatCompletionChunk>;
+        try {
+          const requestBody = buildRequestBody(params, true);
+          completion = await awaitWithSignal(
+            () =>
+              client.chat.completions.create(requestBody as unknown as OpenAI.ChatCompletionCreateParamsStreaming, {
+                signal,
+              }),
+            signal,
+            closeStream,
+          );
+        } catch (error) {
+          rethrowAbort(error, params.signal);
+          throw classifyProviderError(error, provider.name);
         }
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
 
-        const message = error instanceof Error ? error.message : String(error);
-        throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
-      } finally {
-        parser.destroy();
-      }
+        let parser: ReturnType<typeof createParser> | undefined;
+        // MiniMax streaming reasoning: track cumulative text length for delta computation
+        let miniMaxReasoningLen = 0;
+
+        try {
+          parser = createParser();
+          for await (const chunk of abortableChunks(completion, signal)) {
+            // Extract token usage from the final chunk (enabled by stream_options.include_usage)
+            const chunkUsage = extractTokenUsage(chunk);
+            if (chunkUsage) {
+              yield { usage: chunkUsage };
+            }
+
+            const delta = chunk.choices[0]?.delta;
+            if (!delta) continue;
+
+            const message = delta as unknown as Record<string, unknown>;
+
+            if (behavior === 'minimax') {
+              // MiniMax uses cumulative reasoning_details; compute delta
+              const mmReasoning = extractMiniMaxStreamReasoning(message, miniMaxReasoningLen);
+              if (mmReasoning !== null) {
+                miniMaxReasoningLen = mmReasoning.cumulativeLength;
+                yield { reasoning: mmReasoning.text };
+              }
+            } else {
+              const reasoningDelta = extractStreamReasoning(message);
+              if (reasoningDelta !== null) {
+                yield { reasoning: reasoningDelta };
+              }
+            }
+
+            // Yield content and incremental JSON partials
+            if (typeof message.content === 'string') {
+              yield makeContentChunk(parser, message.content);
+            }
+          }
+          throwIfAborted(signal);
+        } catch (error) {
+          rethrowAbort(error, signal);
+          if (error instanceof ProviderError) throw error;
+
+          const message = error instanceof Error ? error.message : String(error);
+          throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
+        } finally {
+          if (parser) parser.destroy();
+          else void closeStream(completion);
+        }
+      }, params.signal);
     },
   });
 

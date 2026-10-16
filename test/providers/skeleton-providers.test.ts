@@ -1173,8 +1173,10 @@ describe('Skeleton Providers', () => {
       }
     });
 
-    it('should classify fetch failures as network errors', async () => {
+    it('连接错误重试耗尽后保留 network 分类', async () => {
+      let attempts = 0;
       mockFetch(async () => {
+        attempts++;
         throw new Error('fetch failed');
       });
 
@@ -1186,7 +1188,8 @@ describe('Skeleton Providers', () => {
         expect(error).toBeInstanceOf(ProviderError);
         expect((error as ProviderError).errorCode).toBe('network');
       }
-    });
+      expect(attempts).toBe(5);
+    }, 10_000);
 
     it('should stream reasoning, content, partial and usage chunks', async () => {
       mockFetch(async () =>

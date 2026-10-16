@@ -3,6 +3,7 @@
 
 import type {
   VenusEngineConfig,
+  CancellationOptions,
   EvaluationResult,
   EvaluationEvent,
   EvaluationStreamEvent,
@@ -40,6 +41,15 @@ import { GenreDetectorAgent } from './agents/genre-detector.js';
 import { getProposerResultSchema, getGenreConfig } from './schema/index.js';
 import { getGroupJointResultSchema, getGroupCompareResultSchema } from './schema/group.js';
 import { VenusError, ValidationError } from './utils/errors.js';
+import {
+  awaitWithSignal,
+  closeIterator,
+  createCancellationScope,
+  isAbortError,
+  rethrowAbort,
+  throwIfAborted,
+} from './utils/cancellation.js';
+import { cancellableStream } from './utils/cancellable-stream.js';
 import { createLogger } from './utils/logger.js';
 
 /** 组图评估的图片数量下限 */
@@ -99,6 +109,36 @@ export class VenusEngine {
     } catch (err) {
       // Observability callbacks must never break the evaluation pipeline
       this.#logger.warn(`onEvent 回调抛出异常（已忽略）: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** 每个回调前后检查，允许观察者同步取消但不再启动下一步。 */
+  #evaluationEmitter(signal: AbortSignal) {
+    return (event: Omit<EvaluationEvent, 'timestamp'>) => {
+      throwIfAborted(signal);
+      this.#emit(event);
+      throwIfAborted(signal);
+    };
+  }
+
+  async #withEvaluation<T>(operation: (signal: AbortSignal) => Promise<T>, parent?: AbortSignal): Promise<T> {
+    throwIfAborted(parent);
+    const scope = createCancellationScope(parent);
+    const onCancel = () => this.#emit({ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } });
+    scope.signal.addEventListener('abort', onCancel, { once: true });
+    try {
+      return await awaitWithSignal(() => operation(scope.signal), scope.signal);
+    } catch (error) {
+      if (scope.signal.aborted || isAbortError(error)) {
+        scope.cancel(error);
+        rethrowAbort(error, scope.signal);
+      }
+      scope.dispose();
+      this.#emit({ type: 'error', agent: 'engine', data: { error } });
+      throw error;
+    } finally {
+      scope.signal.removeEventListener('abort', onCancel);
+      scope.dispose();
     }
   }
 
@@ -272,9 +312,12 @@ export class VenusEngine {
   }
 
   /** Detect the genre of an image (returns full AgentCallResult including reasoning for downstream propagation) */
-  async #detectGenre(imageUrl: string): Promise<AgentCallResult<{ genre: Genre; confidence: number }>> {
+  async #detectGenre(
+    imageUrl: string,
+    signal: AbortSignal,
+  ): Promise<AgentCallResult<{ genre: Genre; confidence: number }>> {
     const detector = this.#buildGenreDetector();
-    return await detector.detect(imageUrl);
+    return await detector.detect(imageUrl, { signal });
   }
 
   /** Resolve genre (auto-detect or use provided) and build augmented context */
@@ -282,6 +325,7 @@ export class VenusEngine {
     imageUrl: string,
     genre: Genre | null | undefined,
     context: EvaluationContext | undefined,
+    signal: AbortSignal,
   ): Promise<{
     detectedGenre: Genre;
     genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
@@ -291,7 +335,7 @@ export class VenusEngine {
     let genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
 
     if (!genre) {
-      genreDetectionOut = await this.#detectGenre(imageUrl);
+      genreDetectionOut = await this.#detectGenre(imageUrl, signal);
       detectedGenre = genreDetectionOut.result.genre;
     } else {
       detectedGenre = genre;
@@ -317,7 +361,22 @@ export class VenusEngine {
   }
 
   /** Run a full evaluation on an image */
-  async evaluate(imageUrl: string, genre?: Genre | null, context?: EvaluationContext): Promise<EvaluationResult> {
+  evaluate(
+    imageUrl: string,
+    genre?: Genre | null,
+    context?: EvaluationContext,
+    options?: CancellationOptions,
+  ): Promise<EvaluationResult> {
+    return this.#withEvaluation((signal) => this.#evaluate(imageUrl, genre, context, signal), options?.signal);
+  }
+
+  async #evaluate(
+    imageUrl: string,
+    genre: Genre | null | undefined,
+    context: EvaluationContext | undefined,
+    signal: AbortSignal,
+  ): Promise<EvaluationResult> {
+    const emit = this.#evaluationEmitter(signal);
     const startTime = Date.now();
 
     this.#logger.info(`评估图片: ${imageUrl.slice(0, 50)}...`);
@@ -326,6 +385,7 @@ export class VenusEngine {
       imageUrl,
       genre,
       context,
+      signal,
     );
 
     if (genreDetectionOut) {
@@ -333,7 +393,7 @@ export class VenusEngine {
       this.#logger.info(`检测结果: ${genreLabel}${genreDetectionOut.reasoning ? ' (有推理链)' : ''}`);
     }
 
-    this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrl, genre: detectedGenre } });
+    emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrl, genre: detectedGenre } });
 
     try {
       // 构建 Agents
@@ -341,38 +401,40 @@ export class VenusEngine {
 
       // 第1轮：提案者初评
       this.#logger.info('第1轮：提案者初评');
-      this.#emit({ type: 'agent_call', round: 1, agent: 'proposer' });
+      emit({ type: 'agent_call', round: 1, agent: 'proposer' });
       const proposalOut: AgentCallResult<ProposerResult> = await proposer.evaluate(
         imageUrl,
         detectedGenre,
         augmentedContext,
+        { signal },
       );
-      this.#emit({
+      emit({
         type: 'agent_complete',
         round: 1,
         agent: 'proposer',
         data: { result: proposalOut.result, reasoning: proposalOut.reasoning },
       });
-      this.#emit({ type: 'round_complete', round: 1 });
+      emit({ type: 'round_complete', round: 1 });
       this.#logger.info(`初始总分: ${proposalOut.result.total_score}`);
 
       // 第2轮：批判者攻击
       this.#logger.info('第2轮：批判者攻击');
-      this.#emit({ type: 'agent_call', round: 2, agent: 'critic' });
+      emit({ type: 'agent_call', round: 2, agent: 'critic' });
       const critiqueOut: AgentCallResult<CritiqueResult> = await critic.attack(
         imageUrl,
         proposalOut.result,
         proposalOut.reasoning,
         detectedGenre,
         augmentedContext,
+        { signal },
       );
-      this.#emit({
+      emit({
         type: 'agent_complete',
         round: 2,
         agent: 'critic',
         data: { result: critiqueOut.result, reasoning: critiqueOut.reasoning },
       });
-      this.#emit({ type: 'round_complete', round: 2 });
+      emit({ type: 'round_complete', round: 2 });
       const critiqueSeverity = critiqueOut.result.severity;
       this.#logger.info(`严重程度: ${critiqueSeverity}`);
 
@@ -380,7 +442,7 @@ export class VenusEngine {
       let revisionOut: AgentCallResult<ProposerResult> | undefined;
       if (critiqueSeverity === 'HIGH') {
         this.#logger.info('第3轮：提案者修正（严重程度 HIGH）');
-        this.#emit({ type: 'agent_call', round: 3, agent: 'proposer' });
+        emit({ type: 'agent_call', round: 3, agent: 'proposer' });
         revisionOut = await proposer.revise(
           imageUrl,
           proposalOut.result,
@@ -388,21 +450,22 @@ export class VenusEngine {
           critiqueOut.reasoning,
           detectedGenre,
           augmentedContext,
+          { signal },
         );
-        this.#emit({
+        emit({
           type: 'agent_complete',
           round: 3,
           agent: 'proposer',
           data: { result: revisionOut.result, reasoning: revisionOut.reasoning },
         });
-        this.#emit({ type: 'round_complete', round: 3 });
+        emit({ type: 'round_complete', round: 3 });
         this.#logger.info(`修正总分: ${revisionOut.result.total_score}`);
       }
 
       // 第4轮：仲裁者裁决
       const finalRound = critiqueSeverity === 'HIGH' ? 4 : 3;
       this.#logger.info('最终轮：仲裁者裁决');
-      this.#emit({ type: 'agent_call', round: finalRound, agent: 'arbiter' });
+      emit({ type: 'agent_call', round: finalRound, agent: 'arbiter' });
       const arbitrationOut: AgentCallResult<ArbitrationResult> = await arbiter.decide(
         imageUrl,
         proposalOut.result,
@@ -413,14 +476,15 @@ export class VenusEngine {
         revisionOut?.reasoning ?? null,
         detectedGenre,
         augmentedContext,
+        { signal },
       );
-      this.#emit({
+      emit({
         type: 'agent_complete',
         round: finalRound,
         agent: 'arbiter',
         data: { result: arbitrationOut.result, reasoning: arbitrationOut.reasoning },
       });
-      this.#emit({ type: 'round_complete', round: finalRound });
+      emit({ type: 'round_complete', round: finalRound });
       const arb = arbitrationOut.result;
       this.#logger.info(`最终总分: ${arb.total_score}`);
 
@@ -439,7 +503,7 @@ export class VenusEngine {
 
       return result;
     } catch (err) {
-      this.#emit({ type: 'error', agent: 'engine', data: { error: err } });
+      rethrowAbort(err, signal);
       throw err;
     }
   }
@@ -453,60 +517,82 @@ export class VenusEngine {
     agentName: string,
     round: number,
     mode: StreamMode,
+    signal: AbortSignal,
   ): AsyncGenerator<StreamRoundEvent, AgentCallResult<T>, unknown> {
-    yield { type: 'agent_call', round, agent: agentName, timestamp: Date.now() };
-    // round 0 (genre detection) is not surfaced via onEvent, matching evaluate()
-    // where round 0 only carries the round_start marker emitted after resolution
-    if (round > 0) {
-      this.#emit({ type: 'agent_call', round, agent: agentName });
-    }
+    const emit = this.#evaluationEmitter(signal);
+    try {
+      throwIfAborted(signal);
+      yield { type: 'agent_call', round, agent: agentName, timestamp: Date.now() };
+      // round 0 (genre detection) is not surfaced via onEvent, matching evaluate()
+      // where round 0 only carries the round_start marker emitted after resolution
+      if (round > 0) {
+        emit({ type: 'agent_call', round, agent: agentName });
+      }
 
-    // Inline the old #wrapAgentStream logic
-    let next = await stream.next();
-    while (!next.done) {
-      const chunk = next.value;
-      // Convert provider-level StreamChunk → engine-level EvaluationStreamEvent
-      const events: StreamRoundEvent[] = [];
-      if (chunk.reasoning) {
-        events.push({ type: 'reasoning_chunk', agent: agentName, content: chunk.reasoning, timestamp: Date.now() });
-      }
-      if (chunk.partial) {
-        events.push({ type: 'result_chunk', agent: agentName, partial: chunk.partial, timestamp: Date.now() });
-      }
-      for (const event of events) {
-        if (mode === 'updates' || (event.type !== 'reasoning_chunk' && event.type !== 'result_chunk')) {
-          yield event;
+      // Inline the old #wrapAgentStream logic
+      let next = await awaitWithSignal(() => stream.next(), signal);
+      while (!next.done) {
+        const chunk = next.value;
+        // Convert provider-level StreamChunk → engine-level EvaluationStreamEvent
+        const events: StreamRoundEvent[] = [];
+        if (chunk.reasoning) {
+          events.push({ type: 'reasoning_chunk', agent: agentName, content: chunk.reasoning, timestamp: Date.now() });
         }
+        if (chunk.partial) {
+          events.push({ type: 'result_chunk', agent: agentName, partial: chunk.partial, timestamp: Date.now() });
+        }
+        for (const event of events) {
+          if (mode === 'updates' || (event.type !== 'reasoning_chunk' && event.type !== 'result_chunk')) {
+            yield event;
+          }
+        }
+        next = await awaitWithSignal(() => stream.next(), signal);
       }
-      next = await stream.next();
-    }
-    const result = next.value;
+      const result = next.value;
+      throwIfAborted(signal);
 
-    yield {
-      type: 'agent_complete',
-      round,
-      agent: agentName,
-      data: { result: result.result, reasoning: result.reasoning },
-      timestamp: Date.now(),
-    };
-    if (round > 0) {
-      this.#emit({
+      yield {
         type: 'agent_complete',
         round,
         agent: agentName,
         data: { result: result.result, reasoning: result.reasoning },
-      });
-      this.#emit({ type: 'round_complete', round });
-    }
+        timestamp: Date.now(),
+      };
+      if (round > 0) {
+        emit({
+          type: 'agent_complete',
+          round,
+          agent: agentName,
+          data: { result: result.result, reasoning: result.reasoning },
+        });
+        emit({ type: 'round_complete', round });
+      }
 
-    return result;
+      return result;
+    } finally {
+      void closeIterator(stream);
+    }
   }
 
   /** Run a streaming evaluation on an image, yielding events at each stage */
-  async *evaluateStream(
+  evaluateStream(
     imageUrl: string,
     options?: EvaluateStreamOptions,
   ): AsyncGenerator<EvaluationStreamEvent, void, unknown> {
+    return cancellableStream(
+      (signal, complete) => this.#evaluateStream(imageUrl, { ...options, signal }, complete),
+      options?.signal,
+      () => this.#emit({ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } }),
+    );
+  }
+
+  async *#evaluateStream(
+    imageUrl: string,
+    options: EvaluateStreamOptions & { signal: AbortSignal },
+    complete: () => void,
+  ): AsyncGenerator<EvaluationStreamEvent, void, unknown> {
+    const signal = options.signal;
+    const emit = this.#evaluationEmitter(signal);
     const genre = options?.genre;
     const context = options?.context;
     const mode: StreamMode = options?.mode ?? 'values';
@@ -523,10 +609,11 @@ export class VenusEngine {
       if (!genre) {
         const detector = this.#buildGenreDetector();
         genreDetectionOut = yield* this.#runStreamRound<{ genre: Genre; confidence: number }>(
-          detector.detectStream(imageUrl),
+          detector.detectStream(imageUrl, { signal }),
           'genreDetector',
           0,
           mode,
+          signal,
         );
         detectedGenre = genreDetectionOut.result.genre;
 
@@ -545,7 +632,7 @@ export class VenusEngine {
       }
 
       yield { type: 'evaluation_start', data: { imageUrl, genre: detectedGenre }, timestamp: Date.now() };
-      this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrl, genre: detectedGenre } });
+      emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrl, genre: detectedGenre } });
 
       // Build Agents
       const { proposer, critic, arbiter } = this.#buildAgents();
@@ -553,20 +640,24 @@ export class VenusEngine {
       // ── 第1轮：提案者初评 ──
       this.#logger.info('[stream] 第1轮：提案者初评');
       const proposalOut = yield* this.#runStreamRound<ProposerResult>(
-        proposer.evaluateStream(imageUrl, detectedGenre, augmentedContext),
+        proposer.evaluateStream(imageUrl, detectedGenre, augmentedContext, { signal }),
         'proposer',
         1,
         mode,
+        signal,
       );
       this.#logger.info(`[stream] 初始总分: ${proposalOut.result.total_score}`);
 
       // ── 第2轮：批判者攻击 ──
       this.#logger.info('[stream] 第2轮：批判者攻击');
       const critiqueOut = yield* this.#runStreamRound<CritiqueResult>(
-        critic.attackStream(imageUrl, proposalOut.result, proposalOut.reasoning, detectedGenre, augmentedContext),
+        critic.attackStream(imageUrl, proposalOut.result, proposalOut.reasoning, detectedGenre, augmentedContext, {
+          signal,
+        }),
         'critic',
         2,
         mode,
+        signal,
       );
       const critiqueSeverity = critiqueOut.result.severity;
       this.#logger.info(`[stream] 严重程度: ${critiqueSeverity}`);
@@ -583,10 +674,12 @@ export class VenusEngine {
             critiqueOut.reasoning,
             detectedGenre,
             augmentedContext,
+            { signal },
           ),
           'proposer-revision',
           3,
           mode,
+          signal,
         );
         this.#logger.info(`[stream] 修正总分: ${revisionOut.result.total_score}`);
       }
@@ -605,10 +698,12 @@ export class VenusEngine {
           revisionOut?.reasoning ?? null,
           detectedGenre,
           augmentedContext,
+          { signal },
         ),
         'arbiter',
         finalRound,
         mode,
+        signal,
       );
       this.#logger.info(`[stream] 最终总分: ${arbitrationOut.result.total_score}`);
 
@@ -625,8 +720,12 @@ export class VenusEngine {
         augmentedContext,
       );
 
+      throwIfAborted(signal);
+      complete();
       yield { type: 'evaluation_complete', data: result, timestamp: Date.now() };
     } catch (err) {
+      rethrowAbort(err, signal);
+      complete();
       const message = err instanceof Error ? err.message : String(err);
       const code = err instanceof VenusError ? err.code : undefined;
       this.#emit({ type: 'error', agent: 'engine', data: { error: err } });
@@ -648,6 +747,7 @@ export class VenusEngine {
     imageUrls: string[],
     genre: Genre | null | undefined,
     context: EvaluationContext | undefined,
+    signal: AbortSignal,
   ): Promise<{
     detectedGenre: Genre;
     genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
@@ -657,7 +757,7 @@ export class VenusEngine {
     let genreDetectionOut: AgentCallResult<{ genre: Genre; confidence: number }> | undefined;
 
     if (!genre) {
-      genreDetectionOut = await this.#buildGenreDetector().detect(imageUrls);
+      genreDetectionOut = await this.#buildGenreDetector().detect(imageUrls, { signal });
       detectedGenre = genreDetectionOut.result.genre;
     } else {
       detectedGenre = genre;
@@ -747,11 +847,24 @@ export class VenusEngine {
   }
 
   /** Run a full group evaluation (joint or compare) on a set of images */
-  async evaluateGroup(
+  evaluateGroup(
     imageUrls: string[],
     mode: GroupEvaluationMode,
     options?: GroupEvaluateOptions,
   ): Promise<GroupEvaluationResult> {
+    return this.#withEvaluation(
+      (signal) => this.#evaluateGroup(imageUrls, mode, { ...options, signal }),
+      options?.signal,
+    );
+  }
+
+  async #evaluateGroup(
+    imageUrls: string[],
+    mode: GroupEvaluationMode,
+    options: GroupEvaluateOptions & { signal: AbortSignal },
+  ): Promise<GroupEvaluationResult> {
+    const signal = options.signal;
+    const emit = this.#evaluationEmitter(signal);
     const startTime = Date.now();
     const includePerImage = options?.includePerImage ?? false;
 
@@ -763,6 +876,7 @@ export class VenusEngine {
       imageUrls,
       options?.genre,
       options?.context,
+      signal,
     );
 
     if (genreDetectionOut) {
@@ -770,7 +884,7 @@ export class VenusEngine {
       this.#logger.info(`检测结果: ${genreLabel}${genreDetectionOut.reasoning ? ' (有推理链)' : ''}`);
     }
 
-    this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrls, mode, genre: detectedGenre } });
+    emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrls, mode, genre: detectedGenre } });
 
     try {
       // 构建 Agents
@@ -778,25 +892,26 @@ export class VenusEngine {
 
       // 第1轮：提案者组图初评
       this.#logger.info('第1轮：提案者组图初评');
-      this.#emit({ type: 'agent_call', round: 1, agent: 'proposer' });
+      emit({ type: 'agent_call', round: 1, agent: 'proposer' });
       const proposalOut: AgentCallResult<GroupProposerOutput> = await proposer.evaluateGroup(
         imageUrls,
         mode,
         detectedGenre,
         includePerImage,
         augmentedContext,
+        { signal },
       );
-      this.#emit({
+      emit({
         type: 'agent_complete',
         round: 1,
         agent: 'proposer',
         data: { result: proposalOut.result, reasoning: proposalOut.reasoning },
       });
-      this.#emit({ type: 'round_complete', round: 1 });
+      emit({ type: 'round_complete', round: 1 });
 
       // 第2轮：批判者攻击
       this.#logger.info('第2轮：批判者攻击');
-      this.#emit({ type: 'agent_call', round: 2, agent: 'critic' });
+      emit({ type: 'agent_call', round: 2, agent: 'critic' });
       const critiqueOut: AgentCallResult<CritiqueResult> = await critic.attackGroup(
         imageUrls,
         mode,
@@ -804,14 +919,15 @@ export class VenusEngine {
         proposalOut.reasoning,
         detectedGenre,
         augmentedContext,
+        { signal },
       );
-      this.#emit({
+      emit({
         type: 'agent_complete',
         round: 2,
         agent: 'critic',
         data: { result: critiqueOut.result, reasoning: critiqueOut.reasoning },
       });
-      this.#emit({ type: 'round_complete', round: 2 });
+      emit({ type: 'round_complete', round: 2 });
       const critiqueSeverity = critiqueOut.result.severity;
       this.#logger.info(`严重程度: ${critiqueSeverity}`);
 
@@ -819,7 +935,7 @@ export class VenusEngine {
       let revisionOut: AgentCallResult<GroupProposerOutput> | undefined;
       if (critiqueSeverity === 'HIGH') {
         this.#logger.info('第3轮：提案者修正（严重程度 HIGH）');
-        this.#emit({ type: 'agent_call', round: 3, agent: 'proposer' });
+        emit({ type: 'agent_call', round: 3, agent: 'proposer' });
         revisionOut = await proposer.reviseGroup(
           imageUrls,
           mode,
@@ -829,20 +945,21 @@ export class VenusEngine {
           detectedGenre,
           includePerImage,
           augmentedContext,
+          { signal },
         );
-        this.#emit({
+        emit({
           type: 'agent_complete',
           round: 3,
           agent: 'proposer',
           data: { result: revisionOut.result, reasoning: revisionOut.reasoning },
         });
-        this.#emit({ type: 'round_complete', round: 3 });
+        emit({ type: 'round_complete', round: 3 });
       }
 
       // 第4轮：仲裁者裁决
       const finalRound = critiqueSeverity === 'HIGH' ? 4 : 3;
       this.#logger.info('最终轮：仲裁者裁决');
-      this.#emit({ type: 'agent_call', round: finalRound, agent: 'arbiter' });
+      emit({ type: 'agent_call', round: finalRound, agent: 'arbiter' });
       const arbitrationOut: AgentCallResult<GroupArbitrationOutput> = await arbiter.decideGroup(
         imageUrls,
         mode,
@@ -855,14 +972,15 @@ export class VenusEngine {
         detectedGenre,
         includePerImage,
         augmentedContext,
+        { signal },
       );
-      this.#emit({
+      emit({
         type: 'agent_complete',
         round: finalRound,
         agent: 'arbiter',
         data: { result: arbitrationOut.result, reasoning: arbitrationOut.reasoning },
       });
-      this.#emit({ type: 'round_complete', round: finalRound });
+      emit({ type: 'round_complete', round: finalRound });
 
       // ── 组装最终结果 ──
       return this.#buildGroupResult(
@@ -879,17 +997,32 @@ export class VenusEngine {
         augmentedContext,
       );
     } catch (err) {
-      this.#emit({ type: 'error', agent: 'engine', data: { error: err } });
+      rethrowAbort(err, signal);
       throw err;
     }
   }
 
   /** Run a streaming group evaluation, yielding events at each stage */
-  async *evaluateGroupStream(
+  evaluateGroupStream(
     imageUrls: string[],
     mode: GroupEvaluationMode,
     options?: GroupEvaluateStreamOptions,
   ): AsyncGenerator<GroupEvaluationStreamEvent, void, unknown> {
+    return cancellableStream(
+      (signal, complete) => this.#evaluateGroupStream(imageUrls, mode, { ...options, signal }, complete),
+      options?.signal,
+      () => this.#emit({ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } }),
+    );
+  }
+
+  async *#evaluateGroupStream(
+    imageUrls: string[],
+    mode: GroupEvaluationMode,
+    options: GroupEvaluateStreamOptions & { signal: AbortSignal },
+    complete: () => void,
+  ): AsyncGenerator<GroupEvaluationStreamEvent, void, unknown> {
+    const signal = options.signal;
+    const emit = this.#evaluationEmitter(signal);
     const includePerImage = options?.includePerImage ?? false;
     const streamMode: StreamMode = options?.mode ?? 'values';
     const startTime = Date.now();
@@ -907,10 +1040,11 @@ export class VenusEngine {
       if (!options?.genre) {
         const detector = this.#buildGenreDetector();
         genreDetectionOut = yield* this.#runStreamRound<{ genre: Genre; confidence: number }>(
-          detector.detectStream(imageUrls),
+          detector.detectStream(imageUrls, { signal }),
           'genreDetector',
           0,
           streamMode,
+          signal,
         );
         detectedGenre = genreDetectionOut.result.genre;
 
@@ -933,7 +1067,7 @@ export class VenusEngine {
         data: { imageUrls, mode, genre: detectedGenre },
         timestamp: Date.now(),
       };
-      this.#emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrls, mode, genre: detectedGenre } });
+      emit({ type: 'round_start', round: 0, agent: 'engine', data: { imageUrls, mode, genre: detectedGenre } });
 
       // Build Agents
       const { proposer, critic, arbiter } = this.#buildAgents();
@@ -941,10 +1075,11 @@ export class VenusEngine {
       // ── 第1轮：提案者组图初评 ──
       this.#logger.info('[stream] 第1轮：提案者组图初评');
       const proposalOut = yield* this.#runStreamRound<GroupProposerOutput>(
-        proposer.evaluateGroupStream(imageUrls, mode, detectedGenre, includePerImage, augmentedContext),
+        proposer.evaluateGroupStream(imageUrls, mode, detectedGenre, includePerImage, augmentedContext, { signal }),
         'proposer',
         1,
         streamMode,
+        signal,
       );
 
       // ── 第2轮：批判者攻击 ──
@@ -957,10 +1092,12 @@ export class VenusEngine {
           proposalOut.reasoning,
           detectedGenre,
           augmentedContext,
+          { signal },
         ),
         'critic',
         2,
         streamMode,
+        signal,
       );
       const critiqueSeverity = critiqueOut.result.severity;
       this.#logger.info(`[stream] 严重程度: ${critiqueSeverity}`);
@@ -979,10 +1116,12 @@ export class VenusEngine {
             detectedGenre,
             includePerImage,
             augmentedContext,
+            { signal },
           ),
           'proposer-revision',
           3,
           streamMode,
+          signal,
         );
       }
 
@@ -1002,10 +1141,12 @@ export class VenusEngine {
           detectedGenre,
           includePerImage,
           augmentedContext,
+          { signal },
         ),
         'arbiter',
         finalRound,
         streamMode,
+        signal,
       );
 
       // 组装最终结果
@@ -1023,8 +1164,12 @@ export class VenusEngine {
         augmentedContext,
       );
 
+      throwIfAborted(signal);
+      complete();
       yield { type: 'group_evaluation_complete', data: result, timestamp: Date.now() };
     } catch (err) {
+      rethrowAbort(err, signal);
+      complete();
       const message = err instanceof Error ? err.message : String(err);
       const code = err instanceof VenusError ? err.code : undefined;
       this.#emit({ type: 'error', agent: 'engine', data: { error: err } });

@@ -8,15 +8,15 @@
 
 `VenusEngineConfig` 完整参考：
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `provider` | `LLMProvider` | *必填* | LLM provider 实例（使用 `createOpenAIChatProvider` 或 `defineProvider`） |
-| `defaultModel` | `string` | — | 所有智能体的默认模型（建议） |
-| `models` | `ModelConfig` | — | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`） |
-| `providers` | `ProviderConfig` | — | 按智能体自定义提供商实例，未设置时回退到 `provider`（`revision` 未设置时沿用 proposer 的提供商） |
-| `reasoning` | `ReasoningConfig` | — | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖 |
-| `maxRetries` | `number` | — | 每次智能体 LLM 调用的最大重试次数。仅适用于 `json_object` 结构化输出模式的提供商；声明 `structuredOutput: 'json_schema'` 的提供商单次调用不重试（参见 [API 参考](./api-reference.md#structuredoutput-语义)） |
-| `onEvent` | `(event: EvaluationEvent) => void` | — | 用于可观测性的事件回调 |
+| 选项           | 类型                               | 默认值 | 说明                                                                                                                                                                                                         |
+| -------------- | ---------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`     | `LLMProvider`                      | _必填_ | LLM provider 实例（使用 `createOpenAIChatProvider` 或 `defineProvider`）                                                                                                                                     |
+| `defaultModel` | `string`                           | —      | 所有智能体的默认模型（建议）                                                                                                                                                                                 |
+| `models`       | `ModelConfig`                      | —      | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`）                                                                                                                             |
+| `providers`    | `ProviderConfig`                   | —      | 按智能体自定义提供商实例，未设置时回退到 `provider`（`revision` 未设置时沿用 proposer 的提供商）                                                                                                             |
+| `reasoning`    | `ReasoningConfig`                  | —      | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖                                                                                                                                |
+| `maxRetries`   | `number`                           | —      | 每次智能体 LLM 调用的最大重试次数。仅适用于 `json_object` 结构化输出模式的提供商；声明 `structuredOutput: 'json_schema'` 的提供商单次调用不重试（参见 [API 参考](./api-reference.md#structuredoutput-语义)） |
+| `onEvent`      | `(event: EvaluationEvent) => void` | —      | 用于可观测性的事件回调                                                                                                                                                                                       |
 
 ### 事件系统与流式评估
 
@@ -35,10 +35,16 @@ interface ReasoningConfig {
   /** 推理的默认 token 预算 */
   budgetTokens?: number;
   /** 按智能体覆盖；设置为 `false` 可禁用特定智能体的推理 */
-  agents?: Partial<Record<AgentRole, {
-    effort: 'minimal' | 'low' | 'medium' | 'high' | 'max';  // 必填
-    budgetTokens?: number;
-  } | false>>;
+  agents?: Partial<
+    Record<
+      AgentRole,
+      | {
+          effort: 'minimal' | 'low' | 'medium' | 'high' | 'max'; // 必填
+          budgetTokens?: number;
+        }
+      | false
+    >
+  >;
 }
 ```
 
@@ -58,7 +64,7 @@ const engine = createVenusEngine({
       proposer: { effort: 'medium', budgetTokens: 4096 },
       critic: { effort: 'medium', budgetTokens: 4096 },
       arbiter: { effort: 'high', budgetTokens: 8192 },
-      genreDetector: false,  // 禁用门类检测器的推理
+      genreDetector: false, // 禁用门类检测器的推理
     },
   },
   onEvent(event) {
@@ -68,6 +74,7 @@ const engine = createVenusEngine({
 ```
 
 引擎会自动将推理参数适配到不同的提供商 API：
+
 - **OpenAI**：使用 `reasoning_effort`（minimal/low/medium/high/max）
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
@@ -189,6 +196,13 @@ const provider = createAnthropicProvider({
 - 未配置推理时显式发送 `thinking: { type: 'disabled' }`（GLM 系列默认开启思考，部分型号强制思考），此时 `temperature` 照常转发；配置推理时发送 `thinking: { type: 'enabled' }`（GLM 不支持思考预算，不发送 `budget_tokens`，`temperature` 省略），`max_tokens` 仍按 effort 对应的预算扩容以为思考留出空间
 - 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，由 GLM 系列在服务端严格执行，provider 声明 `structuredOutput: 'json_schema'`（单次调用，不重试）
 - 认证使用 SDK 默认的 `x-api-key` 请求头（传入智谱 API Key 即可）；流式事件与官方 Messages API 一致
+
+## 取消与超时
+
+- **请求级取消**：`signal?: AbortSignal` 不在 `VenusEngineConfig` 或 Provider 构造器中配置，而是每次评估入口 (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`) 的 `CancellationOptions` 中传入。Adapter 会自动接入 HTTP 客户端的 `Request.signal` 或 `reader.cancel()`。参见[API 参考 · 端到端取消](./api-reference.md#端到端取消)。
+- **Provider 超时**：`OpenAIChatProviderOptions.timeout` / `OpenAIResponsesProviderOptions.timeout` / `GeminiProviderOptions.timeout` 控制 SDK 侧的 HTTP 超时，与取消不冲突；`AbortSignal.timeout(ms)` 则会把内部 TimeoutError 封装为取消。
+- **Agent 重试** (`VenusEngineConfig.maxRetries` 或 `AgentConfig.maxRetries`)：只重试 JSON/Schema 失败；`AbortError` 不进入重试也不会包为 `SchemaError`。
+- **Gemini 请求级重试**：Provider 内部接管 `@google/genai` Interactions 的连接重试，默认首次尝试 + 最多 4 次重试（覆盖 408/409/429/5xx、连接错误及请求超时），每次尝试使用独立 deadline，退避可由 `signal` 取消；用户取消不重试，流建立后不重连或重放。SDK 内部的 `maxRetries` 固定为 0，避免不可取消的退避泄漏。
 
 ## 参见
 

@@ -24,7 +24,9 @@
  */
 
 import { createRouter, defineEventHandler, readBody } from 'h3';
-import type { Router } from 'h3';
+import type { Router, H3Event } from 'h3';
+import { awaitWithSignal, createCancellationScope, type CancellationScope } from '../utils/cancellation.js';
+import { nodeRequestScope, streamHeaders, webEventStream, writeNodeStream, type StreamFormat } from './streaming.js';
 import type { VenusEngine } from '../engine.js';
 import type { AdapterOptions } from '../types.js';
 import {
@@ -34,8 +36,6 @@ import {
   handleGroupEvaluate,
   resolveStreamParamsWithHook,
   resolveGroupStreamParamsWithHook,
-  formatSSEError,
-  formatJSONLError,
 } from './common.js';
 
 /** Build a JSON error response with an explicit status code */
@@ -44,6 +44,24 @@ function jsonError(status: number, body: { error: { code: string; message: strin
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function requestScope(event: H3Event): CancellationScope {
+  if (event.web?.request) return createCancellationScope(event.web.request.signal);
+  return event.node.res.socket ? nodeRequestScope(event.node.req, event.node.res) : createCancellationScope();
+}
+
+async function sendEvaluationStream(
+  event: H3Event,
+  iterator: AsyncIterator<unknown>,
+  scope: CancellationScope,
+  format: StreamFormat,
+) {
+  if (!event.web?.request && event.node.res.socket) {
+    await writeNodeStream(event.node.res, iterator, scope, format);
+    return;
+  }
+  return new Response(webEventStream(iterator, scope, format), { headers: streamHeaders(format) });
 }
 
 export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions): Router {
@@ -55,16 +73,20 @@ export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions
   router.post(
     `${prefix}/evaluate`,
     defineEventHandler(async (event) => {
+      const scope = requestScope(event);
       try {
-        const body = await readBody(event);
-        const result = await handleEvaluate(engine, body, hooks);
+        const body = await awaitWithSignal(() => readBody(event), scope.signal);
+        const result = await handleEvaluate(engine, body, hooks, scope);
         if (!result.ok) {
           return jsonError(result.status, result.body);
         }
         return result.data;
       } catch (error) {
+        if (!event.web?.request && event.node.res.destroyed) return;
         const { status, body } = mapErrorToResponse(error);
         return jsonError(status, body);
+      } finally {
+        scope.dispose();
       }
     }),
   );
@@ -81,40 +103,30 @@ export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions
   router.post(
     `${prefix}/evaluate/stream`,
     defineEventHandler(async (event) => {
+      const scope = requestScope(event);
+      let transferred = false;
       try {
-        const body = await readBody(event);
-        const parsed = await resolveStreamParamsWithHook(body, hooks);
+        const body = await awaitWithSignal(() => readBody(event), scope.signal);
+        const parsed = await resolveStreamParamsWithHook(body, hooks, scope);
         if (!parsed.ok) {
           return jsonError(parsed.status, parsed.body);
         }
         const { imageUrl, genre, context, mode } = parsed.data;
 
-        return new Response(
-          new ReadableStream({
-            async start(controller) {
-              const encoder = new TextEncoder();
-              try {
-                for await (const chunk of engine.evaluateStream(imageUrl, { genre, context, mode })) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-                }
-              } catch (err) {
-                controller.enqueue(encoder.encode(formatSSEError(err)));
-              } finally {
-                controller.close();
-              }
-            },
-          }),
-          {
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-            },
-          },
+        const response = await sendEvaluationStream(
+          event,
+          engine.evaluateStream(imageUrl, { genre, context, mode, signal: scope.signal }),
+          scope,
+          'sse',
         );
+        transferred = true;
+        return response;
       } catch (error) {
+        if (!event.web?.request && event.node.res.destroyed) return;
         const { status, body } = mapErrorToResponse(error);
         return jsonError(status, body);
+      } finally {
+        if (!transferred) scope.dispose();
       }
     }),
   );
@@ -123,41 +135,30 @@ export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions
   router.post(
     `${prefix}/evaluate/stream/jsonl`,
     defineEventHandler(async (event) => {
+      const scope = requestScope(event);
+      let transferred = false;
       try {
-        const body = await readBody(event);
-        const parsed = await resolveStreamParamsWithHook(body, hooks);
+        const body = await awaitWithSignal(() => readBody(event), scope.signal);
+        const parsed = await resolveStreamParamsWithHook(body, hooks, scope);
         if (!parsed.ok) {
           return jsonError(parsed.status, parsed.body);
         }
         const { imageUrl, genre, context, mode } = parsed.data;
 
-        return new Response(
-          new ReadableStream({
-            async start(controller) {
-              const encoder = new TextEncoder();
-              try {
-                for await (const chunk of engine.evaluateStream(imageUrl, { genre, context, mode })) {
-                  controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`));
-                }
-              } catch (err) {
-                controller.enqueue(encoder.encode(formatJSONLError(err)));
-              } finally {
-                controller.close();
-              }
-            },
-          }),
-          {
-            headers: {
-              'Content-Type': 'application/x-ndjson',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-              'X-Accel-Buffering': 'no',
-            },
-          },
+        const response = await sendEvaluationStream(
+          event,
+          engine.evaluateStream(imageUrl, { genre, context, mode, signal: scope.signal }),
+          scope,
+          'jsonl',
         );
+        transferred = true;
+        return response;
       } catch (error) {
+        if (!event.web?.request && event.node.res.destroyed) return;
         const { status, body } = mapErrorToResponse(error);
         return jsonError(status, body);
+      } finally {
+        if (!transferred) scope.dispose();
       }
     }),
   );
@@ -166,16 +167,20 @@ export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions
   router.post(
     `${prefix}/evaluate/group`,
     defineEventHandler(async (event) => {
+      const scope = requestScope(event);
       try {
-        const body = await readBody(event);
-        const result = await handleGroupEvaluate(engine, body, hooks);
+        const body = await awaitWithSignal(() => readBody(event), scope.signal);
+        const result = await handleGroupEvaluate(engine, body, hooks, scope);
         if (!result.ok) {
           return jsonError(result.status, result.body);
         }
         return result.data;
       } catch (error) {
+        if (!event.web?.request && event.node.res.destroyed) return;
         const { status, body } = mapErrorToResponse(error);
         return jsonError(status, body);
+      } finally {
+        scope.dispose();
       }
     }),
   );
@@ -184,45 +189,36 @@ export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions
   router.post(
     `${prefix}/evaluate/group/stream`,
     defineEventHandler(async (event) => {
+      const scope = requestScope(event);
+      let transferred = false;
       try {
-        const body = await readBody(event);
-        const parsed = await resolveGroupStreamParamsWithHook(body, hooks);
+        const body = await awaitWithSignal(() => readBody(event), scope.signal);
+        const parsed = await resolveGroupStreamParamsWithHook(body, hooks, scope);
         if (!parsed.ok) {
           return jsonError(parsed.status, parsed.body);
         }
         const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
 
-        return new Response(
-          new ReadableStream({
-            async start(controller) {
-              const encoder = new TextEncoder();
-              try {
-                for await (const chunk of engine.evaluateGroupStream(imageUrls, mode, {
-                  genre,
-                  context,
-                  includePerImage,
-                  mode: streamMode,
-                })) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-                }
-              } catch (err) {
-                controller.enqueue(encoder.encode(formatSSEError(err)));
-              } finally {
-                controller.close();
-              }
-            },
+        const response = await sendEvaluationStream(
+          event,
+          engine.evaluateGroupStream(imageUrls, mode, {
+            genre,
+            context,
+            includePerImage,
+            mode: streamMode,
+            signal: scope.signal,
           }),
-          {
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-            },
-          },
+          scope,
+          'sse',
         );
+        transferred = true;
+        return response;
       } catch (error) {
+        if (!event.web?.request && event.node.res.destroyed) return;
         const { status, body } = mapErrorToResponse(error);
         return jsonError(status, body);
+      } finally {
+        if (!transferred) scope.dispose();
       }
     }),
   );
@@ -231,46 +227,36 @@ export function createNitroAdapter(engine: VenusEngine, options?: AdapterOptions
   router.post(
     `${prefix}/evaluate/group/stream/jsonl`,
     defineEventHandler(async (event) => {
+      const scope = requestScope(event);
+      let transferred = false;
       try {
-        const body = await readBody(event);
-        const parsed = await resolveGroupStreamParamsWithHook(body, hooks);
+        const body = await awaitWithSignal(() => readBody(event), scope.signal);
+        const parsed = await resolveGroupStreamParamsWithHook(body, hooks, scope);
         if (!parsed.ok) {
           return jsonError(parsed.status, parsed.body);
         }
         const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
 
-        return new Response(
-          new ReadableStream({
-            async start(controller) {
-              const encoder = new TextEncoder();
-              try {
-                for await (const chunk of engine.evaluateGroupStream(imageUrls, mode, {
-                  genre,
-                  context,
-                  includePerImage,
-                  mode: streamMode,
-                })) {
-                  controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`));
-                }
-              } catch (err) {
-                controller.enqueue(encoder.encode(formatJSONLError(err)));
-              } finally {
-                controller.close();
-              }
-            },
+        const response = await sendEvaluationStream(
+          event,
+          engine.evaluateGroupStream(imageUrls, mode, {
+            genre,
+            context,
+            includePerImage,
+            mode: streamMode,
+            signal: scope.signal,
           }),
-          {
-            headers: {
-              'Content-Type': 'application/x-ndjson',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-              'X-Accel-Buffering': 'no',
-            },
-          },
+          scope,
+          'jsonl',
         );
+        transferred = true;
+        return response;
       } catch (error) {
+        if (!event.web?.request && event.node.res.destroyed) return;
         const { status, body } = mapErrorToResponse(error);
         return jsonError(status, body);
+      } finally {
+        if (!transferred) scope.dispose();
       }
     }),
   );

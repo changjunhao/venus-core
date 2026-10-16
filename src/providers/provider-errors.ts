@@ -9,11 +9,13 @@
  * into standardized ProviderError instances.
  */
 
-import { ProviderError } from '../utils/errors.js';
+import { ProviderError, type AbortError } from '../utils/errors.js';
+import { isAbortError, toAbortError } from '../utils/cancellation.js';
 import type { ProviderErrorCode } from '../utils/errors.js';
 
 /** Classify an LLM SDK error into a ProviderError with a fine-grained error code */
-export function classifyProviderError(error: unknown, providerName: string): ProviderError {
+export function classifyProviderError(error: unknown, providerName: string): ProviderError | AbortError {
+  if (isAbortError(error)) return toAbortError(error);
   if (error instanceof ProviderError) return error;
 
   const message = error instanceof Error ? error.message : String(error);

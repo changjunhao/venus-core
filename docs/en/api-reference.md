@@ -10,15 +10,16 @@
 
 Factory function to create an engine instance.
 
-### `engine.evaluate(imageUrl, genre?, context?): Promise<EvaluationResult>`
+### `engine.evaluate(imageUrl, genre?, context?, options?): Promise<EvaluationResult>`
 
 Run a full evaluation. Returns when all rounds complete.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `imageUrl` | `string` | URL of the image to evaluate |
-| `genre` | `Genre` | Optional genre override; auto-detected if omitted |
-| `context` | `EvaluationContext` | Optional context with EXIF data, user notes, and custom metadata |
+| Parameter  | Type                  | Description                                                      |
+| ---------- | --------------------- | ---------------------------------------------------------------- |
+| `imageUrl` | `string`              | URL of the image to evaluate                                     |
+| `genre`    | `Genre`               | Optional genre override; auto-detected if omitted                |
+| `context`  | `EvaluationContext`   | Optional context with EXIF data, user notes, and custom metadata |
+| `options`  | `CancellationOptions` | Optional `{ signal?: AbortSignal }` for end-to-end cancellation  |
 
 Returns `EvaluationResult`:
 
@@ -66,31 +67,34 @@ interface EvaluationResult {
 
 Streaming evaluation that yields events at each stage:
 
-| Event Type | Description |
-|------------|-------------|
-| `evaluation_start` | Evaluation has begun |
-| `genre_detected` | Genre auto-detection result (includes reasoning) |
-| `agent_call` | An agent round is starting |
-| `reasoning_chunk` | Real-time reasoning text (only in `updates` mode) |
-| `result_chunk` | Incremental JSON partial (only in `updates` mode) |
-| `agent_complete` | An agent round has finished (includes result + reasoning) |
-| `evaluation_complete` | Final result available |
-| `error` | An error occurred |
+| Event Type            | Description                                               |
+| --------------------- | --------------------------------------------------------- |
+| `evaluation_start`    | Evaluation has begun                                      |
+| `genre_detected`      | Genre auto-detection result (includes reasoning)          |
+| `agent_call`          | An agent round is starting                                |
+| `reasoning_chunk`     | Real-time reasoning text (only in `updates` mode)         |
+| `result_chunk`        | Incremental JSON partial (only in `updates` mode)         |
+| `agent_complete`      | An agent round has finished (includes result + reasoning) |
+| `evaluation_complete` | Final result available                                    |
+| `error`               | An error occurred                                         |
+
+> Active cancellation does not emit `error` or `evaluation_complete`: `iterator.next()` rejects once with `AbortError`, subsequent reads return `done`. See [End-to-End Cancellation](#end-to-end-cancellation).
 
 `EvaluateStreamOptions`:
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `genre` | `Genre \| null` | — | Pre-specified genre (skips auto-detection) |
-| `context` | `EvaluationContext` | — | Additional evaluation context |
-| `mode` | `'values' \| 'updates'` | `'values'` | Streaming granularity mode |
+| Option    | Type                    | Default    | Description                                             |
+| --------- | ----------------------- | ---------- | ------------------------------------------------------- |
+| `genre`   | `Genre \| null`         | —          | Pre-specified genre (skips auto-detection)              |
+| `context` | `EvaluationContext`     | —          | Additional evaluation context                           |
+| `mode`    | `'values' \| 'updates'` | `'values'` | Streaming granularity mode                              |
+| `signal`  | `AbortSignal`           | —          | Per-request cancellation signal (`CancellationOptions`) |
 
 **Mode comparison:**
 
-| Mode | Behavior |
-|------|----------|
-| `values` | Emits milestone events only: `agent_call`, `agent_complete`, `evaluation_start`, `genre_detected`, `evaluation_complete`, `error` |
-| `updates` | All of `values` plus real-time `reasoning_chunk` and `result_chunk` events for incremental UI updates |
+| Mode      | Behavior                                                                                                                          |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `values`  | Emits milestone events only: `agent_call`, `agent_complete`, `evaluation_start`, `genre_detected`, `evaluation_complete`, `error` |
+| `updates` | All of `values` plus real-time `reasoning_chunk` and `result_chunk` events for incremental UI updates                             |
 
 ## Group Evaluation
 
@@ -98,28 +102,29 @@ Group evaluation runs the same adversarial pipeline (genre detection → Propose
 
 Two modes are available:
 
-| Mode | Meaning | Output focus |
-|------|---------|--------------|
-| `joint` | Evaluate the images as one series/photo essay | Group-level `sceneType`, `totalScore`, genre `dimensions`, plus `groupAnalysis` on narrative and consistency |
-| `compare` | Compare the images against each other | Full `ranking` (rank + score + rationale per image) plus `comparisonSummary` |
+| Mode      | Meaning                                       | Output focus                                                                                                 |
+| --------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `joint`   | Evaluate the images as one series/photo essay | Group-level `sceneType`, `totalScore`, genre `dimensions`, plus `groupAnalysis` on narrative and consistency |
+| `compare` | Compare the images against each other         | Full `ranking` (rank + score + rationale per image) plus `comparisonSummary`                                 |
 
 ### `engine.evaluateGroup(imageUrls, mode, options?): Promise<GroupEvaluationResult>`
 
 Run a full group evaluation. Returns when all rounds complete.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `imageUrls` | `string[]` | URLs of the images to evaluate — **2 to 10 entries**; outside that range throws `ValidationError` |
-| `mode` | `'joint' \| 'compare'` | Group evaluation mode |
-| `options` | `GroupEvaluateOptions` | Optional settings (see below) |
+| Parameter   | Type                   | Description                                                                                       |
+| ----------- | ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `imageUrls` | `string[]`             | URLs of the images to evaluate — **2 to 10 entries**; outside that range throws `ValidationError` |
+| `mode`      | `'joint' \| 'compare'` | Group evaluation mode                                                                             |
+| `options`   | `GroupEvaluateOptions` | Optional settings (see below)                                                                     |
 
 `GroupEvaluateOptions`:
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `genre` | `Genre \| null` | — | Pre-specified genre for the whole group (skips auto-detection) |
-| `context` | `EvaluationContext` | — | Additional evaluation context (EXIF data, user notes, custom metadata) |
-| `includePerImage` | `boolean` | `false` | Whether to also request per-image details (`perImage`) |
+| Option            | Type                | Default | Description                                                            |
+| ----------------- | ------------------- | ------- | ---------------------------------------------------------------------- |
+| `genre`           | `Genre \| null`     | —       | Pre-specified genre for the whole group (skips auto-detection)         |
+| `context`         | `EvaluationContext` | —       | Additional evaluation context (EXIF data, user notes, custom metadata) |
+| `includePerImage` | `boolean`           | `false` | Whether to also request per-image details (`perImage`)                 |
+| `signal`          | `AbortSignal`       | —       | Per-request cancellation signal (`CancellationOptions`)                |
 
 **`includePerImage` and token cost**: the flag is enforced at **both the prompt and the JSON Schema layer**. When it is `false` (the default) the prompts do not ask for per-image output and the schema has no `per_image` field, so the model never generates those tokens — the saving is real, not a post-hoc filter. When it is `true` the schema adds a `per_image` array whose length must equal the image count, and each entry carries `index` / `score` / `comment`.
 
@@ -138,7 +143,7 @@ interface GroupJointEvaluationResult {
   critique: string;
   suggestions: Suggestions;
   arbitrationNotes: ArbitrationNotes;
-  perImage?: PerImageDetail[];        // only when includePerImage: true
+  perImage?: PerImageDetail[]; // only when includePerImage: true
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
     proposal: AgentCallResult<GroupJointProposerResult>;
@@ -158,8 +163,8 @@ interface GroupCompareEvaluationResult {
   comparisonSummary: string;
   suggestions: Suggestions;
   arbitrationNotes: ArbitrationNotes;
-  perImage?: PerImageDetail[];        // only when includePerImage: true
-  process: { /* same shape, with GroupCompare* result types */ };
+  perImage?: PerImageDetail[]; // only when includePerImage: true
+  process: {/* same shape, with GroupCompare* result types */};
   metadata: GroupEvaluationMetadata;
 }
 
@@ -173,7 +178,7 @@ interface GroupEvaluationMetadata {
 }
 
 interface PerImageDetail {
-  index: number;    // position in the input imageUrls array (0-based)
+  index: number; // position in the input imageUrls array (0-based)
   score: number;
   comment: string;
 }
@@ -185,23 +190,23 @@ interface PerImageDetail {
 
 Streaming group evaluation. `GroupEvaluateStreamOptions` extends `GroupEvaluateOptions` with the streaming granularity:
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `genre` | `Genre \| null` | — | Pre-specified genre (skips auto-detection) |
-| `context` | `EvaluationContext` | — | Additional evaluation context |
-| `includePerImage` | `boolean` | `false` | Whether to request per-image details |
-| `mode` | `'values' \| 'updates'` | `'values'` | Streaming granularity mode (the group mode is the positional second argument, so the two never collide) |
+| Option            | Type                    | Default    | Description                                                                                             |
+| ----------------- | ----------------------- | ---------- | ------------------------------------------------------------------------------------------------------- |
+| `genre`           | `Genre \| null`         | —          | Pre-specified genre (skips auto-detection)                                                              |
+| `context`         | `EvaluationContext`     | —          | Additional evaluation context                                                                           |
+| `includePerImage` | `boolean`               | `false`    | Whether to request per-image details                                                                    |
+| `mode`            | `'values' \| 'updates'` | `'values'` | Streaming granularity mode (the group mode is the positional second argument, so the two never collide) |
 
-| Event Type | Description |
-|------------|-------------|
-| `group_evaluation_start` | Group evaluation has begun (`{ imageUrls, mode, genre }`) |
-| `genre_detected` | Genre auto-detection result for the whole group |
-| `agent_call` | An agent round is starting |
-| `reasoning_chunk` | Real-time reasoning text (only in `updates` mode) |
-| `result_chunk` | Incremental JSON partial (only in `updates` mode) |
-| `agent_complete` | An agent round has finished (includes result + reasoning) |
-| `group_evaluation_complete` | Final `GroupEvaluationResult` available |
-| `error` | An error occurred (also used for out-of-range image counts) |
+| Event Type                  | Description                                                 |
+| --------------------------- | ----------------------------------------------------------- |
+| `group_evaluation_start`    | Group evaluation has begun (`{ imageUrls, mode, genre }`)   |
+| `genre_detected`            | Genre auto-detection result for the whole group             |
+| `agent_call`                | An agent round is starting                                  |
+| `reasoning_chunk`           | Real-time reasoning text (only in `updates` mode)           |
+| `result_chunk`              | Incremental JSON partial (only in `updates` mode)           |
+| `agent_complete`            | An agent round has finished (includes result + reasoning)   |
+| `group_evaluation_complete` | Final `GroupEvaluationResult` available                     |
+| `error`                     | An error occurred (also used for out-of-range image counts) |
 
 Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Failures — including an image count outside 2–10 — are reported as a final `error` event instead of a thrown exception.
 
@@ -243,11 +248,11 @@ Returns `{ proposalSchema, critiqueSchema, arbiterSchema }` — Zod schemas for 
 
 Returns `{ proposalSchema, arbiterSchema }` — Zod schemas for `joint` group evaluation. The Critic round reuses the shared `critiqueSchema` from `getSchemas()`, so it is not part of the returned set.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `genre` | `Genre` | Genre driving the scene subtype enum and scoring dimensions |
-| `includePerImage` | `boolean` | When `true`, the schema gains a `per_image` array; when `false` the field is absent entirely |
-| `imageCount` | `number` | Number of images in the group — fixes the `per_image` array length and the valid `index` range |
+| Parameter         | Type      | Description                                                                                    |
+| ----------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `genre`           | `Genre`   | Genre driving the scene subtype enum and scoring dimensions                                    |
+| `includePerImage` | `boolean` | When `true`, the schema gains a `per_image` array; when `false` the field is absent entirely   |
+| `imageCount`      | `number`  | Number of images in the group — fixes the `per_image` array length and the valid `index` range |
 
 ```ts
 import { getGroupJointSchemas } from '@theogony/venus-core';
@@ -272,10 +277,10 @@ proposalSchema.parse({
 
 Returns `{ proposalSchema, arbiterSchema }` — Zod schemas for `compare` group evaluation. Note the **argument order differs from the joint variant**: `compare` output is genre-independent, so there is no `genre` parameter.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `imageCount` | `number` | Number of images in the group — fixes the `ranking` (and `per_image`) array length |
-| `includePerImage` | `boolean` | When `true`, the schema gains a `per_image` array |
+| Parameter         | Type      | Description                                                                        |
+| ----------------- | --------- | ---------------------------------------------------------------------------------- |
+| `imageCount`      | `number`  | Number of images in the group — fixes the `ranking` (and `per_image`) array length |
+| `includePerImage` | `boolean` | When `true`, the schema gains a `per_image` array                                  |
 
 ```ts
 import { getGroupCompareSchemas } from '@theogony/venus-core';
@@ -296,14 +301,14 @@ Both factories cache their result per parameter combination, so repeated calls w
 
 Validation rules enforced by both:
 
-| Rule | Applies to |
-|------|-----------|
-| Array length must equal `imageCount` | `ranking`, `per_image` |
-| `index` must be an integer in `0..imageCount - 1`, unique across entries | `ranking`, `per_image` |
-| `rank` must be an integer forming a permutation of `1..imageCount` without duplicates | `ranking` |
-| Text fields (`rationale`, `comment`, `comparison_summary`, `group_analysis`, `critique`) must be non-empty | both modes |
-| `suggestions` must be an array of 1–8 non-empty single-line strings | both modes |
-| `arbitration_notes` must contain a scene ruling, decision array, and final rationale | arbiter schemas |
+| Rule                                                                                                       | Applies to             |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Array length must equal `imageCount`                                                                       | `ranking`, `per_image` |
+| `index` must be an integer in `0..imageCount - 1`, unique across entries                                   | `ranking`, `per_image` |
+| `rank` must be an integer forming a permutation of `1..imageCount` without duplicates                      | `ranking`              |
+| Text fields (`rationale`, `comment`, `comparison_summary`, `group_analysis`, `critique`) must be non-empty | both modes             |
+| `suggestions` must be an array of 1–8 non-empty single-line strings                                        | both modes             |
+| `arbitration_notes` must contain a scene ruling, decision array, and final rationale                       | arbiter schemas        |
 
 ### `getProposerResultSchema(genre: Genre)`
 
@@ -330,12 +335,12 @@ Returns full configuration for a genre including labels, dimensions, and subtype
 import { getGenreConfig } from '@theogony/venus-core';
 
 const cfg = getGenreConfig('portrait');
-console.log(cfg.label);             // '人像摄影'
-console.log(cfg.dimensions);        // ['facial_expression', 'pose_body', ...]
-console.log(cfg.dimensionLabels);   // ['神态', '姿态', ...]
-console.log(cfg.subtypes);          // ['studio', 'environmental', 'wedding']
-console.log(cfg.dimensionNames);    // { facial_expression: '面部神态', ... }
-console.log(cfg.subtypeNames);      // { studio: '棚拍/写真', ... }
+console.log(cfg.label); // '人像摄影'
+console.log(cfg.dimensions); // ['facial_expression', 'pose_body', ...]
+console.log(cfg.dimensionLabels); // ['神态', '姿态', ...]
+console.log(cfg.subtypes); // ['studio', 'environmental', 'wedding']
+console.log(cfg.dimensionNames); // { facial_expression: '面部神态', ... }
+console.log(cfg.subtypeNames); // { studio: '棚拍/写真', ... }
 ```
 
 ### `getMetadata(): Record<string, GenreMetadata>`
@@ -368,19 +373,19 @@ const provider = createOpenAIChatProvider({
   defaultModel: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
   timeout: 120_000,
   headers: { 'Custom-Header': 'value' },
-  defaultExtra: { /* vendor-specific params */ },
+  defaultExtra: {/* vendor-specific params */},
 });
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `baseURL` | `string` | *required* | OpenAI-compatible API base URL |
-| `apiKey` | `string` | *required* | API key |
-| `defaultModel` | `string` | — | Default model identifier |
-| `headers` | `Record<string, string>` | — | Extra HTTP headers |
-| `timeout` | `number` | 60000 | Request timeout in milliseconds |
-| `defaultExtra` | `Record<string, unknown>` | — | Vendor-specific extra parameters |
-| `includeUsage` | `boolean` | `true` | Whether to request token usage in streaming mode via `stream_options.include_usage`. Set to `false` for endpoints that do not support this parameter. |
+| Option         | Type                      | Default    | Description                                                                                                                                           |
+| -------------- | ------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseURL`      | `string`                  | _required_ | OpenAI-compatible API base URL                                                                                                                        |
+| `apiKey`       | `string`                  | _required_ | API key                                                                                                                                               |
+| `defaultModel` | `string`                  | —          | Default model identifier                                                                                                                              |
+| `headers`      | `Record<string, string>`  | —          | Extra HTTP headers                                                                                                                                    |
+| `timeout`      | `number`                  | 60000      | Request timeout in milliseconds                                                                                                                       |
+| `defaultExtra` | `Record<string, unknown>` | —          | Vendor-specific extra parameters                                                                                                                      |
+| `includeUsage` | `boolean`                 | `true`     | Whether to request token usage in streaming mode via `stream_options.include_usage`. Set to `false` for endpoints that do not support this parameter. |
 
 > **Note on structured output**: this provider declares `structuredOutput: 'json_object'`. Any
 > `response_format` of type `json_schema` passed to it is **downgraded to `json_object`**
@@ -403,15 +408,15 @@ const provider = createOpenAIResponsesProvider({
 });
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `baseURL` | `string` | *required* | OpenAI API base URL |
-| `apiKey` | `string` | *required* | API key |
-| `defaultModel` | `string` | — | Default model identifier |
-| `headers` | `Record<string, string>` | — | Extra HTTP headers |
-| `timeout` | `number` | 60000 | Request timeout in milliseconds |
-| `defaultExtra` | `Record<string, unknown>` | — | Provider-specific default extra parameters |
-| `includeUsage` | `boolean` | `true` | Whether to request token usage in streaming mode |
+| Option         | Type                      | Default    | Description                                      |
+| -------------- | ------------------------- | ---------- | ------------------------------------------------ |
+| `baseURL`      | `string`                  | _required_ | OpenAI API base URL                              |
+| `apiKey`       | `string`                  | _required_ | API key                                          |
+| `defaultModel` | `string`                  | —          | Default model identifier                         |
+| `headers`      | `Record<string, string>`  | —          | Extra HTTP headers                               |
+| `timeout`      | `number`                  | 60000      | Request timeout in milliseconds                  |
+| `defaultExtra` | `Record<string, unknown>` | —          | Provider-specific default extra parameters       |
+| `includeUsage` | `boolean`                 | `true`     | Whether to request token usage in streaming mode |
 
 ### `createAnthropicProvider(options: AnthropicProviderOptions): LLMProvider`
 
@@ -428,15 +433,15 @@ const provider = createAnthropicProvider({
 });
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `apiKey` | `string` | *required* | Anthropic API key |
-| `defaultModel` | `string` | — | Default model identifier |
-| `baseURL` | `string` | `https://api.anthropic.com` | API base URL override |
-| `timeout` | `number` | 60000 | Request timeout in milliseconds |
-| `headers` | `Record<string, string>` | — | Extra HTTP headers |
-| `defaultExtra` | `Record<string, unknown>` | — | Provider-specific default extra parameters |
-| `defaultMaxTokens` | `number` | 4096 | Default `max_tokens` when not supplied via `extra.max_tokens` |
+| Option             | Type                      | Default                     | Description                                                   |
+| ------------------ | ------------------------- | --------------------------- | ------------------------------------------------------------- |
+| `apiKey`           | `string`                  | _required_                  | Anthropic API key                                             |
+| `defaultModel`     | `string`                  | —                           | Default model identifier                                      |
+| `baseURL`          | `string`                  | `https://api.anthropic.com` | API base URL override                                         |
+| `timeout`          | `number`                  | 60000                       | Request timeout in milliseconds                               |
+| `headers`          | `Record<string, string>`  | —                           | Extra HTTP headers                                            |
+| `defaultExtra`     | `Record<string, unknown>` | —                           | Provider-specific default extra parameters                    |
+| `defaultMaxTokens` | `number`                  | 4096                        | Default `max_tokens` when not supplied via `extra.max_tokens` |
 
 ### `createGeminiProvider(options: GeminiProviderOptions): LLMProvider`
 
@@ -453,34 +458,34 @@ const provider = createGeminiProvider({
 });
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `apiKey` | `string` | *required* | Gemini API key |
-| `defaultModel` | `string` | — | Default model identifier |
-| `baseURL` | `string` | `https://generativelanguage.googleapis.com` | API base URL override |
-| `timeout` | `number` | 60000 | Request timeout in milliseconds |
-| `headers` | `Record<string, string>` | — | Extra HTTP headers |
-| `defaultExtra` | `Record<string, unknown>` | — | Provider-specific default extra parameters |
+| Option         | Type                      | Default                                     | Description                                |
+| -------------- | ------------------------- | ------------------------------------------- | ------------------------------------------ |
+| `apiKey`       | `string`                  | _required_                                  | Gemini API key                             |
+| `defaultModel` | `string`                  | —                                           | Default model identifier                   |
+| `baseURL`      | `string`                  | `https://generativelanguage.googleapis.com` | API base URL override                      |
+| `timeout`      | `number`                  | 60000                                       | Request timeout in milliseconds            |
+| `headers`      | `Record<string, string>`  | —                                           | Extra HTTP headers                         |
+| `defaultExtra` | `Record<string, unknown>` | —                                           | Provider-specific default extra parameters |
 
 ### `defineProvider(options: DefineProviderOptions): LLMProvider`
 
 Create a fully custom provider by implementing the `chat()` method directly.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `name` | `string` | *required* | Provider name for logging |
-| `capabilities` | `ProviderCapabilities` | — | Provider capability flags |
-| `chat` | `(params: ChatParams) => Promise<ChatResponse>` | *required* | Chat completion implementation |
-| `chatStream` | `(params: ChatParams) => AsyncIterable<StreamChunk>` | — | Optional streaming implementation |
+| Option         | Type                                                 | Default    | Description                       |
+| -------------- | ---------------------------------------------------- | ---------- | --------------------------------- |
+| `name`         | `string`                                             | _required_ | Provider name for logging         |
+| `capabilities` | `ProviderCapabilities`                               | —          | Provider capability flags         |
+| `chat`         | `(params: ChatParams) => Promise<ChatResponse>`      | _required_ | Chat completion implementation    |
+| `chatStream`   | `(params: ChatParams) => AsyncIterable<StreamChunk>` | —          | Optional streaming implementation |
 
 `ProviderCapabilities`:
 
 ```ts
 interface ProviderCapabilities {
-  reasoning: boolean;       // Supports reasoning/thinking mode
+  reasoning: boolean; // Supports reasoning/thinking mode
   reasoningBudget: boolean; // Supports explicit token budget
-  vision: boolean;          // Supports image inputs
-  streaming: boolean;       // Supports streaming
+  vision: boolean; // Supports image inputs
+  streaming: boolean; // Supports streaming
   structuredOutput?: 'json_object' | 'json_schema'; // Structured output support (see below)
 }
 ```
@@ -489,10 +494,10 @@ interface ProviderCapabilities {
 
 The `structuredOutput` capability controls how agents request and validate JSON output:
 
-| Value | Agent behavior |
-|-------|----------------|
-| `'json_object'` or omitted | Requests `response_format: { type: 'json_object' }`. The agent parses JSON, validates it against the Zod schema, and retries up to `maxRetries` times with repair prompts. Failure after all attempts throws `SchemaError`. |
-| `'json_schema'` | The agent builds a strict JSON Schema from the Zod schema and sends `response_format: { type: 'json_schema', ... }` in a **single call — no retries and no local Zod validation** (`maxRetries` does not apply). Schema compliance is trusted to the provider/API. If the response is not valid JSON, a `ProviderError` with `errorCode: 'parse_error'` is thrown immediately. |
+| Value                      | Agent behavior                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `'json_object'` or omitted | Requests `response_format: { type: 'json_object' }`. The agent parses JSON, validates it against the Zod schema, and retries up to `maxRetries` times with repair prompts. Failure after all attempts throws `SchemaError`.                                                                                                                                                    |
+| `'json_schema'`            | The agent builds a strict JSON Schema from the Zod schema and sends `response_format: { type: 'json_schema', ... }` in a **single call — no retries and no local Zod validation** (`maxRetries` does not apply). Schema compliance is trusted to the provider/API. If the response is not valid JSON, a `ProviderError` with `errorCode: 'parse_error'` is thrown immediately. |
 
 > **Warning**: only declare `structuredOutput: 'json_schema'` on a custom provider if the
 > underlying API actually guarantees schema-compliant output (e.g. OpenAI Responses API).
@@ -500,12 +505,12 @@ The `structuredOutput` capability controls how agents request and validate JSON 
 
 Built-in provider support:
 
-| Provider | `structuredOutput` | Notes |
-|----------|--------------------|-------|
-| `createOpenAIChatProvider` | `'json_object'` | `json_schema` response_format is downgraded to `json_object` with a warning |
-| `createOpenAIResponsesProvider` | `'json_schema'` | Strict schema via `text.format`; the Xiaomi MiMo endpoint declares `'json_object'` (its `text.format` has no json_schema enforcement) |
-| `createAnthropicProvider` | `'json_schema'` | Strict schema enforced server-side via `output_config.format`; on DashScope-compatible endpoints, unsupported schema keywords (e.g. `multipleOf`) are stripped client-side |
-| `createGeminiProvider` | `'json_schema'` | Strict schema via `response_format` (Interactions API) |
+| Provider                        | `structuredOutput` | Notes                                                                                                                                                                      |
+| ------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createOpenAIChatProvider`      | `'json_object'`    | `json_schema` response_format is downgraded to `json_object` with a warning                                                                                                |
+| `createOpenAIResponsesProvider` | `'json_schema'`    | Strict schema via `text.format`; the Xiaomi MiMo endpoint declares `'json_object'` (its `text.format` has no json_schema enforcement)                                      |
+| `createAnthropicProvider`       | `'json_schema'`    | Strict schema enforced server-side via `output_config.format`; on DashScope-compatible endpoints, unsupported schema keywords (e.g. `multipleOf`) are stripped client-side |
+| `createGeminiProvider`          | `'json_schema'`    | Strict schema via `response_format` (Interactions API)                                                                                                                     |
 
 #### Streaming JSON partials (`StreamChunk.partial`)
 
@@ -539,7 +544,7 @@ const myProvider = defineProvider({
       body: JSON.stringify({
         model: params.model,
         messages: params.messages,
-        reasoning: params.reasoning,  // Access reasoning params
+        reasoning: params.reasoning, // Access reasoning params
       }),
     });
     const data = await res.json();
@@ -567,15 +572,17 @@ const engine = createVenusEngine({
 
 All errors extend `VenusError` with a `code` property:
 
-| Error Class | Code | Description |
-|-------------|------|-------------|
-| `VenusError` | `VENUS_ERROR` | Base error class |
-| `ValidationError` | `VALIDATION_ERROR` | Invalid input (bad URL, unknown genre) |
-| `ProviderError` | `PROVIDER_ERROR` | LLM provider failure |
-| `SchemaError` | `SCHEMA_ERROR` | Agent output failed schema validation |
-| `TimeoutError` | `TIMEOUT_ERROR` | Evaluation timed out |
+| Error Class       | Code               | Description                                                                                     |
+| ----------------- | ------------------ | ----------------------------------------------------------------------------------------------- |
+| `VenusError`      | `VENUS_ERROR`      | Base error class                                                                                |
+| `ValidationError` | `VALIDATION_ERROR` | Invalid input (bad URL, unknown genre)                                                          |
+| `ProviderError`   | `PROVIDER_ERROR`   | LLM provider failure                                                                            |
+| `SchemaError`     | `SCHEMA_ERROR`     | Agent output failed schema validation                                                           |
+| `TimeoutError`    | `TIMEOUT_ERROR`    | Evaluation timed out                                                                            |
+| `AbortError`      | `ABORTED`          | End-to-end cancellation (`AbortSignal` abort, iterator early return, or HTTP client disconnect) |
 
 `ProviderError` includes additional fields for fine-grained diagnosis:
+
 - `provider: string` — Name of the failing provider
 - `errorCode: ProviderErrorCode` — One of `'network' | 'api_error' | 'parse_error' | 'timeout' | 'auth_error' | 'unknown'`
 - `statusCode?: number` — HTTP status code if applicable
@@ -599,6 +606,54 @@ try {
   }
 }
 ```
+
+## End-to-End Cancellation
+
+All four Engine entry points (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`) accept `CancellationOptions = { signal?: AbortSignal }`, and the Adapters automatically attach HTTP-client cancellation (`AbortSignal` or `reader.cancel()` on Express/Hono/Nitro) to the same scope.
+
+```ts
+import { AbortError, isAbortError } from '@theogony/venus-core';
+
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5_000);
+
+// Non-streaming
+try {
+  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
+} catch (err) {
+  if (isAbortError(err)) {
+    // Cancelled: no new rounds, no retry, no synthesised result
+  }
+}
+
+// Streaming: an active signal abort makes iterator.next() throw once
+try {
+  for await (const event of engine.evaluateStream(imageUrl, { signal: controller.signal })) {
+    // …
+  }
+} catch (err) {
+  if (err instanceof AbortError) {
+    // Previously emitted events are kept; missing agent_complete / evaluation_complete is expected
+  }
+}
+```
+
+Behaviour matrix:
+
+| Scenario                    | Result                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Non-streaming active abort  | `Promise` rejects with `AbortError`                                                                           |
+| Streaming signal abort      | `next()` rejects once with `AbortError`; no `error` or synthetic completion events emitted                    |
+| Consumer `break` / `return` | Underlying request is aborted synchronously; a pending `next()` may reject with `AbortError`                  |
+| Pre-aborted signal          | Hook, Agent, and Provider are not invoked; non-streaming rejects immediately, stream rejects on first consume |
+| HTTP client disconnect      | Server cleans up silently; uncommitted non-streaming responses return `499 ABORTED`                           |
+| Abort after terminal commit | Committed result is unchanged; concurrent requests unaffected                                                 |
+
+`onEvent` additionally receives `{ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } }` at most once per scope; cancellation does not emit the `error` observation event.
+
+Built-in Providers (OpenAI Chat / OpenAI Responses / Anthropic / Gemini) pass `signal` down to the SDK, which aborts pending fetches and response-body reads. In-flight local network operations are aborted; whether the vendor's server-side task also halts or stops billing is outside SDK guarantees. Custom Providers and `beforeEvaluate` hooks must consume `options.signal` to be interrupted promptly; uncooperative external I/O is only guaranteed to stop further scheduling and drop late-arriving results.
+
+> The Gemini Provider now owns the SDK's connection retry: passing `signal` still honours `options.timeout` (default 60s) and uses a cancellable exponential backoff (initial attempt + up to 4 HTTP-status retries covering 408/409/429/5xx). The Agent-level `maxRetries` semantic (schema self-repair) is unchanged.
 
 ## Type Exports
 
@@ -633,7 +688,7 @@ import type {
   GroupJointArbitrationResult,
   GroupCompareArbitrationResult,
   PerImageDetail,
-  
+
   // Provider types
   LLMProvider,
   ProviderCapabilities,
@@ -652,7 +707,7 @@ import type {
   AnthropicProviderOptions,
   GeminiProviderOptions,
   DefineProviderOptions,
-  
+
   // Engine & Agent types
   VenusEngineConfig,
   AgentRole,
@@ -660,14 +715,14 @@ import type {
   AgentCallResult,
   ModelConfig,
   ProviderConfig,
-  
+
   // Result types
   ProposerResult,
   ArbitrationResult,
   CritiqueResult,
   CritiqueChallenge,
   SceneTypeReview,
-  
+
   // Error types
   ProviderErrorCode,
   VenusError,
@@ -675,7 +730,7 @@ import type {
   ProviderError,
   SchemaError,
   TimeoutError,
-  
+
   // Adapter types
   AdapterOptions,
   AdapterHooks,

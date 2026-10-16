@@ -4,6 +4,7 @@
 import type {
   AgentCallResult,
   AgentConfig,
+  CancellationOptions,
   ArbitrationResult,
   CritiqueResult,
   EvaluationContext,
@@ -71,6 +72,7 @@ export class ArbiterAgent extends BaseAgent {
     revisionReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<ArbitrationResult>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareDecide(
       genre,
@@ -81,7 +83,7 @@ export class ArbiterAgent extends BaseAgent {
       revisionReasoning,
       context,
     );
-    return await this.call(systemPrompt, userPrompt, imageUrl, schema);
+    return await this.call(systemPrompt, userPrompt, imageUrl, schema, options);
   }
 
   /** 仲裁提案者和批判者的争议（流式） */
@@ -95,6 +97,7 @@ export class ArbiterAgent extends BaseAgent {
     revisionReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<ArbitrationResult>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareDecide(
       genre,
@@ -105,7 +108,7 @@ export class ArbiterAgent extends BaseAgent {
       revisionReasoning,
       context,
     );
-    return this.callStream<ArbitrationResult>(systemPrompt, userPrompt, imageUrl, schema);
+    return this.callStream<ArbitrationResult>(systemPrompt, userPrompt, imageUrl, schema, options);
   }
 
   /** 组装 decideGroup 调用参数 */
@@ -156,6 +159,7 @@ export class ArbiterAgent extends BaseAgent {
     genre: Genre,
     includePerImage: boolean,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<GroupArbitrationOutput>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupDecide(
       mode,
@@ -170,7 +174,7 @@ export class ArbiterAgent extends BaseAgent {
       revisionReasoning,
       context,
     );
-    return await this.call<GroupArbitrationOutput>(systemPrompt, userPrompt, imageUrls, schema);
+    return await this.call<GroupArbitrationOutput>(systemPrompt, userPrompt, imageUrls, schema, options);
   }
 
   /** 仲裁组图评估中提案者和批判者的争议（流式） */
@@ -186,6 +190,7 @@ export class ArbiterAgent extends BaseAgent {
     genre: Genre,
     includePerImage: boolean,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<GroupArbitrationOutput>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupDecide(
       mode,
@@ -200,6 +205,6 @@ export class ArbiterAgent extends BaseAgent {
       revisionReasoning,
       context,
     );
-    return this.callStream<GroupArbitrationOutput>(systemPrompt, userPrompt, imageUrls, schema);
+    return this.callStream<GroupArbitrationOutput>(systemPrompt, userPrompt, imageUrls, schema, options);
   }
 }

@@ -109,8 +109,13 @@ export interface ChatMessage {
   content: string | ChatContentPart[];
 }
 
+/** 请求级取消选项，不属于业务数据或实例配置。 */
+export interface CancellationOptions {
+  readonly signal?: AbortSignal;
+}
+
 /** Parameters for an LLM chat call */
-export interface ChatParams {
+export interface ChatParams extends CancellationOptions {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
@@ -164,7 +169,7 @@ export interface StreamChunk {
 }
 
 /** Options for evaluateStream */
-export interface EvaluateStreamOptions {
+export interface EvaluateStreamOptions extends CancellationOptions {
   /** Pre-specified genre (skips auto-detection) */
   genre?: Genre | null;
   /** Additional evaluation context (EXIF data, etc.) */
@@ -195,7 +200,7 @@ export interface AgentCallResult<T = unknown> {
 }
 
 /** Agent call configuration override */
-export interface CallConfig {
+export interface CallConfig extends CancellationOptions {
   model?: string;
   reasoning?: ChatReasoningParams;
   temperature?: number;
@@ -285,7 +290,7 @@ export type ProviderConfig = Partial<Record<AgentRole, LLMProvider>>;
 
 /** Event emitted during evaluation */
 export interface EvaluationEvent {
-  type: 'round_start' | 'round_complete' | 'agent_call' | 'agent_complete' | 'error';
+  type: 'round_start' | 'round_complete' | 'agent_call' | 'agent_complete' | 'error' | 'cancelled';
   round?: number;
   agent?: string;
   data?: unknown;
@@ -334,13 +339,16 @@ export interface AdapterHooks {
    * Use cases: upload image to provider file API, inject EXIF context,
    * override genre, switch streaming granularity, etc.
    */
-  beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+  beforeEvaluate?: (params: EvaluateParams, context?: CancellationOptions) => Promise<EvaluateParams> | EvaluateParams;
 
   /**
    * Called before a group evaluation starts (both sync and stream endpoints).
    * Receives the validated group request params, can transform and return modified params.
    */
-  beforeEvaluateGroup?: (params: GroupEvaluateParams) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
+  beforeEvaluateGroup?: (
+    params: GroupEvaluateParams,
+    context?: CancellationOptions,
+  ) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
 }
 
 /** Options for creating an adapter */
@@ -388,7 +396,7 @@ export type EvaluationStreamEvent =
 export type GroupEvaluationMode = 'joint' | 'compare';
 
 /** Options for evaluateGroup */
-export interface GroupEvaluateOptions {
+export interface GroupEvaluateOptions extends CancellationOptions {
   /** Pre-specified genre (skips auto-detection) */
   genre?: Genre | null;
   /** Additional evaluation context (EXIF data, etc.) */

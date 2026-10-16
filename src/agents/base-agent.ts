@@ -13,6 +13,8 @@ import type {
 } from '../types.js';
 import { z, toJSONSchema, type ZodType } from 'zod';
 import { ProviderError, SchemaError } from '../utils/errors.js';
+import { awaitWithSignal, rethrowAbort, throwIfAborted } from '../utils/cancellation.js';
+import { abortableChunks, cancellableStream } from '../utils/cancellable-stream.js';
 import { createLogger } from '../utils/logger.js';
 
 /**
@@ -144,6 +146,8 @@ export class BaseAgent {
     schema: ZodType,
     callConfig?: CallConfig,
   ): Promise<AgentCallResult<T>> {
+    const signal = callConfig?.signal;
+    throwIfAborted(signal);
     const provider = callConfig?.provider ?? this.provider;
     const reasoningParams = callConfig?.reasoning ?? this.config.reasoning;
     const responseFormat = this.#buildResponseFormat(schema, provider);
@@ -158,13 +162,19 @@ export class BaseAgent {
         `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, mode=json_schema`,
       );
 
-      const response = await provider.chat({
-        model: callConfig?.model ?? this.config.model,
-        messages: requestMessages,
-        temperature: this.config.temperature ?? 0.3,
-        response_format: responseFormat,
-        reasoning: reasoningParams,
-      });
+      const response = await awaitWithSignal(
+        () =>
+          provider.chat({
+            model: callConfig?.model ?? this.config.model,
+            messages: requestMessages,
+            temperature: this.config.temperature ?? 0.3,
+            response_format: responseFormat,
+            reasoning: reasoningParams,
+            signal,
+          }),
+        signal,
+      );
+      throwIfAborted(signal);
 
       // Provider-side strict mode is not a substitute for local runtime validation:
       // capabilities differ and some providers omit JSON Schema constraints.
@@ -179,6 +189,7 @@ export class BaseAgent {
     const history: ChatMessage[] = [];
 
     for (let attempt = 0; attempt < this.#maxRetries; attempt++) {
+      throwIfAborted(signal);
       try {
         const requestMessages = this.#buildMessages(systemPrompt, userPrompt, imageUrl, history);
 
@@ -187,17 +198,24 @@ export class BaseAgent {
           `Calling provider: role=${this.name}, model=${callConfig?.model ?? this.config.model}, reasoning=${this.#formatReasoningLog(reasoningParams)}, attempt=${attempt + 1}/${this.#maxRetries}`,
         );
 
-        const response = await provider.chat({
-          model: callConfig?.model ?? this.config.model,
-          messages: requestMessages,
-          temperature: this.config.temperature ?? 0.3,
-          response_format: responseFormat,
-          reasoning: reasoningParams,
-        });
+        const response = await awaitWithSignal(
+          () =>
+            provider.chat({
+              model: callConfig?.model ?? this.config.model,
+              messages: requestMessages,
+              temperature: this.config.temperature ?? 0.3,
+              response_format: responseFormat,
+              reasoning: reasoningParams,
+              signal,
+            }),
+          signal,
+        );
+        throwIfAborted(signal);
 
         reasoning = response.reasoning ?? null;
         return this.#parseResponse<T>(response.content, schema, reasoning, provider.name);
       } catch (error) {
+        rethrowAbort(error, signal);
         lastError = error as Error;
         this.logger.warn(`第 ${attempt + 1} 次尝试失败: ${lastError.message}${reasoning ? ' (有推理链)' : ''}`);
 
@@ -217,13 +235,28 @@ export class BaseAgent {
    * @param imageUrl - 单张图片的 URL，或多张图片的 URL 数组（按顺序注入）
    * @returns AsyncGenerator yielding StreamChunk, returning AgentCallResult<T>
    */
-  async *callStream<T = unknown>(
+  callStream<T = unknown>(
     systemPrompt: string,
     userPrompt: string,
     imageUrl: string | string[],
     schema: ZodType,
     callConfig?: CallConfig,
   ): AsyncGenerator<StreamChunk, AgentCallResult<T>, unknown> {
+    return cancellableStream(
+      (signal) => this.#callStream<T>(systemPrompt, userPrompt, imageUrl, schema, { ...callConfig, signal }),
+      callConfig?.signal,
+    );
+  }
+
+  async *#callStream<T>(
+    systemPrompt: string,
+    userPrompt: string,
+    imageUrl: string | string[],
+    schema: ZodType,
+    callConfig: CallConfig & { signal: AbortSignal },
+  ): AsyncGenerator<StreamChunk, AgentCallResult<T>, unknown> {
+    const signal = callConfig.signal;
+    throwIfAborted(signal);
     const provider = callConfig?.provider ?? this.provider;
 
     // 降级：provider 不支持流式，回退到非流式 call()
@@ -247,18 +280,23 @@ export class BaseAgent {
       let reasoning = '';
       let finalContent = '';
 
-      for await (const chunk of provider.chatStream({
-        model: callConfig?.model ?? this.config.model,
-        messages: requestMessages,
-        temperature: this.config.temperature ?? 0.3,
-        response_format: responseFormat,
-        reasoning: reasoningParams,
-      })) {
+      for await (const chunk of abortableChunks(
+        provider.chatStream({
+          model: callConfig?.model ?? this.config.model,
+          messages: requestMessages,
+          temperature: this.config.temperature ?? 0.3,
+          response_format: responseFormat,
+          reasoning: reasoningParams,
+          signal,
+        }),
+        signal,
+      )) {
         if (chunk.reasoning) reasoning += chunk.reasoning;
         if (chunk.content) finalContent += chunk.content;
         yield chunk;
       }
 
+      throwIfAborted(signal);
       const result = this.#parseResponse<T>(finalContent, schema, reasoning || null, provider.name, '流式');
       this.logger.info('流式调用完成');
       return result;
@@ -269,6 +307,7 @@ export class BaseAgent {
     const history: ChatMessage[] = [];
 
     for (let attempt = 0; attempt < this.#maxRetries; attempt++) {
+      throwIfAborted(signal);
       const requestMessages = this.#buildMessages(
         systemPrompt,
         userPrompt,
@@ -284,21 +323,27 @@ export class BaseAgent {
       let reasoning = '';
       let finalContent = '';
 
-      for await (const chunk of provider.chatStream({
-        model: callConfig?.model ?? this.config.model,
-        messages: requestMessages,
-        temperature: this.config.temperature ?? 0.3,
-        response_format: responseFormat,
-        reasoning: reasoningParams,
-      })) {
+      for await (const chunk of abortableChunks(
+        provider.chatStream({
+          model: callConfig?.model ?? this.config.model,
+          messages: requestMessages,
+          temperature: this.config.temperature ?? 0.3,
+          response_format: responseFormat,
+          reasoning: reasoningParams,
+          signal,
+        }),
+        signal,
+      )) {
         if (chunk.reasoning) reasoning += chunk.reasoning;
         if (chunk.content) finalContent += chunk.content;
         yield chunk;
       }
 
+      throwIfAborted(signal);
       try {
         return this.#parseResponse<T>(finalContent, schema, reasoning || null, provider.name, '流式');
       } catch (err: unknown) {
+        rethrowAbort(err, signal);
         lastError = err as Error;
         this.logger.warn(
           `流式第 ${attempt + 1} 次验证失败: ${err instanceof z.ZodError ? err.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; ') : String(err)}`,

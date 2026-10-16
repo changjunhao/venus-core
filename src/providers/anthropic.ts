@@ -50,6 +50,8 @@ import { ProviderError } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
 import { classifyProviderError } from './provider-errors.js';
+import { awaitWithSignal, closeStream, rethrowAbort, throwIfAborted } from '../utils/cancellation.js';
+import { abortableChunks, cancellableStream } from '../utils/cancellable-stream.js';
 import { makeContentChunk } from './stream-utils.js';
 import { detectEndpointBehavior, getDefaultBudget } from './reasoning.js';
 import type { EndpointBehavior } from './reasoning.js';
@@ -355,12 +357,18 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
+      throwIfAborted(params.signal);
       try {
         const requestBody = buildRequestBody(params);
 
-        const message = await client.messages.create(
-          requestBody as unknown as Anthropic.MessageCreateParamsNonStreaming,
+        const message = await awaitWithSignal(
+          () =>
+            client.messages.create(requestBody as unknown as Anthropic.MessageCreateParamsNonStreaming, {
+              signal: params.signal,
+            }),
+          params.signal,
         );
+        throwIfAborted(params.signal);
 
         const raw = message as unknown as Record<string, unknown>;
         const content = extractAnthropicText(raw.content);
@@ -381,83 +389,95 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
+        rethrowAbort(error, params.signal);
         throw classifyProviderError(error, provider.name);
       }
     },
 
-    async *chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
-      // Classify initial request failures (network / timeout / auth) like chat()
-      let stream: AsyncIterable<Anthropic.RawMessageStreamEvent>;
-      try {
-        const requestBody = buildRequestBody(params, true);
-        stream = (await client.messages.create(
-          requestBody as unknown as Anthropic.MessageCreateParamsStreaming,
-        )) as unknown as AsyncIterable<Anthropic.RawMessageStreamEvent>;
-      } catch (error) {
-        throw classifyProviderError(error, provider.name);
-      }
+    chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
+      return cancellableStream(async function* (signal) {
+        params = { ...params, signal };
+        throwIfAborted(signal);
+        // Classify initial request failures (network / timeout / auth) like chat()
+        let stream: AsyncIterable<Anthropic.RawMessageStreamEvent>;
+        try {
+          const requestBody = buildRequestBody(params, true);
+          stream = await awaitWithSignal(
+            () => client.messages.create(requestBody as unknown as Anthropic.MessageCreateParamsStreaming, { signal }),
+            signal,
+            closeStream,
+          );
+        } catch (error) {
+          rethrowAbort(error, params.signal);
+          throw classifyProviderError(error, provider.name);
+        }
 
-      const parser = createParser();
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let reasoningTokens: number | undefined;
+        let parser: ReturnType<typeof createParser> | undefined;
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let reasoningTokens: number | undefined;
 
-      try {
-        for await (const event of stream) {
-          const evt = event as unknown as Record<string, unknown>;
+        try {
+          parser = createParser();
+          for await (const event of abortableChunks(stream, signal)) {
+            const evt = event as unknown as Record<string, unknown>;
 
-          switch (evt.type) {
-            case 'message_start': {
-              const usage = (evt.message as Record<string, unknown> | undefined)?.usage;
-              const parsed = extractAnthropicUsage(usage);
-              if (parsed) inputTokens = parsed.inputTokens;
-              break;
-            }
-            case 'content_block_delta': {
-              const delta = evt.delta as Record<string, unknown> | undefined;
-              if (!delta) break;
-              if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
-                yield makeContentChunk(parser, delta.text);
-              } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking) {
-                yield { reasoning: delta.thinking };
+            switch (evt.type) {
+              case 'message_start': {
+                const usage = (evt.message as Record<string, unknown> | undefined)?.usage;
+                const parsed = extractAnthropicUsage(usage);
+                if (parsed) inputTokens = parsed.inputTokens;
+                break;
               }
-              // signature_delta / other delta types are intentionally ignored
-              break;
-            }
-            case 'message_delta': {
-              const usage = extractAnthropicUsage(evt.usage);
-              if (usage) {
-                if (usage.outputTokens) outputTokens = usage.outputTokens;
-                if (usage.inputTokens) inputTokens = usage.inputTokens;
-                if (usage.reasoningTokens !== undefined) reasoningTokens = usage.reasoningTokens;
+              case 'content_block_delta': {
+                const delta = evt.delta as Record<string, unknown> | undefined;
+                if (!delta) break;
+                if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
+                  yield makeContentChunk(parser, delta.text);
+                } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking) {
+                  yield { reasoning: delta.thinking };
+                }
+                // signature_delta / other delta types are intentionally ignored
+                break;
               }
-              break;
+              case 'message_delta': {
+                const usage = extractAnthropicUsage(evt.usage);
+                if (usage) {
+                  if (usage.outputTokens) outputTokens = usage.outputTokens;
+                  if (usage.inputTokens) inputTokens = usage.inputTokens;
+                  if (usage.reasoningTokens !== undefined) reasoningTokens = usage.reasoningTokens;
+                }
+                break;
+              }
+              case 'error': {
+                const err = evt.error as { message?: string } | undefined;
+                throw new ProviderError(
+                  `Stream call failed: ${err?.message ?? 'Unknown Messages API error'}`,
+                  provider.name,
+                  'api_error',
+                );
+              }
+              default:
+                break;
             }
-            case 'error': {
-              const err = evt.error as { message?: string } | undefined;
-              throw new ProviderError(
-                `Stream call failed: ${err?.message ?? 'Unknown Messages API error'}`,
-                provider.name,
-                'api_error',
-              );
-            }
-            default:
-              break;
           }
-        }
 
-        if (inputTokens || outputTokens || reasoningTokens !== undefined) {
-          const usage: TokenUsage = { inputTokens, outputTokens };
-          if (reasoningTokens !== undefined) usage.reasoningTokens = reasoningTokens;
-          yield { usage };
+          throwIfAborted(signal);
+          if (inputTokens || outputTokens || reasoningTokens !== undefined) {
+            const usage: TokenUsage = { inputTokens, outputTokens };
+            if (reasoningTokens !== undefined) usage.reasoningTokens = reasoningTokens;
+            yield { usage };
+          }
+        } catch (error) {
+          rethrowAbort(error, signal);
+          if (error instanceof ProviderError) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
+        } finally {
+          if (parser) parser.destroy();
+          else void closeStream(stream);
         }
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
-      } finally {
-        parser.destroy();
-      }
+      }, params.signal);
     },
   });
 

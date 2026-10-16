@@ -5,6 +5,7 @@ import type {
   AgentCallResult,
   AgentConfig,
   CallConfig,
+  CancellationOptions,
   CritiqueResult,
   EvaluationContext,
   Genre,
@@ -67,9 +68,10 @@ export class ProposerAgent extends BaseAgent {
     imageUrl: string,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<ProposerResult>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareEvaluate(genre, context);
-    return await this.call(systemPrompt, userPrompt, imageUrl, schema);
+    return await this.call(systemPrompt, userPrompt, imageUrl, schema, options);
   }
 
   /** 在收到批判后修正评估 */
@@ -80,6 +82,7 @@ export class ProposerAgent extends BaseAgent {
     critiqueReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<ProposerResult>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareRevision(
       genre,
@@ -88,7 +91,10 @@ export class ProposerAgent extends BaseAgent {
       critiqueReasoning,
       context,
     );
-    return await this.call(systemPrompt, userPrompt, imageUrl, schema, this.#revisionConfig);
+    return await this.call(systemPrompt, userPrompt, imageUrl, schema, {
+      ...this.#revisionConfig,
+      signal: options?.signal,
+    });
   }
 
   /** 初始评估（流式） */
@@ -96,9 +102,10 @@ export class ProposerAgent extends BaseAgent {
     imageUrl: string,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<ProposerResult>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareEvaluate(genre, context);
-    return this.callStream<ProposerResult>(systemPrompt, userPrompt, imageUrl, schema);
+    return this.callStream<ProposerResult>(systemPrompt, userPrompt, imageUrl, schema, options);
   }
 
   /** 在收到批判后修正评估（流式） */
@@ -109,6 +116,7 @@ export class ProposerAgent extends BaseAgent {
     critiqueReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<ProposerResult>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareRevision(
       genre,
@@ -117,7 +125,10 @@ export class ProposerAgent extends BaseAgent {
       critiqueReasoning,
       context,
     );
-    return this.callStream<ProposerResult>(systemPrompt, userPrompt, imageUrl, schema, this.#revisionConfig);
+    return this.callStream<ProposerResult>(systemPrompt, userPrompt, imageUrl, schema, {
+      ...this.#revisionConfig,
+      signal: options?.signal,
+    });
   }
 
   /** 组装 evaluateGroup 调用参数 */
@@ -168,6 +179,7 @@ export class ProposerAgent extends BaseAgent {
     genre: Genre,
     includePerImage: boolean,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<GroupProposerOutput>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupEvaluate(
       mode,
@@ -176,7 +188,7 @@ export class ProposerAgent extends BaseAgent {
       includePerImage,
       context,
     );
-    return await this.call<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema);
+    return await this.call<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema, options);
   }
 
   /** 组图在收到批判后修正评估 */
@@ -189,6 +201,7 @@ export class ProposerAgent extends BaseAgent {
     genre: Genre,
     includePerImage: boolean,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<GroupProposerOutput>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupRevision(
       mode,
@@ -200,7 +213,10 @@ export class ProposerAgent extends BaseAgent {
       critiqueReasoning,
       context,
     );
-    return await this.call<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema, this.#revisionConfig);
+    return await this.call<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema, {
+      ...this.#revisionConfig,
+      signal: options?.signal,
+    });
   }
 
   /** 组图初始评估（流式） */
@@ -210,6 +226,7 @@ export class ProposerAgent extends BaseAgent {
     genre: Genre,
     includePerImage: boolean,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<GroupProposerOutput>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupEvaluate(
       mode,
@@ -218,7 +235,7 @@ export class ProposerAgent extends BaseAgent {
       includePerImage,
       context,
     );
-    return this.callStream<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema);
+    return this.callStream<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema, options);
   }
 
   /** 组图在收到批判后修正评估（流式） */
@@ -231,6 +248,7 @@ export class ProposerAgent extends BaseAgent {
     genre: Genre,
     includePerImage: boolean,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<GroupProposerOutput>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupRevision(
       mode,
@@ -242,6 +260,9 @@ export class ProposerAgent extends BaseAgent {
       critiqueReasoning,
       context,
     );
-    return this.callStream<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema, this.#revisionConfig);
+    return this.callStream<GroupProposerOutput>(systemPrompt, userPrompt, imageUrls, schema, {
+      ...this.#revisionConfig,
+      signal: options?.signal,
+    });
   }
 }

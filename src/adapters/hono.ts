@@ -23,6 +23,8 @@
  */
 
 import { Hono } from 'hono';
+import { awaitWithSignal, createCancellationScope } from '../utils/cancellation.js';
+import { streamHeaders, webEventStream } from './streaming.js';
 import type { VenusEngine } from '../engine.js';
 import type { AdapterOptions } from '../types.js';
 import {
@@ -32,8 +34,6 @@ import {
   handleGroupEvaluate,
   resolveStreamParamsWithHook,
   resolveGroupStreamParamsWithHook,
-  formatSSEError,
-  formatJSONLError,
 } from './common.js';
 
 export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions): Hono {
@@ -43,16 +43,19 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
 
   // POST /evaluate
   app.post(`${prefix}/evaluate`, async (c) => {
+    const scope = createCancellationScope(c.req.raw.signal);
     try {
-      const body = await c.req.json();
-      const result = await handleEvaluate(engine, body, hooks);
+      const body = await awaitWithSignal(() => c.req.json(), scope.signal);
+      const result = await handleEvaluate(engine, body, hooks, scope);
       if (!result.ok) {
         return c.json(result.body, result.status);
       }
       return c.json(result.data);
     } catch (error) {
       const { status, body } = mapErrorToResponse(error);
-      return c.json(body, status);
+      return status === 499 ? Response.json(body, { status }) : c.json(body, status);
+    } finally {
+      scope.dispose();
     }
   });
 
@@ -63,184 +66,143 @@ export function createHonoAdapter(engine: VenusEngine, options?: AdapterOptions)
 
   // POST /evaluate/stream (SSE)
   app.post(`${prefix}/evaluate/stream`, async (c) => {
+    const scope = createCancellationScope(c.req.raw.signal);
+    let transferred = false;
     try {
-      const body = await c.req.json();
-      const parsed = await resolveStreamParamsWithHook(body, hooks);
+      const body = await awaitWithSignal(() => c.req.json(), scope.signal);
+      const parsed = await resolveStreamParamsWithHook(body, hooks, scope);
       if (!parsed.ok) {
         return c.json(parsed.body, parsed.status);
       }
       const { imageUrl, genre, context, mode } = parsed.data;
 
-      return new Response(
-        new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            try {
-              for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-              }
-            } catch (err) {
-              controller.enqueue(encoder.encode(formatSSEError(err)));
-            } finally {
-              controller.close();
-            }
-          },
-        }),
-        {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-          },
-        },
+      const response = new Response(
+        webEventStream(engine.evaluateStream(imageUrl, { genre, context, mode, signal: scope.signal }), scope, 'sse'),
+        { headers: streamHeaders('sse') },
       );
+      transferred = true;
+      return response;
     } catch (error) {
       const { status, body } = mapErrorToResponse(error);
-      return c.json(body, status);
+      return status === 499 ? Response.json(body, { status }) : c.json(body, status);
+    } finally {
+      if (!transferred) scope.dispose();
     }
   });
 
   // POST /evaluate/stream/jsonl (Streamable HTTP - JSON Lines)
   app.post(`${prefix}/evaluate/stream/jsonl`, async (c) => {
+    const scope = createCancellationScope(c.req.raw.signal);
+    let transferred = false;
     try {
-      const body = await c.req.json();
-      const parsed = await resolveStreamParamsWithHook(body, hooks);
+      const body = await awaitWithSignal(() => c.req.json(), scope.signal);
+      const parsed = await resolveStreamParamsWithHook(body, hooks, scope);
       if (!parsed.ok) {
         return c.json(parsed.body, parsed.status);
       }
       const { imageUrl, genre, context, mode } = parsed.data;
 
-      return new Response(
-        new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            try {
-              for await (const event of engine.evaluateStream(imageUrl, { genre, context, mode })) {
-                controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-              }
-            } catch (err) {
-              controller.enqueue(encoder.encode(formatJSONLError(err)));
-            } finally {
-              controller.close();
-            }
-          },
-        }),
-        {
-          headers: {
-            'Content-Type': 'application/x-ndjson',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'X-Accel-Buffering': 'no',
-          },
-        },
+      const response = new Response(
+        webEventStream(engine.evaluateStream(imageUrl, { genre, context, mode, signal: scope.signal }), scope, 'jsonl'),
+        { headers: streamHeaders('jsonl') },
       );
+      transferred = true;
+      return response;
     } catch (error) {
       const { status, body } = mapErrorToResponse(error);
-      return c.json(body, status);
+      return status === 499 ? Response.json(body, { status }) : c.json(body, status);
+    } finally {
+      if (!transferred) scope.dispose();
     }
   });
 
   // POST /evaluate/group
   app.post(`${prefix}/evaluate/group`, async (c) => {
+    const scope = createCancellationScope(c.req.raw.signal);
     try {
-      const body = await c.req.json();
-      const result = await handleGroupEvaluate(engine, body, hooks);
+      const body = await awaitWithSignal(() => c.req.json(), scope.signal);
+      const result = await handleGroupEvaluate(engine, body, hooks, scope);
       if (!result.ok) {
         return c.json(result.body, result.status);
       }
       return c.json(result.data);
     } catch (error) {
       const { status, body } = mapErrorToResponse(error);
-      return c.json(body, status);
+      return status === 499 ? Response.json(body, { status }) : c.json(body, status);
+    } finally {
+      scope.dispose();
     }
   });
 
   // POST /evaluate/group/stream (SSE)
   app.post(`${prefix}/evaluate/group/stream`, async (c) => {
+    const scope = createCancellationScope(c.req.raw.signal);
+    let transferred = false;
     try {
-      const body = await c.req.json();
-      const parsed = await resolveGroupStreamParamsWithHook(body, hooks);
+      const body = await awaitWithSignal(() => c.req.json(), scope.signal);
+      const parsed = await resolveGroupStreamParamsWithHook(body, hooks, scope);
       if (!parsed.ok) {
         return c.json(parsed.body, parsed.status);
       }
       const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
 
-      return new Response(
-        new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            try {
-              for await (const event of engine.evaluateGroupStream(imageUrls, mode, {
-                genre,
-                context,
-                includePerImage,
-                mode: streamMode,
-              })) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-              }
-            } catch (err) {
-              controller.enqueue(encoder.encode(formatSSEError(err)));
-            } finally {
-              controller.close();
-            }
-          },
-        }),
-        {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-          },
-        },
+      const response = new Response(
+        webEventStream(
+          engine.evaluateGroupStream(imageUrls, mode, {
+            genre,
+            context,
+            includePerImage,
+            mode: streamMode,
+            signal: scope.signal,
+          }),
+          scope,
+          'sse',
+        ),
+        { headers: streamHeaders('sse') },
       );
+      transferred = true;
+      return response;
     } catch (error) {
       const { status, body } = mapErrorToResponse(error);
-      return c.json(body, status);
+      return status === 499 ? Response.json(body, { status }) : c.json(body, status);
+    } finally {
+      if (!transferred) scope.dispose();
     }
   });
 
   // POST /evaluate/group/stream/jsonl (Streamable HTTP - JSON Lines)
   app.post(`${prefix}/evaluate/group/stream/jsonl`, async (c) => {
+    const scope = createCancellationScope(c.req.raw.signal);
+    let transferred = false;
     try {
-      const body = await c.req.json();
-      const parsed = await resolveGroupStreamParamsWithHook(body, hooks);
+      const body = await awaitWithSignal(() => c.req.json(), scope.signal);
+      const parsed = await resolveGroupStreamParamsWithHook(body, hooks, scope);
       if (!parsed.ok) {
         return c.json(parsed.body, parsed.status);
       }
       const { imageUrls, mode, genre, context, includePerImage, streamMode } = parsed.data;
 
-      return new Response(
-        new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            try {
-              for await (const event of engine.evaluateGroupStream(imageUrls, mode, {
-                genre,
-                context,
-                includePerImage,
-                mode: streamMode,
-              })) {
-                controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-              }
-            } catch (err) {
-              controller.enqueue(encoder.encode(formatJSONLError(err)));
-            } finally {
-              controller.close();
-            }
-          },
-        }),
-        {
-          headers: {
-            'Content-Type': 'application/x-ndjson',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'X-Accel-Buffering': 'no',
-          },
-        },
+      const response = new Response(
+        webEventStream(
+          engine.evaluateGroupStream(imageUrls, mode, {
+            genre,
+            context,
+            includePerImage,
+            mode: streamMode,
+            signal: scope.signal,
+          }),
+          scope,
+          'jsonl',
+        ),
+        { headers: streamHeaders('jsonl') },
       );
+      transferred = true;
+      return response;
     } catch (error) {
       const { status, body } = mapErrorToResponse(error);
-      return c.json(body, status);
+      return status === 499 ? Response.json(body, { status }) : c.json(body, status);
+    } finally {
+      if (!transferred) scope.dispose();
     }
   });
 

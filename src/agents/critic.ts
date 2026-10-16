@@ -4,6 +4,7 @@
 import type {
   AgentCallResult,
   AgentConfig,
+  CancellationOptions,
   CritiqueResult,
   EvaluationContext,
   Genre,
@@ -49,9 +50,10 @@ export class CriticAgent extends BaseAgent {
     proposerReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<CritiqueResult>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareAttack(genre, proposalResult, proposerReasoning, context);
-    return await this.call(systemPrompt, userPrompt, imageUrl, schema);
+    return await this.call(systemPrompt, userPrompt, imageUrl, schema, options);
   }
 
   /** 攻击提案者的评估（流式） */
@@ -61,9 +63,10 @@ export class CriticAgent extends BaseAgent {
     proposerReasoning: string | null,
     genre: Genre = 'portrait',
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<CritiqueResult>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareAttack(genre, proposalResult, proposerReasoning, context);
-    return this.callStream<CritiqueResult>(systemPrompt, userPrompt, imageUrl, schema);
+    return this.callStream<CritiqueResult>(systemPrompt, userPrompt, imageUrl, schema, options);
   }
 
   /** 组装 attackGroup 调用参数 */
@@ -89,6 +92,7 @@ export class CriticAgent extends BaseAgent {
     proposerReasoning: string | null,
     genre: Genre,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): Promise<AgentCallResult<CritiqueResult>> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupAttack(
       mode,
@@ -97,7 +101,7 @@ export class CriticAgent extends BaseAgent {
       proposerReasoning,
       context,
     );
-    return await this.call<CritiqueResult>(systemPrompt, userPrompt, imageUrls, schema);
+    return await this.call<CritiqueResult>(systemPrompt, userPrompt, imageUrls, schema, options);
   }
 
   /** 攻击提案者的组图评估（流式） */
@@ -108,6 +112,7 @@ export class CriticAgent extends BaseAgent {
     proposerReasoning: string | null,
     genre: Genre,
     context?: EvaluationContext,
+    options?: CancellationOptions,
   ): AsyncGenerator<StreamChunk, AgentCallResult<CritiqueResult>, unknown> {
     const { schema, systemPrompt, userPrompt } = this.#prepareGroupAttack(
       mode,
@@ -116,6 +121,6 @@ export class CriticAgent extends BaseAgent {
       proposerReasoning,
       context,
     );
-    return this.callStream<CritiqueResult>(systemPrompt, userPrompt, imageUrls, schema);
+    return this.callStream<CritiqueResult>(systemPrompt, userPrompt, imageUrls, schema, options);
   }
 }

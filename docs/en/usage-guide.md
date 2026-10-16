@@ -67,10 +67,10 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg',
 
 `evaluateGroup()` evaluates **2 to 10 images at once** through the same adversarial pipeline. The group mode is the second positional argument:
 
-| Mode | Use it for | Key result fields |
-|------|-----------|-------------------|
-| `joint` | A series / photo essay judged as a whole | `sceneType`, `totalScore`, `dimensions`, `groupAnalysis`, `critique`, `suggestions` |
-| `compare` | Ranking the images against each other | `ranking` (per image: `index`, `rank`, `score`, `rationale`), `comparisonSummary`, `suggestions` |
+| Mode      | Use it for                               | Key result fields                                                                                |
+| --------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `joint`   | A series / photo essay judged as a whole | `sceneType`, `totalScore`, `dimensions`, `groupAnalysis`, `critique`, `suggestions`              |
+| `compare` | Ranking the images against each other    | `ranking` (per image: `index`, `rank`, `score`, `rationale`), `comparisonSummary`, `suggestions` |
 
 ```ts
 const imageUrls = [
@@ -82,8 +82,8 @@ const imageUrls = [
 // Joint evaluation — the group as one body of work
 const joint = await engine.evaluateGroup(imageUrls, 'joint', { genre: 'portrait' });
 if (joint.mode === 'joint') {
-  console.log(joint.totalScore);     // 8.4
-  console.log(joint.groupAnalysis);  // narrative / consistency analysis of the series
+  console.log(joint.totalScore); // 8.4
+  console.log(joint.groupAnalysis); // narrative / consistency analysis of the series
 }
 
 // Compare evaluation — rank the images against each other
@@ -156,14 +156,17 @@ const engine = createVenusEngine({
 });
 
 const app = new Hono();
-app.route('/api', createHonoAdapter(engine, {
-  hooks: {
-    beforeEvaluate: async (params) => {
-      // e.g., upload image to a file API, inject EXIF context
-      return params;
+app.route(
+  '/api',
+  createHonoAdapter(engine, {
+    hooks: {
+      beforeEvaluate: async (params) => {
+        // e.g., upload image to a file API, inject EXIF context
+        return params;
+      },
     },
-  },
-}));
+  }),
+);
 
 export default app; // Works with Bun, Deno, Node, Cloudflare Workers, etc.
 ```
@@ -184,14 +187,17 @@ const engine = createVenusEngine({
 
 const app = express();
 app.use(express.json());
-app.use('/api', createExpressAdapter(engine, {
-  hooks: {
-    beforeEvaluate: async (params) => {
-      // Transform validated params before evaluation
-      return params;
+app.use(
+  '/api',
+  createExpressAdapter(engine, {
+    hooks: {
+      beforeEvaluate: async (params) => {
+        // Transform validated params before evaluation
+        return params;
+      },
     },
-  },
-}));
+  }),
+);
 app.listen(3000);
 ```
 
@@ -224,35 +230,35 @@ export default useBase('/api', venus.handler);
 
 All three adapters expose the same endpoints:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/evaluate` | Synchronous evaluation |
-| `POST` | `/evaluate/stream` | Streaming evaluation (SSE / `text/event-stream`) |
-| `POST` | `/evaluate/stream/jsonl` | Streaming evaluation (JSON Lines / `application/x-ndjson`) |
-| `POST` | `/evaluate/group` | Synchronous group evaluation (2–10 images) |
-| `POST` | `/evaluate/group/stream` | Streaming group evaluation (SSE / `text/event-stream`) |
+| Method | Path                           | Description                                                      |
+| ------ | ------------------------------ | ---------------------------------------------------------------- |
+| `POST` | `/evaluate`                    | Synchronous evaluation                                           |
+| `POST` | `/evaluate/stream`             | Streaming evaluation (SSE / `text/event-stream`)                 |
+| `POST` | `/evaluate/stream/jsonl`       | Streaming evaluation (JSON Lines / `application/x-ndjson`)       |
+| `POST` | `/evaluate/group`              | Synchronous group evaluation (2–10 images)                       |
+| `POST` | `/evaluate/group/stream`       | Streaming group evaluation (SSE / `text/event-stream`)           |
 | `POST` | `/evaluate/group/stream/jsonl` | Streaming group evaluation (JSON Lines / `application/x-ndjson`) |
-| `GET` | `/metadata` | Genre metadata and dimensions |
+| `GET`  | `/metadata`                    | Genre metadata and dimensions                                    |
 
 ### Group Evaluation Endpoints
 
 All three group endpoints accept the same JSON body:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `imageUrls` | `string[]` | yes | 2–10 image URLs; private/reserved hosts are rejected (SSRF protection) |
-| `mode` | `'joint' \| 'compare'` | yes | **Group evaluation mode** |
-| `genre` | `Genre` | no | Pre-specified genre; auto-detected if omitted |
-| `context` | `EvaluationContext` | no | EXIF data, user notes, custom metadata |
-| `includePerImage` | `boolean` | no | Request per-image details (default `false`) |
-| `streamMode` | `'values' \| 'updates'` | no | **Streaming granularity**, stream endpoints only (default `values`) |
+| Field             | Type                    | Required | Description                                                            |
+| ----------------- | ----------------------- | -------- | ---------------------------------------------------------------------- |
+| `imageUrls`       | `string[]`              | yes      | 2–10 image URLs; private/reserved hosts are rejected (SSRF protection) |
+| `mode`            | `'joint' \| 'compare'`  | yes      | **Group evaluation mode**                                              |
+| `genre`           | `Genre`                 | no       | Pre-specified genre; auto-detected if omitted                          |
+| `context`         | `EvaluationContext`     | no       | EXIF data, user notes, custom metadata                                 |
+| `includePerImage` | `boolean`               | no       | Request per-image details (default `false`)                            |
+| `streamMode`      | `'values' \| 'updates'` | no       | **Streaming granularity**, stream endpoints only (default `values`)    |
 
 **`mode` vs `streamMode`** — the group endpoints carry two independent switches:
 
-| Field | Values | Meaning | SDK equivalent |
-|-------|--------|---------|----------------|
-| `mode` | `joint` / `compare` | *What* is evaluated: the group as a whole vs. images against each other | 2nd positional argument of `evaluateGroup()` / `evaluateGroupStream()` |
-| `streamMode` | `values` / `updates` | *How finely* events are emitted (milestones only vs. plus `reasoning_chunk` / `result_chunk`) | `options.mode` of `evaluateGroupStream()` |
+| Field        | Values               | Meaning                                                                                       | SDK equivalent                                                         |
+| ------------ | -------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `mode`       | `joint` / `compare`  | _What_ is evaluated: the group as a whole vs. images against each other                       | 2nd positional argument of `evaluateGroup()` / `evaluateGroupStream()` |
+| `streamMode` | `values` / `updates` | _How finely_ events are emitted (milestones only vs. plus `reasoning_chunk` / `result_chunk`) | `options.mode` of `evaluateGroupStream()`                              |
 
 > On the single-image endpoints the granularity field is called `mode` (there is no evaluation mode there). The group endpoints rename it to `streamMode` so that `mode` can carry `joint` / `compare`.
 
@@ -411,11 +417,11 @@ interface EvaluateParams {
 ```ts
 interface GroupEvaluateParams {
   imageUrls: string[];
-  mode: GroupEvaluationMode;   // 'joint' | 'compare'
+  mode: GroupEvaluationMode; // 'joint' | 'compare'
   genre: Genre | null;
   context?: EvaluationContext;
   includePerImage?: boolean;
-  streamMode?: StreamMode;     // 'values' | 'updates'
+  streamMode?: StreamMode; // 'values' | 'updates'
 }
 ```
 
@@ -484,21 +490,17 @@ Venus supports passing additional context via `EvaluationContext` to enhance eva
 Pass EXIF metadata as a first-class citizen. The engine formats EXIF parameters into agent prompts with **genre-aware injection depth**:
 
 ```ts
-const result = await engine.evaluate(
-  'https://example.com/photo.jpg',
-  'portrait',
-  {
-    exif: {
-      shutterSpeed: '1/2000',
-      iso: 400,
-      fNumber: 2.8,
-      focalLength: 85,
-      cameraModel: 'SONY ILCE-7M4',
-      lensModel: 'FE 85mm F1.4 GM',
-      dateTimeOriginal: '2026:03:15 14:30:00',
-    },
+const result = await engine.evaluate('https://example.com/photo.jpg', 'portrait', {
+  exif: {
+    shutterSpeed: '1/2000',
+    iso: 400,
+    fNumber: 2.8,
+    focalLength: 85,
+    cameraModel: 'SONY ILCE-7M4',
+    lensModel: 'FE 85mm F1.4 GM',
+    dateTimeOriginal: '2026:03:15 14:30:00',
   },
-);
+});
 ```
 
 ### User Notes
@@ -506,13 +508,9 @@ const result = await engine.evaluate(
 Provide free-text notes to give agents additional context about the shooting conditions or creative intent:
 
 ```ts
-const result = await engine.evaluate(
-  'https://example.com/photo.jpg',
-  'landscape',
-  {
-    userNotes: 'Shot at sunrise with a GND graduated filter to darken the sky',
-  },
-);
+const result = await engine.evaluate('https://example.com/photo.jpg', 'landscape', {
+  userNotes: 'Shot at sunrise with a GND graduated filter to darken the sky',
+});
 ```
 
 ### Full Context Example
@@ -527,8 +525,8 @@ const result = await engine.evaluate(imageUrl, 'sports', {
 });
 
 // Context is returned in result metadata
-console.log(result.metadata.context?.exif);      // { shutterSpeed: '1/4000', ... }
-console.log(result.metadata.context?.userNotes);  // '2026 National Athletics ...'
+console.log(result.metadata.context?.exif); // { shutterSpeed: '1/4000', ... }
+console.log(result.metadata.context?.userNotes); // '2026 National Athletics ...'
 ```
 
 ### Passing Context via Web Framework Adapters
@@ -554,14 +552,14 @@ Schema validation is applied automatically: `userNotes` is limited to 2000 chara
 
 EXIF data is injected into prompts at different intensities depending on the photography genre:
 
-| Injection Level | Genres | Behavior |
-|----------------|--------|----------|
-| **High** | Sports, Nature | EXIF parameters (shutter, focal length) are emphasized as directly relevant to evaluation |
-| **Standard** | Portrait, Landscape | EXIF shown as reference parameters |
-| **Light** | Architecture, Commercial, Documentary | Compact one-line summary, not emphasized |
-| **Minimal** | Fine Art | Explicitly noted as reference only; artistic expression takes priority |
+| Injection Level | Genres                                | Behavior                                                                                  |
+| --------------- | ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **High**        | Sports, Nature                        | EXIF parameters (shutter, focal length) are emphasized as directly relevant to evaluation |
+| **Standard**    | Portrait, Landscape                   | EXIF shown as reference parameters                                                        |
+| **Light**       | Architecture, Commercial, Documentary | Compact one-line summary, not emphasized                                                  |
+| **Minimal**     | Fine Art                              | Explicitly noted as reference only; artistic expression takes priority                    |
 
-A disclaimer is always appended: *"EXIF data may have been modified in post-processing; the actual visual result is the final basis for evaluation."*
+A disclaimer is always appended: _"EXIF data may have been modified in post-processing; the actual visual result is the final basis for evaluation."_
 
 ## Event System
 
@@ -579,15 +577,70 @@ const engine = createVenusEngine({
 });
 ```
 
-| Event Type | Payload |
-|------------|---------|
-| `round_start` | `{ round, agent, data }` |
-| `round_complete` | `{ round }` |
-| `agent_call` | `{ round, agent }` |
-| `agent_complete` | `{ round, agent, data: { result, reasoning } }` |
-| `error` | `{ agent, data: { error } }` |
+| Event Type       | Payload                                                                   |
+| ---------------- | ------------------------------------------------------------------------- |
+| `round_start`    | `{ round, agent, data }`                                                  |
+| `round_complete` | `{ round }`                                                               |
+| `agent_call`     | `{ round, agent }`                                                        |
+| `agent_complete` | `{ round, agent, data: { result, reasoning } }`                           |
+| `error`          | `{ agent, data: { error } }`                                              |
+| `cancelled`      | `{ agent: 'engine', data: { code: 'ABORTED' } }` (at most once per scope) |
 
 `onEvent` fires for both `evaluate()` and `evaluateStream()` — streaming evaluations emit the same pipeline-stage events alongside the yielded `EvaluationStreamEvent` stream.
+
+## End-to-End Cancellation
+
+All four Engine entry points accept `{ signal?: AbortSignal }`; the three Adapters automatically attach HTTP-client `AbortSignal` and `reader.cancel()` to the same scope. See [API Reference · End-to-End Cancellation](./api-reference.md#end-to-end-cancellation) for the full behaviour matrix and type signatures.
+
+```ts
+import { AbortError, isAbortError } from '@theogony/venus-core';
+
+const controller = new AbortController();
+setTimeout(() => controller.abort('user left'), 30_000);
+
+// 1. Non-streaming
+try {
+  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
+} catch (err) {
+  if (!isAbortError(err)) throw err;
+}
+
+// 2. Streaming — capture the single reject in for-await; release the iterator in finally
+const stream = engine.evaluateStream(imageUrl, { mode: 'updates', signal: controller.signal });
+try {
+  for await (const event of stream) renderEvent(event);
+} catch (err) {
+  if (!(err instanceof AbortError)) throw err;
+} finally {
+  await stream.return(undefined as never);
+}
+
+// 3. Client disconnect — both AbortController and reader.cancel abort the server engine
+const response = await fetch('/api/evaluate/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ imageUrl, genre: 'portrait' }),
+  signal: controller.signal,
+});
+const reader = response.body!.getReader();
+try {
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    handleChunk(value);
+  }
+} finally {
+  // After disconnect: no more frames, no error frame, no synthetic evaluation_complete
+  await reader.cancel('user disconnect');
+}
+```
+
+Notes:
+
+- **Custom Providers / hooks** must read `options.signal` or `context.signal` to be interrupted promptly; uncooperative external I/O is only guaranteed to stop further scheduling and drop late-arriving results.
+- **Revision round** still receives the signal even when routed to a dedicated `revision` provider.
+- **Concurrency** — requests sharing the same Engine or Provider remain independent; aborting one does not propagate to siblings.
+- **Server-side tasks** — local fetch is aborted, but whether the vendor's server also halts generation or stops billing is outside SDK guarantees.
 
 ## See Also
 

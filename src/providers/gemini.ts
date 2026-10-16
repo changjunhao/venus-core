@@ -17,11 +17,22 @@
  */
 
 import { GoogleGenAI, type Interactions } from '@google/genai';
-import type { LLMProvider, ChatParams, ChatResponse, StreamChunk, ChatMessage, ReasoningEffort, TokenUsage } from '../types.js';
+import type {
+  LLMProvider,
+  ChatParams,
+  ChatResponse,
+  StreamChunk,
+  ChatMessage,
+  ReasoningEffort,
+  TokenUsage,
+} from '../types.js';
 import { ProviderError } from '../utils/errors.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
 import { classifyProviderError } from './provider-errors.js';
+import { closeStream, rethrowAbort, throwIfAborted } from '../utils/cancellation.js';
+import { abortableChunks, cancellableStream } from '../utils/cancellable-stream.js';
+import { geminiRequest, type GeminiRequest } from './gemini-request.js';
 import { makeContentChunk } from './stream-utils.js';
 
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com';
@@ -255,12 +266,21 @@ export function createGeminiProvider(options: GeminiProviderOptions): LLMProvide
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
+      throwIfAborted(params.signal);
+      let request: GeminiRequest<unknown> | undefined;
       try {
         const requestBody = buildRequestBody(params);
 
-        const interaction = await client.interactions.create(
-          requestBody as unknown as Interactions.CreateModelInteractionParamsNonStreaming,
+        request = await geminiRequest(
+          (signal) =>
+            client.interactions.create(
+              requestBody as unknown as Interactions.CreateModelInteractionParamsNonStreaming,
+              { signal, maxRetries: 0 },
+            ),
+          { signal: params.signal, timeout: options.timeout ?? 60_000, provider: provider.name },
         );
+        request.check();
+        const interaction = request.value;
 
         const raw = interaction as unknown as Record<string, unknown>;
 
@@ -286,82 +306,108 @@ export function createGeminiProvider(options: GeminiProviderOptions): LLMProvide
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
+        rethrowAbort(error, params.signal);
         throw classifyProviderError(error, provider.name);
+      } finally {
+        request?.dispose();
       }
     },
 
-    async *chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
-      // Classify initial request failures (network / timeout / auth) like chat()
-      let stream: AsyncIterable<Interactions.InteractionSSEEvent>;
-      try {
-        const requestBody = buildRequestBody(params);
-        stream = (await client.interactions.create({
-          ...requestBody,
-          stream: true,
-        } as unknown as Interactions.CreateModelInteractionParamsStreaming)) as unknown as AsyncIterable<Interactions.InteractionSSEEvent>;
-      } catch (error) {
-        throw classifyProviderError(error, provider.name);
-      }
-
-      const parser = createParser();
-
-      try {
-        for await (const event of stream) {
-          const evt = event as unknown as Record<string, unknown>;
-          const eventType = evt.event_type as string;
-
-          if (eventType === 'error') {
-            const err = evt.error as { code?: string; message?: string } | undefined;
-            const message = err?.message ?? 'Unknown Interactions API error';
-            throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
-          }
-
-          if (eventType === 'step.start') {
-            // The first content block may arrive embedded in step.start
-            const step = evt.step as Record<string, unknown> | undefined;
-            if (!step) continue;
-
-            if (step.type === 'thought') {
-              const reasoning = extractGeminiReasoning([step]);
-              if (reasoning) {
-                yield { reasoning };
-              }
-            } else if (step.type === 'model_output') {
-              const text = extractModelOutputText([step]);
-              if (text) {
-                yield makeContentChunk(parser, text);
-              }
-            }
-          } else if (eventType === 'step.delta') {
-            const delta = evt.delta as Record<string, unknown> | undefined;
-            if (!delta) continue;
-
-            if (delta.type === 'text' && typeof delta.text === 'string' && delta.text) {
-              yield makeContentChunk(parser, delta.text);
-            } else if (delta.type === 'thought_summary') {
-              // Thought summary deltas carry a single content block
-              const contentBlock = delta.content as Record<string, unknown> | undefined;
-              if (contentBlock?.type === 'text' && typeof contentBlock.text === 'string' && contentBlock.text) {
-                yield { reasoning: contentBlock.text };
-              }
-            }
-            // thought_signature and other delta types are intentionally ignored
-          } else if (eventType === 'interaction.completed') {
-            // Terminal event — extract token usage from the final interaction
-            const finalInteraction = evt.interaction as Record<string, unknown> | undefined;
-            const usage = extractGeminiUsage(finalInteraction?.usage);
-            if (usage) {
-              yield { usage };
-            }
-          }
+    chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
+      return cancellableStream(async function* (signal) {
+        params = { ...params, signal };
+        throwIfAborted(signal);
+        // Classify initial request failures (network / timeout / auth) like chat()
+        let request: GeminiRequest<AsyncIterable<Interactions.InteractionSSEEvent>>;
+        try {
+          const requestBody = buildRequestBody(params);
+          request = await geminiRequest<AsyncIterable<Interactions.InteractionSSEEvent>>(
+            (requestSignal) =>
+              client.interactions.create(
+                {
+                  ...requestBody,
+                  stream: true,
+                } as unknown as Interactions.InteractionCreateParams.CreateModelInteractionParamsStreaming,
+                {
+                  signal: requestSignal,
+                  maxRetries: 0,
+                },
+              ),
+            { signal, timeout: options.timeout ?? 60_000, provider: provider.name },
+            closeStream,
+          );
+        } catch (error) {
+          rethrowAbort(error, signal);
+          throw classifyProviderError(error, provider.name);
         }
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
-      } finally {
-        parser.destroy();
-      }
+
+        let parser: ReturnType<typeof createParser> | undefined;
+
+        try {
+          request.check();
+          parser = createParser();
+          for await (const event of abortableChunks(request.value, request.signal)) {
+            const evt = event as unknown as Record<string, unknown>;
+            const eventType = evt.event_type as string;
+
+            if (eventType === 'error') {
+              const err = evt.error as { code?: string; message?: string } | undefined;
+              const message = err?.message ?? 'Unknown Interactions API error';
+              throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
+            }
+
+            if (eventType === 'step.start') {
+              // The first content block may arrive embedded in step.start
+              const step = evt.step as Record<string, unknown> | undefined;
+              if (!step) continue;
+
+              if (step.type === 'thought') {
+                const reasoning = extractGeminiReasoning([step]);
+                if (reasoning) {
+                  yield { reasoning };
+                }
+              } else if (step.type === 'model_output') {
+                const text = extractModelOutputText([step]);
+                if (text) {
+                  yield makeContentChunk(parser, text);
+                }
+              }
+            } else if (eventType === 'step.delta') {
+              const delta = evt.delta as Record<string, unknown> | undefined;
+              if (!delta) continue;
+
+              if (delta.type === 'text' && typeof delta.text === 'string' && delta.text) {
+                yield makeContentChunk(parser, delta.text);
+              } else if (delta.type === 'thought_summary') {
+                // Thought summary deltas carry a single content block
+                const contentBlock = delta.content as Record<string, unknown> | undefined;
+                if (contentBlock?.type === 'text' && typeof contentBlock.text === 'string' && contentBlock.text) {
+                  yield { reasoning: contentBlock.text };
+                }
+              }
+              // thought_signature and other delta types are intentionally ignored
+            } else if (eventType === 'interaction.completed') {
+              // Terminal event — extract token usage from the final interaction
+              const finalInteraction = evt.interaction as Record<string, unknown> | undefined;
+              const usage = extractGeminiUsage(finalInteraction?.usage);
+              if (usage) {
+                yield { usage };
+              }
+            }
+          }
+          request.check();
+        } catch (error) {
+          request.check();
+          rethrowAbort(error, signal);
+          if (error instanceof ProviderError) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
+        } finally {
+          request.dispose();
+          if (parser) parser.destroy();
+          else void closeStream(request.value);
+        }
+      }, params.signal);
     },
   });
 

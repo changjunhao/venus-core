@@ -56,5 +56,6 @@ export {
 export type { SubtypeForGenre, DimensionForGenre } from './schema/index.js';
 
 // ─── Errors ───────────────────────────────────────────────
-export { VenusError, ValidationError, ProviderError, SchemaError, TimeoutError } from './utils/errors.js';
+export { VenusError, ValidationError, ProviderError, SchemaError, TimeoutError, AbortError } from './utils/errors.js';
+export { isAbortError } from './utils/cancellation.js';
 export type { ProviderErrorCode } from './utils/errors.js';

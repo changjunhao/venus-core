@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { VenusEngine } from '../engine.js';
 import type {
   AdapterHooks,
+  CancellationOptions,
   EvaluateParams,
   EvaluationResult,
   GroupEvaluateParams,
@@ -15,6 +16,7 @@ import type {
 } from '../types.js';
 import { GenreEnum, EvaluationContextSchema, getMetadata } from '../schema/index.js';
 import { VenusError, ValidationError } from '../utils/errors.js';
+import { awaitWithSignal, isAbortError, throwIfAborted, toAbortError } from '../utils/cancellation.js';
 
 const EvaluationContextOptionalSchema = EvaluationContextSchema.optional();
 
@@ -25,12 +27,7 @@ const EvaluationContextOptionalSchema = EvaluationContextSchema.optional();
 /** 判断主机名是否指向私有/保留地址（loopback、RFC 1918、link-local、云元数据等） */
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal')
-  ) {
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
     return true;
   }
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
@@ -152,9 +149,19 @@ export function formatJSONLError(err: unknown): string {
  * Returns the params unchanged when no hook is configured, otherwise awaits
  * the hook (sync or async) and returns its transformed result.
  */
-export async function applyBeforeEvaluateHook(params: EvaluateParams, hooks?: AdapterHooks): Promise<EvaluateParams> {
+export async function applyBeforeEvaluateHook(
+  params: EvaluateParams,
+  hooks?: AdapterHooks,
+  options?: CancellationOptions,
+): Promise<EvaluateParams> {
+  throwIfAborted(options?.signal);
   if (!hooks?.beforeEvaluate) return params;
-  return await hooks.beforeEvaluate(params);
+  const result = await awaitWithSignal(
+    () => hooks.beforeEvaluate!(params, { signal: options?.signal }),
+    options?.signal,
+  );
+  throwIfAborted(options?.signal);
+  return result;
 }
 
 /** Shared POST /evaluate handler: validate body → apply hook → call engine.evaluate */
@@ -162,9 +169,11 @@ export async function handleEvaluate(
   engine: VenusEngine,
   body: unknown,
   hooks?: AdapterHooks,
+  options?: CancellationOptions,
 ): Promise<
   { ok: true; data: EvaluationResult } | { ok: false; status: 400; body: { error: { code: string; message: string } } }
 > {
+  throwIfAborted(options?.signal);
   const parsed = parseEvaluateRequest(body);
   if (!parsed.ok) return parsed;
   const params = await applyBeforeEvaluateHook(
@@ -174,8 +183,13 @@ export async function handleEvaluate(
       context: parsed.data.context,
     },
     hooks,
+    options,
   );
-  const result = await engine.evaluate(params.imageUrl, params.genre, params.context);
+  throwIfAborted(options?.signal);
+  const result = await awaitWithSignal(
+    () => engine.evaluate(params.imageUrl, params.genre, params.context, options),
+    options?.signal,
+  );
   return { ok: true, data: result };
 }
 
@@ -191,9 +205,16 @@ export { getMetadata as handleMetadata };
 export async function applyBeforeEvaluateGroupHook(
   params: GroupEvaluateParams,
   hooks?: AdapterHooks,
+  options?: CancellationOptions,
 ): Promise<GroupEvaluateParams> {
+  throwIfAborted(options?.signal);
   if (!hooks?.beforeEvaluateGroup) return params;
-  return await hooks.beforeEvaluateGroup(params);
+  const result = await awaitWithSignal(
+    () => hooks.beforeEvaluateGroup!(params, { signal: options?.signal }),
+    options?.signal,
+  );
+  throwIfAborted(options?.signal);
+  return result;
 }
 
 /** Shared POST /evaluate/group handler: validate body → apply hook → call engine.evaluateGroup */
@@ -201,10 +222,12 @@ export async function handleGroupEvaluate(
   engine: VenusEngine,
   body: unknown,
   hooks?: AdapterHooks,
+  options?: CancellationOptions,
 ): Promise<
   | { ok: true; data: GroupEvaluationResult }
   | { ok: false; status: 400; body: { error: { code: string; message: string } } }
 > {
+  throwIfAborted(options?.signal);
   const parsed = parseGroupEvaluateRequest(body);
   if (!parsed.ok) return parsed;
   const params = await applyBeforeEvaluateGroupHook(
@@ -216,12 +239,19 @@ export async function handleGroupEvaluate(
       includePerImage: parsed.data.includePerImage,
     },
     hooks,
+    options,
   );
-  const result = await engine.evaluateGroup(params.imageUrls, params.mode, {
-    genre: params.genre,
-    context: params.context,
-    includePerImage: params.includePerImage,
-  });
+  throwIfAborted(options?.signal);
+  const result = await awaitWithSignal(
+    () =>
+      engine.evaluateGroup(params.imageUrls, params.mode, {
+        genre: params.genre,
+        context: params.context,
+        includePerImage: params.includePerImage,
+        signal: options?.signal,
+      }),
+    options?.signal,
+  );
   return { ok: true, data: result };
 }
 
@@ -236,9 +266,11 @@ export async function handleGroupEvaluate(
 export async function resolveStreamParamsWithHook(
   body: unknown,
   hooks?: AdapterHooks,
+  options?: CancellationOptions,
 ): Promise<
   { ok: true; data: EvaluateParams } | { ok: false; status: 400; body: { error: { code: string; message: string } } }
 > {
+  throwIfAborted(options?.signal);
   const parsed = parseEvaluateRequest(body);
   if (!parsed.ok) return parsed;
   const params = await applyBeforeEvaluateHook(
@@ -249,6 +281,7 @@ export async function resolveStreamParamsWithHook(
       mode: parsed.data.mode,
     },
     hooks,
+    options,
   );
   return { ok: true, data: params };
 }
@@ -264,10 +297,12 @@ export async function resolveStreamParamsWithHook(
 export async function resolveGroupStreamParamsWithHook(
   body: unknown,
   hooks?: AdapterHooks,
+  options?: CancellationOptions,
 ): Promise<
   | { ok: true; data: GroupEvaluateParams }
   | { ok: false; status: 400; body: { error: { code: string; message: string } } }
 > {
+  throwIfAborted(options?.signal);
   const parsed = parseGroupEvaluateRequest(body);
   if (!parsed.ok) return parsed;
   const params = await applyBeforeEvaluateGroupHook(
@@ -280,6 +315,7 @@ export async function resolveGroupStreamParamsWithHook(
       streamMode: parsed.data.streamMode,
     },
     hooks,
+    options,
   );
   return { ok: true, data: params };
 }
@@ -290,9 +326,13 @@ export async function resolveGroupStreamParamsWithHook(
 
 /** Map an error to a framework-agnostic HTTP response { status, body } */
 export function mapErrorToResponse(error: unknown): {
-  status: 400 | 422 | 500;
+  status: 400 | 422 | 499 | 500;
   body: { error: { code: string; message: string } };
 } {
+  if (isAbortError(error)) {
+    const aborted = toAbortError(error);
+    return { status: 499, body: { error: { code: aborted.code, message: aborted.message } } };
+  }
   if (error instanceof ValidationError) {
     return { status: 400, body: { error: { code: error.code, message: error.message } } };
   }

@@ -25,6 +25,8 @@ import type {
 } from '../types.js';
 import { ProviderError } from '../utils/errors.js';
 import { classifyProviderError } from './provider-errors.js';
+import { awaitWithSignal, closeStream, rethrowAbort, throwIfAborted } from '../utils/cancellation.js';
+import { abortableChunks, cancellableStream } from '../utils/cancellable-stream.js';
 import { createLogger } from '../utils/logger.js';
 import { createParser } from 'vectorjson';
 import { defineProvider } from './factory.js';
@@ -268,12 +270,18 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
     },
 
     async chat(params: ChatParams): Promise<ChatResponse> {
+      throwIfAborted(params.signal);
       try {
         const requestBody = buildRequestBody(params);
 
-        const response = await client.responses.create(
-          requestBody as unknown as OpenAI.Responses.ResponseCreateParamsNonStreaming,
+        const response = await awaitWithSignal(
+          () =>
+            client.responses.create(requestBody as unknown as OpenAI.Responses.ResponseCreateParamsNonStreaming, {
+              signal: params.signal,
+            }),
+          params.signal,
         );
+        throwIfAborted(params.signal);
 
         const resp = response as unknown as Record<string, unknown>;
 
@@ -289,78 +297,93 @@ export function createOpenAIResponsesProvider(options: OpenAIResponsesProviderOp
         if (usage) result.usage = usage;
         return result;
       } catch (error) {
+        rethrowAbort(error, params.signal);
         throw classifyProviderError(error, provider.name);
       }
     },
 
-    async *chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
-      // Classify initial request failures (network / timeout / auth) like chat()
-      let stream: AsyncIterable<unknown>;
-      try {
-        const requestBody = buildRequestBody(params, true);
-        stream = await client.responses.create(
-          requestBody as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
-        );
-      } catch (error) {
-        throw classifyProviderError(error, provider.name);
-      }
+    chatStream(params: ChatParams): AsyncIterable<StreamChunk> {
+      return cancellableStream(async function* (signal) {
+        params = { ...params, signal };
+        throwIfAborted(signal);
+        // Classify initial request failures (network / timeout / auth) like chat()
+        let stream: AsyncIterable<unknown>;
+        try {
+          const requestBody = buildRequestBody(params, true);
+          stream = await awaitWithSignal(
+            () =>
+              client.responses.create(requestBody as unknown as OpenAI.Responses.ResponseCreateParamsStreaming, {
+                signal,
+              }),
+            signal,
+            closeStream,
+          );
+        } catch (error) {
+          rethrowAbort(error, params.signal);
+          throw classifyProviderError(error, provider.name);
+        }
 
-      const parser = createParser();
+        let parser: ReturnType<typeof createParser> | undefined;
 
-      try {
-        for await (const event of stream) {
-          const evt = event as Record<string, unknown>;
-          const eventType = evt.type as string;
+        try {
+          parser = createParser();
+          for await (const event of abortableChunks(stream, signal)) {
+            const evt = event as Record<string, unknown>;
+            const eventType = evt.type as string;
 
-          // Error / failure events — throw immediately.
-          // Top-level `error` events carry `message` directly; `response.error`
-          // carries it under `error`; `response.failed` under `response.error`.
-          if (eventType === 'error' || eventType === 'response.error' || eventType === 'response.failed') {
-            const failedResponse = evt.response as Record<string, unknown> | undefined;
-            const err = (eventType === 'response.failed' ? failedResponse?.error : (evt.error ?? evt)) as
-              { message?: string; code?: string; status?: number } | undefined;
-            const message = err?.message ?? 'Unknown Responses API error';
-            throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error', err?.status);
-          }
-
-          // Text content delta
-          if (eventType === 'response.output_text.delta') {
-            const delta = typeof evt.delta === 'string' ? evt.delta : '';
-            if (delta) {
-              yield makeContentChunk(parser, delta);
+            // Error / failure events — throw immediately.
+            // Top-level `error` events carry `message` directly; `response.error`
+            // carries it under `error`; `response.failed` under `response.error`.
+            if (eventType === 'error' || eventType === 'response.error' || eventType === 'response.failed') {
+              const failedResponse = evt.response as Record<string, unknown> | undefined;
+              const err = (eventType === 'response.failed' ? failedResponse?.error : (evt.error ?? evt)) as
+                { message?: string; code?: string; status?: number } | undefined;
+              const message = err?.message ?? 'Unknown Responses API error';
+              throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error', err?.status);
             }
-          } else if (eventType === 'response.reasoning_summary_text.delta') {
-            // Reasoning summary delta (streamed reasoning)
-            const delta = typeof evt.delta === 'string' ? evt.delta : '';
-            if (delta) {
-              yield { reasoning: delta };
-            }
-          } else if (eventType === 'response.reasoning_text.delta') {
-            // Raw chain-of-thought delta (Xiaomi MiMo; OpenAI gpt-oss variants)
-            const delta = typeof evt.delta === 'string' ? evt.delta : '';
-            if (delta) {
-              yield { reasoning: delta };
-            }
-          } else if (eventType === 'response.completed' || eventType === 'response.incomplete') {
-            // Terminal events — extract usage (only when includeUsage is not explicitly false)
-            if (options.includeUsage !== false) {
-              const finalResponse = evt.response as Record<string, unknown> | undefined;
-              if (finalResponse) {
-                const usage = extractResponsesTokenUsage(finalResponse);
-                if (usage) {
-                  yield { usage };
+
+            // Text content delta
+            if (eventType === 'response.output_text.delta') {
+              const delta = typeof evt.delta === 'string' ? evt.delta : '';
+              if (delta) {
+                yield makeContentChunk(parser, delta);
+              }
+            } else if (eventType === 'response.reasoning_summary_text.delta') {
+              // Reasoning summary delta (streamed reasoning)
+              const delta = typeof evt.delta === 'string' ? evt.delta : '';
+              if (delta) {
+                yield { reasoning: delta };
+              }
+            } else if (eventType === 'response.reasoning_text.delta') {
+              // Raw chain-of-thought delta (Xiaomi MiMo; OpenAI gpt-oss variants)
+              const delta = typeof evt.delta === 'string' ? evt.delta : '';
+              if (delta) {
+                yield { reasoning: delta };
+              }
+            } else if (eventType === 'response.completed' || eventType === 'response.incomplete') {
+              // Terminal events — extract usage (only when includeUsage is not explicitly false)
+              if (options.includeUsage !== false) {
+                const finalResponse = evt.response as Record<string, unknown> | undefined;
+                if (finalResponse) {
+                  const usage = extractResponsesTokenUsage(finalResponse);
+                  if (usage) {
+                    yield { usage };
+                  }
                 }
               }
             }
           }
+          throwIfAborted(signal);
+        } catch (error) {
+          rethrowAbort(error, signal);
+          if (error instanceof ProviderError) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
+        } finally {
+          if (parser) parser.destroy();
+          else void closeStream(stream);
         }
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        throw new ProviderError(`Stream call failed: ${message}`, provider.name, 'api_error');
-      } finally {
-        parser.destroy();
-      }
+      }, params.signal);
     },
   });
 

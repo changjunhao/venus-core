@@ -10,15 +10,16 @@
 
 工厂函数，用于创建引擎实例。
 
-### `engine.evaluate(imageUrl, genre?, context?): Promise<EvaluationResult>`
+### `engine.evaluate(imageUrl, genre?, context?, options?): Promise<EvaluationResult>`
 
 执行完整评估。所有轮次完成后返回结果。
 
-| 参数 | 类型 | 说明 |
-|-----------|------|-------------|
-| `imageUrl` | `string` | 待评估图片的 URL |
-| `genre` | `Genre` | 可选的门类覆盖；省略时自动检测 |
-| `context` | `EvaluationContext` | 可选的上下文，包含 EXIF 数据、用户备注和自定义元数据 |
+| 参数       | 类型                  | 说明                                                 |
+| ---------- | --------------------- | ---------------------------------------------------- |
+| `imageUrl` | `string`              | 待评估图片的 URL                                     |
+| `genre`    | `Genre`               | 可选的门类覆盖；省略时自动检测                       |
+| `context`  | `EvaluationContext`   | 可选的上下文，包含 EXIF 数据、用户备注和自定义元数据 |
+| `options`  | `CancellationOptions` | 可选的 `{ signal?: AbortSignal }`，用于端到端取消    |
 
 返回 `EvaluationResult`：
 
@@ -66,31 +67,34 @@ interface EvaluationResult {
 
 流式评估，在每个阶段产出事件：
 
-| 事件类型 | 说明 |
-|------------|-------------|
-| `evaluation_start` | 评估已开始 |
-| `genre_detected` | 门类自动检测结果（含推理） |
-| `agent_call` | 某个智能体轮次开始 |
-| `reasoning_chunk` | 实时推理文本（仅 `updates` 模式） |
-| `result_chunk` | 增量 JSON 片段（仅 `updates` 模式） |
-| `agent_complete` | 某个智能体轮次完成（含结果 + 推理） |
-| `evaluation_complete` | 最终结果就绪 |
-| `error` | 发生错误 |
+| 事件类型              | 说明                                |
+| --------------------- | ----------------------------------- |
+| `evaluation_start`    | 评估已开始                          |
+| `genre_detected`      | 门类自动检测结果（含推理）          |
+| `agent_call`          | 某个智能体轮次开始                  |
+| `reasoning_chunk`     | 实时推理文本（仅 `updates` 模式）   |
+| `result_chunk`        | 增量 JSON 片段（仅 `updates` 模式） |
+| `agent_complete`      | 某个智能体轮次完成（含结果 + 推理） |
+| `evaluation_complete` | 最终结果就绪                        |
+| `error`               | 发生错误                            |
+
+> 主动取消不会产出 `error` 或 `evaluation_complete`：`iterator.next()` 会以 `AbortError` 拒绝一次，后续读取则返回 `done`。参见[端到端取消](#端到端取消)。
 
 `EvaluateStreamOptions`：
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `genre` | `Genre \| null` | — | 预先指定门类（跳过自动检测） |
-| `context` | `EvaluationContext` | — | 附加评估上下文 |
-| `mode` | `'values' \| 'updates'` | `'values'` | 流式粒度模式 |
+| 选项      | 类型                    | 默认值     | 说明                                    |
+| --------- | ----------------------- | ---------- | --------------------------------------- |
+| `genre`   | `Genre \| null`         | —          | 预先指定门类（跳过自动检测）            |
+| `context` | `EvaluationContext`     | —          | 附加评估上下文                          |
+| `mode`    | `'values' \| 'updates'` | `'values'` | 流式粒度模式                            |
+| `signal`  | `AbortSignal`           | —          | 请求级取消信号（`CancellationOptions`） |
 
 **模式对比：**
 
-| 模式 | 行为 |
-|------|----------|
-| `values` | 仅发送里程碑事件：`agent_call`、`agent_complete`、`evaluation_start`、`genre_detected`、`evaluation_complete`、`error` |
-| `updates` | 包含 `values` 全部事件，外加实时 `reasoning_chunk` 和 `result_chunk` 事件用于增量 UI 更新 |
+| 模式      | 行为                                                                                                                   |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `values`  | 仅发送里程碑事件：`agent_call`、`agent_complete`、`evaluation_start`、`genre_detected`、`evaluation_complete`、`error` |
+| `updates` | 包含 `values` 全部事件，外加实时 `reasoning_chunk` 和 `result_chunk` 事件用于增量 UI 更新                              |
 
 ## 组图评估
 
@@ -98,28 +102,29 @@ interface EvaluationResult {
 
 提供两种模式：
 
-| 模式 | 含义 | 输出侧重 |
-|------|---------|--------------|
-| `joint` | 把多张图片作为一个系列/组照整体评估 | 组级 `sceneType`、`totalScore`、门类 `dimensions`，以及关于叙事与一致性的 `groupAnalysis` |
-| `compare` | 组内图片相互对比 | 完整 `ranking`（每张图的排名、分数、依据）与 `comparisonSummary` |
+| 模式      | 含义                                | 输出侧重                                                                                  |
+| --------- | ----------------------------------- | ----------------------------------------------------------------------------------------- |
+| `joint`   | 把多张图片作为一个系列/组照整体评估 | 组级 `sceneType`、`totalScore`、门类 `dimensions`，以及关于叙事与一致性的 `groupAnalysis` |
+| `compare` | 组内图片相互对比                    | 完整 `ranking`（每张图的排名、分数、依据）与 `comparisonSummary`                          |
 
 ### `engine.evaluateGroup(imageUrls, mode, options?): Promise<GroupEvaluationResult>`
 
 执行完整组图评估。所有轮次完成后返回结果。
 
-| 参数 | 类型 | 说明 |
-|-----------|------|-------------|
-| `imageUrls` | `string[]` | 待评估图片的 URL 数组 — **2 到 10 张**；超出范围抛出 `ValidationError` |
-| `mode` | `'joint' \| 'compare'` | 组图评估模式 |
-| `options` | `GroupEvaluateOptions` | 可选配置（见下） |
+| 参数        | 类型                   | 说明                                                                   |
+| ----------- | ---------------------- | ---------------------------------------------------------------------- |
+| `imageUrls` | `string[]`             | 待评估图片的 URL 数组 — **2 到 10 张**；超出范围抛出 `ValidationError` |
+| `mode`      | `'joint' \| 'compare'` | 组图评估模式                                                           |
+| `options`   | `GroupEvaluateOptions` | 可选配置（见下）                                                       |
 
 `GroupEvaluateOptions`：
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `genre` | `Genre \| null` | — | 为整组预先指定门类（跳过自动检测） |
-| `context` | `EvaluationContext` | — | 附加评估上下文（EXIF 数据、用户备注、自定义元数据） |
-| `includePerImage` | `boolean` | `false` | 是否额外要求逐图明细（`perImage`） |
+| 选项              | 类型                | 默认值  | 说明                                                |
+| ----------------- | ------------------- | ------- | --------------------------------------------------- |
+| `genre`           | `Genre \| null`     | —       | 为整组预先指定门类（跳过自动检测）                  |
+| `context`         | `EvaluationContext` | —       | 附加评估上下文（EXIF 数据、用户备注、自定义元数据） |
+| `includePerImage` | `boolean`           | `false` | 是否额外要求逐图明细（`perImage`）                  |
+| `signal`          | `AbortSignal`       | —       | 请求级取消信号（`CancellationOptions`）             |
 
 **`includePerImage` 与 token 成本**：该参数在**提示词与 JSON Schema 两层**同时控制。为 `false`（默认）时，提示词不要求逐图输出、Schema 也不含 `per_image` 字段，模型根本不会生成这些 token —— 是真实的节省，而非生成后过滤。为 `true` 时 Schema 增加 `per_image` 数组（长度必须等于图片数量），每项包含 `index` / `score` / `comment`。
 
@@ -138,7 +143,7 @@ interface GroupJointEvaluationResult {
   critique: string;
   suggestions: Suggestions;
   arbitrationNotes: ArbitrationNotes;
-  perImage?: PerImageDetail[];        // 仅当 includePerImage: true
+  perImage?: PerImageDetail[]; // 仅当 includePerImage: true
   process: {
     genreDetection?: AgentCallResult<{ genre: Genre; confidence: number }>;
     proposal: AgentCallResult<GroupJointProposerResult>;
@@ -158,8 +163,8 @@ interface GroupCompareEvaluationResult {
   comparisonSummary: string;
   suggestions: Suggestions;
   arbitrationNotes: ArbitrationNotes;
-  perImage?: PerImageDetail[];        // 仅当 includePerImage: true
-  process: { /* 结构相同，结果类型为 GroupCompare* 系列 */ };
+  perImage?: PerImageDetail[]; // 仅当 includePerImage: true
+  process: {/* 结构相同，结果类型为 GroupCompare* 系列 */};
   metadata: GroupEvaluationMetadata;
 }
 
@@ -173,7 +178,7 @@ interface GroupEvaluationMetadata {
 }
 
 interface PerImageDetail {
-  index: number;    // 在输入 imageUrls 数组中的位置（从 0 开始）
+  index: number; // 在输入 imageUrls 数组中的位置（从 0 开始）
   score: number;
   comment: string;
 }
@@ -185,23 +190,23 @@ interface PerImageDetail {
 
 流式组图评估。`GroupEvaluateStreamOptions` 在 `GroupEvaluateOptions` 基础上增加流式粒度：
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `genre` | `Genre \| null` | — | 预先指定门类（跳过自动检测） |
-| `context` | `EvaluationContext` | — | 附加评估上下文 |
-| `includePerImage` | `boolean` | `false` | 是否要求逐图明细 |
-| `mode` | `'values' \| 'updates'` | `'values'` | 流式粒度模式（组图模式是第二个位置参数，二者互不冲突） |
+| 选项              | 类型                    | 默认值     | 说明                                                   |
+| ----------------- | ----------------------- | ---------- | ------------------------------------------------------ |
+| `genre`           | `Genre \| null`         | —          | 预先指定门类（跳过自动检测）                           |
+| `context`         | `EvaluationContext`     | —          | 附加评估上下文                                         |
+| `includePerImage` | `boolean`               | `false`    | 是否要求逐图明细                                       |
+| `mode`            | `'values' \| 'updates'` | `'values'` | 流式粒度模式（组图模式是第二个位置参数，二者互不冲突） |
 
-| 事件类型 | 说明 |
-|------------|-------------|
-| `group_evaluation_start` | 组图评估已开始（`{ imageUrls, mode, genre }`） |
-| `genre_detected` | 整组的门类自动检测结果 |
-| `agent_call` | 某个智能体轮次开始 |
-| `reasoning_chunk` | 实时推理文本（仅 `updates` 模式） |
-| `result_chunk` | 增量 JSON 片段（仅 `updates` 模式） |
-| `agent_complete` | 某个智能体轮次完成（含结果 + 推理） |
-| `group_evaluation_complete` | 最终 `GroupEvaluationResult` 就绪 |
-| `error` | 发生错误（图片数量越界也走此事件） |
+| 事件类型                    | 说明                                           |
+| --------------------------- | ---------------------------------------------- |
+| `group_evaluation_start`    | 组图评估已开始（`{ imageUrls, mode, genre }`） |
+| `genre_detected`            | 整组的门类自动检测结果                         |
+| `agent_call`                | 某个智能体轮次开始                             |
+| `reasoning_chunk`           | 实时推理文本（仅 `updates` 模式）              |
+| `result_chunk`              | 增量 JSON 片段（仅 `updates` 模式）            |
+| `agent_complete`            | 某个智能体轮次完成（含结果 + 推理）            |
+| `group_evaluation_complete` | 最终 `GroupEvaluationResult` 就绪              |
+| `error`                     | 发生错误（图片数量越界也走此事件）             |
 
 事件顺序：第 0 轮 `agent_call` / `agent_complete` 与 `genre_detected`（仅在自动检测门类时）→ `group_evaluation_start` → 各轮 `agent_call` / `agent_complete` → `group_evaluation_complete`。失败（包括图片数量不在 2–10 范围内）以末尾的 `error` 事件形式产出，而不是抛出异常。
 
@@ -243,11 +248,11 @@ const ctx = EvaluationContextSchema.parse({ exif, userNotes: '...' });
 
 返回 `{ proposalSchema, arbiterSchema }` — `joint` 组图评估的 Zod Schema。批判轮直接复用 `getSchemas()` 中的通用 `critiqueSchema`，因此不包含在返回值中。
 
-| 参数 | 类型 | 说明 |
-|-----------|------|-------------|
-| `genre` | `Genre` | 决定场景子类型枚举与评分维度的门类 |
+| 参数              | 类型      | 说明                                                                   |
+| ----------------- | --------- | ---------------------------------------------------------------------- |
+| `genre`           | `Genre`   | 决定场景子类型枚举与评分维度的门类                                     |
 | `includePerImage` | `boolean` | 为 `true` 时 Schema 增加 `per_image` 数组；为 `false` 时完全不含该字段 |
-| `imageCount` | `number` | 组内图片数量 — 决定 `per_image` 数组的固定长度及 `index` 的取值范围 |
+| `imageCount`      | `number`  | 组内图片数量 — 决定 `per_image` 数组的固定长度及 `index` 的取值范围    |
 
 ```ts
 import { getGroupJointSchemas } from '@theogony/venus-core';
@@ -272,10 +277,10 @@ proposalSchema.parse({
 
 返回 `{ proposalSchema, arbiterSchema }` — `compare` 组图评估的 Zod Schema。注意**参数顺序与 joint 版本不同**：`compare` 的输出与门类无关，因此没有 `genre` 参数。
 
-| 参数 | 类型 | 说明 |
-|-----------|------|-------------|
-| `imageCount` | `number` | 组内图片数量 — 决定 `ranking`（以及 `per_image`）数组的固定长度 |
-| `includePerImage` | `boolean` | 为 `true` 时 Schema 增加 `per_image` 数组 |
+| 参数              | 类型      | 说明                                                            |
+| ----------------- | --------- | --------------------------------------------------------------- |
+| `imageCount`      | `number`  | 组内图片数量 — 决定 `ranking`（以及 `per_image`）数组的固定长度 |
+| `includePerImage` | `boolean` | 为 `true` 时 Schema 增加 `per_image` 数组                       |
 
 ```ts
 import { getGroupCompareSchemas } from '@theogony/venus-core';
@@ -296,14 +301,14 @@ proposalSchema.parse({
 
 两者共同强制的校验规则：
 
-| 规则 | 适用字段 |
-|------|-----------|
-| 数组长度必须等于 `imageCount` | `ranking`、`per_image` |
-| `index` 必须是 `0..imageCount - 1` 范围内的整数，且各项不得重复 | `ranking`、`per_image` |
-| `rank` 必须是整数，且构成 `1..imageCount` 的一个无重复排列 | `ranking` |
-| 文本字段（`rationale`、`comment`、`comparison_summary`、`group_analysis`、`critique`）不得为空 | 两种模式 |
-| `suggestions` 必须是包含 1–8 个非空单行字符串的数组 | 两种模式 |
-| `arbitration_notes` 必须包含场景判定、裁决数组和最终理由 | 仲裁 Schema |
+| 规则                                                                                           | 适用字段               |
+| ---------------------------------------------------------------------------------------------- | ---------------------- |
+| 数组长度必须等于 `imageCount`                                                                  | `ranking`、`per_image` |
+| `index` 必须是 `0..imageCount - 1` 范围内的整数，且各项不得重复                                | `ranking`、`per_image` |
+| `rank` 必须是整数，且构成 `1..imageCount` 的一个无重复排列                                     | `ranking`              |
+| 文本字段（`rationale`、`comment`、`comparison_summary`、`group_analysis`、`critique`）不得为空 | 两种模式               |
+| `suggestions` 必须是包含 1–8 个非空单行字符串的数组                                            | 两种模式               |
+| `arbitration_notes` 必须包含场景判定、裁决数组和最终理由                                       | 仲裁 Schema            |
 
 ### `getProposerResultSchema(genre: Genre)`
 
@@ -330,12 +335,12 @@ const validated = schema.parse({
 import { getGenreConfig } from '@theogony/venus-core';
 
 const cfg = getGenreConfig('portrait');
-console.log(cfg.label);             // '人像摄影'
-console.log(cfg.dimensions);        // ['facial_expression', 'pose_body', ...]
-console.log(cfg.dimensionLabels);   // ['神态', '姿态', ...]
-console.log(cfg.subtypes);          // ['studio', 'environmental', 'wedding']
-console.log(cfg.dimensionNames);    // { facial_expression: '面部神态', ... }
-console.log(cfg.subtypeNames);      // { studio: '棚拍/写真', ... }
+console.log(cfg.label); // '人像摄影'
+console.log(cfg.dimensions); // ['facial_expression', 'pose_body', ...]
+console.log(cfg.dimensionLabels); // ['神态', '姿态', ...]
+console.log(cfg.subtypes); // ['studio', 'environmental', 'wedding']
+console.log(cfg.dimensionNames); // { facial_expression: '面部神态', ... }
+console.log(cfg.subtypeNames); // { studio: '棚拍/写真', ... }
 ```
 
 ### `getMetadata(): Record<string, GenreMetadata>`
@@ -368,19 +373,19 @@ const provider = createOpenAIChatProvider({
   defaultModel: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
   timeout: 120_000,
   headers: { 'Custom-Header': 'value' },
-  defaultExtra: { /* 厂商特定参数 */ },
+  defaultExtra: {/* 厂商特定参数 */},
 });
 ```
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `baseURL` | `string` | *必填* | OpenAI 兼容 API 基础 URL |
-| `apiKey` | `string` | *必填* | API 密钥 |
-| `defaultModel` | `string` | — | 默认模型标识 |
-| `headers` | `Record<string, string>` | — | 额外 HTTP 头 |
-| `timeout` | `number` | 60000 | 请求超时（毫秒） |
-| `defaultExtra` | `Record<string, unknown>` | — | 厂商特定额外参数 |
-| `includeUsage` | `boolean` | `true` | 是否在流式模式下通过 `stream_options.include_usage` 请求 token 用量统计。对于不支持此参数的端点，设置为 `false`。 |
+| 选项           | 类型                      | 默认值 | 说明                                                                                                              |
+| -------------- | ------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
+| `baseURL`      | `string`                  | _必填_ | OpenAI 兼容 API 基础 URL                                                                                          |
+| `apiKey`       | `string`                  | _必填_ | API 密钥                                                                                                          |
+| `defaultModel` | `string`                  | —      | 默认模型标识                                                                                                      |
+| `headers`      | `Record<string, string>`  | —      | 额外 HTTP 头                                                                                                      |
+| `timeout`      | `number`                  | 60000  | 请求超时（毫秒）                                                                                                  |
+| `defaultExtra` | `Record<string, unknown>` | —      | 厂商特定额外参数                                                                                                  |
+| `includeUsage` | `boolean`                 | `true` | 是否在流式模式下通过 `stream_options.include_usage` 请求 token 用量统计。对于不支持此参数的端点，设置为 `false`。 |
 
 > **关于结构化输出**：此提供商声明 `structuredOutput: 'json_object'`。传入的任何
 > `json_schema` 类型的 `response_format` 都会**降级为 `json_object`**（schema 不会发送
@@ -402,15 +407,15 @@ const provider = createOpenAIResponsesProvider({
 });
 ```
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `baseURL` | `string` | *必填* | OpenAI API 基础 URL |
-| `apiKey` | `string` | *必填* | API 密钥 |
-| `defaultModel` | `string` | — | 默认模型标识 |
-| `headers` | `Record<string, string>` | — | 额外 HTTP 头 |
-| `timeout` | `number` | 60000 | 请求超时（毫秒） |
-| `defaultExtra` | `Record<string, unknown>` | — | 提供商特定的默认额外参数 |
-| `includeUsage` | `boolean` | `true` | 是否在流式模式下请求 token 用量统计 |
+| 选项           | 类型                      | 默认值 | 说明                                |
+| -------------- | ------------------------- | ------ | ----------------------------------- |
+| `baseURL`      | `string`                  | _必填_ | OpenAI API 基础 URL                 |
+| `apiKey`       | `string`                  | _必填_ | API 密钥                            |
+| `defaultModel` | `string`                  | —      | 默认模型标识                        |
+| `headers`      | `Record<string, string>`  | —      | 额外 HTTP 头                        |
+| `timeout`      | `number`                  | 60000  | 请求超时（毫秒）                    |
+| `defaultExtra` | `Record<string, unknown>` | —      | 提供商特定的默认额外参数            |
+| `includeUsage` | `boolean`                 | `true` | 是否在流式模式下请求 token 用量统计 |
 
 ### `createAnthropicProvider(options: AnthropicProviderOptions): LLMProvider`
 
@@ -427,15 +432,15 @@ const provider = createAnthropicProvider({
 });
 ```
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `apiKey` | `string` | *必填* | Anthropic API 密钥 |
-| `defaultModel` | `string` | — | 默认模型标识符 |
-| `baseURL` | `string` | `https://api.anthropic.com` | API 基础 URL 覆盖 |
-| `timeout` | `number` | 60000 | 请求超时（毫秒） |
-| `headers` | `Record<string, string>` | — | 额外 HTTP 请求头 |
-| `defaultExtra` | `Record<string, unknown>` | — | 提供商特定的默认额外参数 |
-| `defaultMaxTokens` | `number` | 4096 | 未通过 `extra.max_tokens` 提供时的默认 `max_tokens` |
+| 选项               | 类型                      | 默认值                      | 说明                                                |
+| ------------------ | ------------------------- | --------------------------- | --------------------------------------------------- |
+| `apiKey`           | `string`                  | _必填_                      | Anthropic API 密钥                                  |
+| `defaultModel`     | `string`                  | —                           | 默认模型标识符                                      |
+| `baseURL`          | `string`                  | `https://api.anthropic.com` | API 基础 URL 覆盖                                   |
+| `timeout`          | `number`                  | 60000                       | 请求超时（毫秒）                                    |
+| `headers`          | `Record<string, string>`  | —                           | 额外 HTTP 请求头                                    |
+| `defaultExtra`     | `Record<string, unknown>` | —                           | 提供商特定的默认额外参数                            |
+| `defaultMaxTokens` | `number`                  | 4096                        | 未通过 `extra.max_tokens` 提供时的默认 `max_tokens` |
 
 ### `createGeminiProvider(options: GeminiProviderOptions): LLMProvider`
 
@@ -452,34 +457,34 @@ const provider = createGeminiProvider({
 });
 ```
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `apiKey` | `string` | *必填* | Gemini API 密钥 |
-| `defaultModel` | `string` | — | 默认模型标识符 |
-| `baseURL` | `string` | `https://generativelanguage.googleapis.com` | API 基础 URL 覆盖 |
-| `timeout` | `number` | 60000 | 请求超时（毫秒） |
-| `headers` | `Record<string, string>` | — | 额外 HTTP 请求头 |
-| `defaultExtra` | `Record<string, unknown>` | — | 提供商特定的默认额外参数 |
+| 选项           | 类型                      | 默认值                                      | 说明                     |
+| -------------- | ------------------------- | ------------------------------------------- | ------------------------ |
+| `apiKey`       | `string`                  | _必填_                                      | Gemini API 密钥          |
+| `defaultModel` | `string`                  | —                                           | 默认模型标识符           |
+| `baseURL`      | `string`                  | `https://generativelanguage.googleapis.com` | API 基础 URL 覆盖        |
+| `timeout`      | `number`                  | 60000                                       | 请求超时（毫秒）         |
+| `headers`      | `Record<string, string>`  | —                                           | 额外 HTTP 请求头         |
+| `defaultExtra` | `Record<string, unknown>` | —                                           | 提供商特定的默认额外参数 |
 
 ### `defineProvider(options: DefineProviderOptions): LLMProvider`
 
 通过直接实现 `chat()` 方法创建完全自定义的提供商。
 
-| 选项 | 类型 | 默认值 | 说明 |
-|--------|------|---------|-------------|
-| `name` | `string` | *必填* | 用于日志的提供商名称 |
-| `capabilities` | `ProviderCapabilities` | — | 提供商能力标志 |
-| `chat` | `(params: ChatParams) => Promise<ChatResponse>` | *必填* | 聊天补全实现 |
-| `chatStream` | `(params: ChatParams) => AsyncIterable<StreamChunk>` | — | 可选的流式实现 |
+| 选项           | 类型                                                 | 默认值 | 说明                 |
+| -------------- | ---------------------------------------------------- | ------ | -------------------- |
+| `name`         | `string`                                             | _必填_ | 用于日志的提供商名称 |
+| `capabilities` | `ProviderCapabilities`                               | —      | 提供商能力标志       |
+| `chat`         | `(params: ChatParams) => Promise<ChatResponse>`      | _必填_ | 聊天补全实现         |
+| `chatStream`   | `(params: ChatParams) => AsyncIterable<StreamChunk>` | —      | 可选的流式实现       |
 
 `ProviderCapabilities`：
 
 ```ts
 interface ProviderCapabilities {
-  reasoning: boolean;       // 支持推理/思维模式
+  reasoning: boolean; // 支持推理/思维模式
   reasoningBudget: boolean; // 支持显式 token 预算
-  vision: boolean;          // 支持图像输入
-  streaming: boolean;       // 支持流式
+  vision: boolean; // 支持图像输入
+  streaming: boolean; // 支持流式
   structuredOutput?: 'json_object' | 'json_schema'; // 结构化输出支持（见下文）
 }
 ```
@@ -488,10 +493,10 @@ interface ProviderCapabilities {
 
 `structuredOutput` 能力决定智能体如何请求和校验 JSON 输出：
 
-| 取值 | 智能体行为 |
-|------|-----------|
-| `'json_object'` 或省略 | 请求 `response_format: { type: 'json_object' }`。智能体解析 JSON、用 Zod schema 校验，并在失败时携带修复提示重试最多 `maxRetries` 次；全部失败后抛出 `SchemaError`。 |
-| `'json_schema'` | 智能体从 Zod schema 构建严格 JSON Schema，发送 `response_format: { type: 'json_schema', ... }`，**单次调用 — 不重试、不做本地 Zod 校验**（`maxRetries` 不适用）。schema 合规性完全信任提供商/API。若响应不是合法 JSON，立即抛出 `errorCode: 'parse_error'` 的 `ProviderError`。 |
+| 取值                   | 智能体行为                                                                                                                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'json_object'` 或省略 | 请求 `response_format: { type: 'json_object' }`。智能体解析 JSON、用 Zod schema 校验，并在失败时携带修复提示重试最多 `maxRetries` 次；全部失败后抛出 `SchemaError`。                                                                                                            |
+| `'json_schema'`        | 智能体从 Zod schema 构建严格 JSON Schema，发送 `response_format: { type: 'json_schema', ... }`，**单次调用 — 不重试、不做本地 Zod 校验**（`maxRetries` 不适用）。schema 合规性完全信任提供商/API。若响应不是合法 JSON，立即抛出 `errorCode: 'parse_error'` 的 `ProviderError`。 |
 
 > **警告**：仅当底层 API 确实保证 schema 合规输出时（如 OpenAI Responses API），才应在
 > 自定义提供商上声明 `structuredOutput: 'json_schema'`。声明后会完全禁用智能体侧的
@@ -499,12 +504,12 @@ interface ProviderCapabilities {
 
 内置提供商支持情况：
 
-| 提供商 | `structuredOutput` | 说明 |
-|--------|--------------------|------|
-| `createOpenAIChatProvider` | `'json_object'` | `json_schema` response_format 会降级为 `json_object` 并输出警告 |
-| `createOpenAIResponsesProvider` | `'json_schema'` | 通过 `text.format` 支持严格 schema；小米 MiMo 端点声明 `'json_object'`（其 `text.format` 不支持 json_schema 强约束） |
-| `createAnthropicProvider` | `'json_schema'` | 通过 `output_config.format` 由服务端强制执行严格 schema；DashScope 兼容端点会在客户端剥离不支持的 schema 关键字（如 `multipleOf`） |
-| `createGeminiProvider` | `'json_schema'` | 通过 `response_format` 支持严格 schema（Interactions API） |
+| 提供商                          | `structuredOutput` | 说明                                                                                                                               |
+| ------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `createOpenAIChatProvider`      | `'json_object'`    | `json_schema` response_format 会降级为 `json_object` 并输出警告                                                                    |
+| `createOpenAIResponsesProvider` | `'json_schema'`    | 通过 `text.format` 支持严格 schema；小米 MiMo 端点声明 `'json_object'`（其 `text.format` 不支持 json_schema 强约束）               |
+| `createAnthropicProvider`       | `'json_schema'`    | 通过 `output_config.format` 由服务端强制执行严格 schema；DashScope 兼容端点会在客户端剥离不支持的 schema 关键字（如 `multipleOf`） |
+| `createGeminiProvider`          | `'json_schema'`    | 通过 `response_format` 支持严格 schema（Interactions API）                                                                         |
 
 #### 流式 JSON 增量（`StreamChunk.partial`）
 
@@ -536,7 +541,7 @@ const myProvider = defineProvider({
       body: JSON.stringify({
         model: params.model,
         messages: params.messages,
-        reasoning: params.reasoning,  // 访问推理参数
+        reasoning: params.reasoning, // 访问推理参数
       }),
     });
     const data = await res.json();
@@ -564,15 +569,17 @@ const engine = createVenusEngine({
 
 所有错误均继承 `VenusError` 并带有 `code` 属性：
 
-| 错误类 | 代码 | 说明 |
-|-------------|------|-------------|
-| `VenusError` | `VENUS_ERROR` | 基础错误类 |
-| `ValidationError` | `VALIDATION_ERROR` | 输入无效（URL 错误、未知门类） |
-| `ProviderError` | `PROVIDER_ERROR` | LLM 提供商故障 |
-| `SchemaError` | `SCHEMA_ERROR` | 智能体输出 Schema 校验失败 |
-| `TimeoutError` | `TIMEOUT_ERROR` | 评估超时 |
+| 错误类            | 代码               | 说明                                                                   |
+| ----------------- | ------------------ | ---------------------------------------------------------------------- |
+| `VenusError`      | `VENUS_ERROR`      | 基础错误类                                                             |
+| `ValidationError` | `VALIDATION_ERROR` | 输入无效（URL 错误、未知门类）                                         |
+| `ProviderError`   | `PROVIDER_ERROR`   | LLM 提供商故障                                                         |
+| `SchemaError`     | `SCHEMA_ERROR`     | 智能体输出 Schema 校验失败                                             |
+| `TimeoutError`    | `TIMEOUT_ERROR`    | 评估超时                                                               |
+| `AbortError`      | `ABORTED`          | 端到端取消（`AbortSignal` 中止、迭代器提前 return 或 HTTP 客户端断连） |
 
 `ProviderError` 包含用于细粒度诊断的额外字段：
+
 - `provider: string` — 失败提供商的名称
 - `errorCode: ProviderErrorCode` — 以下之一：`'network' | 'api_error' | 'parse_error' | 'timeout' | 'auth_error' | 'unknown'`
 - `statusCode?: number` — HTTP 状态码（如适用）
@@ -595,6 +602,54 @@ try {
   }
 }
 ```
+
+## 端到端取消
+
+所有四个 Engine 入口 (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`) 都接收 `CancellationOptions = { signal?: AbortSignal }`，Adapter 会自动把 HTTP 客户端取消（Express/Hono/Nitro 上的 `AbortSignal` 或 `reader.cancel()`）接到同一取消作用域。
+
+```ts
+import { AbortError, isAbortError } from '@theogony/venus-core';
+
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5_000);
+
+// 非流式
+try {
+  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
+} catch (err) {
+  if (isAbortError(err)) {
+    // 取消：不再启动新的轮次、不重试、也不产生合成结果
+  }
+}
+
+// 流式：主动 signal 取消会使 iterator.next() 抛出一次 AbortError
+try {
+  for await (const event of engine.evaluateStream(imageUrl, { signal: controller.signal })) {
+    // …
+  }
+} catch (err) {
+  if (err instanceof AbortError) {
+    // 已发出的事件保留；缺失的 agent_complete / evaluation_complete 是预期行为
+  }
+}
+```
+
+行为矩阵：
+
+| 场景                      | 结果                                                                |
+| ------------------------- | ------------------------------------------------------------------- |
+| 非流式主动取消            | `Promise` 以 `AbortError` reject                                    |
+| 流式 signal 主动取消      | `next()` 以 `AbortError` reject 一次；不产出 `error` 或合成完成事件 |
+| 消费者 `break` / `return` | 同步中止底层请求；已有 `next()` 允许以 `AbortError` 拒绝            |
+| 预先 aborted              | 不调用 hook、Agent 或 Provider；非流式立即拒绝，流式首次消费时拒绝  |
+| HTTP 客户端断连           | 服务器静默清理，不再写帧；未提交的非流式响应返回 `499 ABORTED`      |
+| 完成后再取消              | 不改变已提交结果，不影响并发请求                                    |
+
+`onEvent` 会额外收到 `{ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } }`；同一作用域至多一次，取消不再产生 `error` 观测事件。
+
+内置 Provider（OpenAI Chat / OpenAI Responses / Anthropic / Gemini）把 `signal` 交给底层 SDK，中止尚未完成的 fetch 与响应体读取；已启动的本地网络操作会中止，厂商服务端是否立即停算/停止计费不在 SDK 保证范围内。自定义 Provider 与 `beforeEvaluate` hook 需读取 `options.signal` 才能被及时打断；不合作的外部 I/O 只保证停止后续调度并丢弃迟到结果。
+
+> Gemini Provider 会接管 SDK 内部的连接重试：传 `signal` 后仍遵守 `options.timeout`（默认 60s）并使用可取消的指数退避（首次尝试 + 最多 4 次 HTTP 状态码重试，覆盖 408/409/429/5xx）；Agent 层的 `maxRetries` 语义（Schema 自修复）保持不变。
 
 ## 类型导出
 
@@ -629,7 +684,7 @@ import type {
   GroupJointArbitrationResult,
   GroupCompareArbitrationResult,
   PerImageDetail,
-  
+
   // 提供商类型
   LLMProvider,
   ProviderCapabilities,
@@ -648,7 +703,7 @@ import type {
   AnthropicProviderOptions,
   GeminiProviderOptions,
   DefineProviderOptions,
-  
+
   // 引擎和智能体类型
   VenusEngineConfig,
   AgentRole,
@@ -656,14 +711,14 @@ import type {
   AgentCallResult,
   ModelConfig,
   ProviderConfig,
-  
+
   // 结果类型
   ProposerResult,
   ArbitrationResult,
   CritiqueResult,
   CritiqueChallenge,
   SceneTypeReview,
-  
+
   // 错误类型
   ProviderErrorCode,
   VenusError,
@@ -671,7 +726,7 @@ import type {
   ProviderError,
   SchemaError,
   TimeoutError,
-  
+
   // 适配器类型
   AdapterOptions,
   AdapterHooks,

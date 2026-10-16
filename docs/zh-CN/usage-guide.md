@@ -67,10 +67,10 @@ for await (const event of engine.evaluateStream('https://example.com/photo.jpg',
 
 `evaluateGroup()` 通过同一套对抗管线**一次评估 2 到 10 张图片**。组图模式是第二个位置参数：
 
-| 模式 | 适用场景 | 关键结果字段 |
-|------|-----------|-------------------|
-| `joint` | 把系列/组照作为整体评判 | `sceneType`、`totalScore`、`dimensions`、`groupAnalysis`、`critique`、`suggestions` |
-| `compare` | 让组内图片相互对比排名 | `ranking`（每张图含 `index`、`rank`、`score`、`rationale`）、`comparisonSummary`、`suggestions` |
+| 模式      | 适用场景                | 关键结果字段                                                                                    |
+| --------- | ----------------------- | ----------------------------------------------------------------------------------------------- |
+| `joint`   | 把系列/组照作为整体评判 | `sceneType`、`totalScore`、`dimensions`、`groupAnalysis`、`critique`、`suggestions`             |
+| `compare` | 让组内图片相互对比排名  | `ranking`（每张图含 `index`、`rank`、`score`、`rationale`）、`comparisonSummary`、`suggestions` |
 
 ```ts
 const imageUrls = [
@@ -82,8 +82,8 @@ const imageUrls = [
 // 联合评估 — 把整组当作一件作品
 const joint = await engine.evaluateGroup(imageUrls, 'joint', { genre: 'portrait' });
 if (joint.mode === 'joint') {
-  console.log(joint.totalScore);     // 8.4
-  console.log(joint.groupAnalysis);  // 系列的叙事 / 一致性分析
+  console.log(joint.totalScore); // 8.4
+  console.log(joint.groupAnalysis); // 系列的叙事 / 一致性分析
 }
 
 // 对比评估 — 组内图片相互排名
@@ -156,14 +156,17 @@ const engine = createVenusEngine({
 });
 
 const app = new Hono();
-app.route('/api', createHonoAdapter(engine, {
-  hooks: {
-    beforeEvaluate: async (params) => {
-      // 例如：上传图片到文件 API、注入 EXIF 上下文
-      return params;
+app.route(
+  '/api',
+  createHonoAdapter(engine, {
+    hooks: {
+      beforeEvaluate: async (params) => {
+        // 例如：上传图片到文件 API、注入 EXIF 上下文
+        return params;
+      },
     },
-  },
-}));
+  }),
+);
 
 export default app; // 适用于 Bun、Deno、Node、Cloudflare Workers 等
 ```
@@ -184,14 +187,17 @@ const engine = createVenusEngine({
 
 const app = express();
 app.use(express.json());
-app.use('/api', createExpressAdapter(engine, {
-  hooks: {
-    beforeEvaluate: async (params) => {
-      // 在评估前转换已验证的参数
-      return params;
+app.use(
+  '/api',
+  createExpressAdapter(engine, {
+    hooks: {
+      beforeEvaluate: async (params) => {
+        // 在评估前转换已验证的参数
+        return params;
+      },
     },
-  },
-}));
+  }),
+);
 app.listen(3000);
 ```
 
@@ -224,35 +230,35 @@ export default useBase('/api', venus.handler);
 
 三种适配器暴露相同的端点：
 
-| 方法 | 路径 | 说明 |
-|--------|------|-------------|
-| `POST` | `/evaluate` | 同步评估 |
-| `POST` | `/evaluate/stream` | 流式评估（SSE / `text/event-stream`） |
-| `POST` | `/evaluate/stream/jsonl` | 流式评估（JSON Lines / `application/x-ndjson`） |
-| `POST` | `/evaluate/group` | 同步组图评估（2–10 张图片） |
-| `POST` | `/evaluate/group/stream` | 流式组图评估（SSE / `text/event-stream`） |
+| 方法   | 路径                           | 说明                                                |
+| ------ | ------------------------------ | --------------------------------------------------- |
+| `POST` | `/evaluate`                    | 同步评估                                            |
+| `POST` | `/evaluate/stream`             | 流式评估（SSE / `text/event-stream`）               |
+| `POST` | `/evaluate/stream/jsonl`       | 流式评估（JSON Lines / `application/x-ndjson`）     |
+| `POST` | `/evaluate/group`              | 同步组图评估（2–10 张图片）                         |
+| `POST` | `/evaluate/group/stream`       | 流式组图评估（SSE / `text/event-stream`）           |
 | `POST` | `/evaluate/group/stream/jsonl` | 流式组图评估（JSON Lines / `application/x-ndjson`） |
-| `GET` | `/metadata` | 门类元数据和维度信息 |
+| `GET`  | `/metadata`                    | 门类元数据和维度信息                                |
 
 ### 组图评估端点
 
 三个组图端点接受相同的 JSON 请求体：
 
-| 字段 | 类型 | 必填 | 说明 |
-|-------|------|----------|-------------|
-| `imageUrls` | `string[]` | 是 | 2–10 个图片 URL；指向私有/保留主机的 URL 会被拒绝（SSRF 防护） |
-| `mode` | `'joint' \| 'compare'` | 是 | **组图评估模式** |
-| `genre` | `Genre` | 否 | 预先指定门类；省略时自动检测 |
-| `context` | `EvaluationContext` | 否 | EXIF 数据、用户备注、自定义元数据 |
-| `includePerImage` | `boolean` | 否 | 是否要求逐图明细（默认 `false`） |
-| `streamMode` | `'values' \| 'updates'` | 否 | **流式粒度**，仅流式端点有效（默认 `values`） |
+| 字段              | 类型                    | 必填 | 说明                                                           |
+| ----------------- | ----------------------- | ---- | -------------------------------------------------------------- |
+| `imageUrls`       | `string[]`              | 是   | 2–10 个图片 URL；指向私有/保留主机的 URL 会被拒绝（SSRF 防护） |
+| `mode`            | `'joint' \| 'compare'`  | 是   | **组图评估模式**                                               |
+| `genre`           | `Genre`                 | 否   | 预先指定门类；省略时自动检测                                   |
+| `context`         | `EvaluationContext`     | 否   | EXIF 数据、用户备注、自定义元数据                              |
+| `includePerImage` | `boolean`               | 否   | 是否要求逐图明细（默认 `false`）                               |
+| `streamMode`      | `'values' \| 'updates'` | 否   | **流式粒度**，仅流式端点有效（默认 `values`）                  |
 
 **`mode` 与 `streamMode` 的区别** —— 组图端点带有两个相互独立的开关：
 
-| 字段 | 取值 | 含义 | SDK 对应 |
-|-------|--------|---------|----------------|
-| `mode` | `joint` / `compare` | 评估*什么*：整组联合评估，还是组内相互对比 | `evaluateGroup()` / `evaluateGroupStream()` 的第 2 个位置参数 |
-| `streamMode` | `values` / `updates` | 事件产出的*粒度*：仅里程碑事件，还是额外含 `reasoning_chunk` / `result_chunk` | `evaluateGroupStream()` 的 `options.mode` |
+| 字段         | 取值                 | 含义                                                                          | SDK 对应                                                      |
+| ------------ | -------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `mode`       | `joint` / `compare`  | 评估*什么*：整组联合评估，还是组内相互对比                                    | `evaluateGroup()` / `evaluateGroupStream()` 的第 2 个位置参数 |
+| `streamMode` | `values` / `updates` | 事件产出的*粒度*：仅里程碑事件，还是额外含 `reasoning_chunk` / `result_chunk` | `evaluateGroupStream()` 的 `options.mode`                     |
 
 > 单图端点的粒度字段名为 `mode`（那里不存在评估模式）。组图端点将其改名为 `streamMode`，从而让 `mode` 承载 `joint` / `compare`。
 
@@ -411,11 +417,11 @@ interface EvaluateParams {
 ```ts
 interface GroupEvaluateParams {
   imageUrls: string[];
-  mode: GroupEvaluationMode;   // 'joint' | 'compare'
+  mode: GroupEvaluationMode; // 'joint' | 'compare'
   genre: Genre | null;
   context?: EvaluationContext;
   includePerImage?: boolean;
-  streamMode?: StreamMode;     // 'values' | 'updates'
+  streamMode?: StreamMode; // 'values' | 'updates'
 }
 ```
 
@@ -484,21 +490,17 @@ Venus 支持通过 `EvaluationContext` 传递额外上下文以增强评估准�
 将 EXIF 元数据作为一等公民传入。引擎会将 EXIF 参数按**门类感知的注入深度**格式化到智能体提示中：
 
 ```ts
-const result = await engine.evaluate(
-  'https://example.com/photo.jpg',
-  'portrait',
-  {
-    exif: {
-      shutterSpeed: '1/2000',
-      iso: 400,
-      fNumber: 2.8,
-      focalLength: 85,
-      cameraModel: 'SONY ILCE-7M4',
-      lensModel: 'FE 85mm F1.4 GM',
-      dateTimeOriginal: '2026:03:15 14:30:00',
-    },
+const result = await engine.evaluate('https://example.com/photo.jpg', 'portrait', {
+  exif: {
+    shutterSpeed: '1/2000',
+    iso: 400,
+    fNumber: 2.8,
+    focalLength: 85,
+    cameraModel: 'SONY ILCE-7M4',
+    lensModel: 'FE 85mm F1.4 GM',
+    dateTimeOriginal: '2026:03:15 14:30:00',
   },
-);
+});
 ```
 
 ### 用户备注
@@ -506,13 +508,9 @@ const result = await engine.evaluate(
 提供自由文本备注，让智能体了解拍摄条件或创作意图的额外上下文：
 
 ```ts
-const result = await engine.evaluate(
-  'https://example.com/photo.jpg',
-  'landscape',
-  {
-    userNotes: 'Shot at sunrise with a GND graduated filter to darken the sky',
-  },
-);
+const result = await engine.evaluate('https://example.com/photo.jpg', 'landscape', {
+  userNotes: 'Shot at sunrise with a GND graduated filter to darken the sky',
+});
 ```
 
 ### 完整上下文示例
@@ -527,8 +525,8 @@ const result = await engine.evaluate(imageUrl, 'sports', {
 });
 
 // 上下文在结果元数据中返回
-console.log(result.metadata.context?.exif);      // { shutterSpeed: '1/4000', ... }
-console.log(result.metadata.context?.userNotes);  // '2026 National Athletics ...'
+console.log(result.metadata.context?.exif); // { shutterSpeed: '1/4000', ... }
+console.log(result.metadata.context?.userNotes); // '2026 National Athletics ...'
 ```
 
 ### 通过 Web 框架适配器传递上下文
@@ -554,14 +552,14 @@ Schema 校验自动应用：`userNotes` 限制为 2000 字符，所有 EXIF 字�
 
 EXIF 数据根据摄影门类以不同强度注入提示：
 
-| 注入级别 | 门类 | 行为 |
-|----------------|--------|----------|
-| **高** | 体育、自然 | EXIF 参数（快门、焦距）被强调为与评估直接相关 |
-| **标准** | 人像、风光 | EXIF 作为参考参数显示 |
-| **轻量** | 建筑、商业、纪实 | 紧凑的单行摘要，不强调 |
-| **最小** | 艺术 | 明确注明仅供参考；艺术表达优先 |
+| 注入级别 | 门类             | 行为                                          |
+| -------- | ---------------- | --------------------------------------------- |
+| **高**   | 体育、自然       | EXIF 参数（快门、焦距）被强调为与评估直接相关 |
+| **标准** | 人像、风光       | EXIF 作为参考参数显示                         |
+| **轻量** | 建筑、商业、纪实 | 紧凑的单行摘要，不强调                        |
+| **最小** | 艺术             | 明确注明仅供参考；艺术表达优先                |
 
-始终附加免责声明：*"EXIF 数据可能经过后期处理修改；实际视觉效果为最终评判依据。"*
+始终附加免责声明：_"EXIF 数据可能经过后期处理修改；实际视觉效果为最终评判依据。"_
 
 ## 事件系统
 
@@ -579,15 +577,70 @@ const engine = createVenusEngine({
 });
 ```
 
-| 事件类型 | 负载 |
-|------------|---------|
-| `round_start` | `{ round, agent, data }` |
-| `round_complete` | `{ round }` |
-| `agent_call` | `{ round, agent }` |
-| `agent_complete` | `{ round, agent, data: { result, reasoning } }` |
-| `error` | `{ agent, data: { error } }` |
+| 事件类型         | 负载                                                                   |
+| ---------------- | ---------------------------------------------------------------------- |
+| `round_start`    | `{ round, agent, data }`                                               |
+| `round_complete` | `{ round }`                                                            |
+| `agent_call`     | `{ round, agent }`                                                     |
+| `agent_complete` | `{ round, agent, data: { result, reasoning } }`                        |
+| `error`          | `{ agent, data: { error } }`                                           |
+| `cancelled`      | `{ agent: 'engine', data: { code: 'ABORTED' } }`（同一作用域至多一次） |
 
 `onEvent` 在 `evaluate()` 与 `evaluateStream()` 中都会触发——流式评估会在产出 `EvaluationStreamEvent` 流的同时发出相同的管线阶段事件。
+
+## 端到端取消
+
+四个 Engine 入口都接收 `{ signal?: AbortSignal }`；三种 Adapter 会自动将 HTTP 客户端的 `AbortSignal` 与 `reader.cancel()` 接入同一个取消作用域。完整的行为矩阵与类型签名参见 [API 参考 · 端到端取消](./api-reference.md#端到端取消)。
+
+```ts
+import { AbortError, isAbortError } from '@theogony/venus-core';
+
+const controller = new AbortController();
+setTimeout(() => controller.abort('user left'), 30_000);
+
+// 1. 非流式
+try {
+  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
+} catch (err) {
+  if (!isAbortError(err)) throw err;
+}
+
+// 2. 流式：for-await 中捕获一次 reject；finally 里手动释放迭代器确保早退
+const stream = engine.evaluateStream(imageUrl, { mode: 'updates', signal: controller.signal });
+try {
+  for await (const event of stream) renderEvent(event);
+} catch (err) {
+  if (!(err instanceof AbortError)) throw err;
+} finally {
+  await stream.return(undefined as never);
+}
+
+// 3. 客户端断开：AbortController + reader.cancel 都会中止服务端引擎
+const response = await fetch('/api/evaluate/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ imageUrl, genre: 'portrait' }),
+  signal: controller.signal,
+});
+const reader = response.body!.getReader();
+try {
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    handleChunk(value);
+  }
+} finally {
+  // 断连后不再写帧，不补发 error，也不伪造 evaluation_complete
+  await reader.cancel('user disconnect');
+}
+```
+
+注意事项：
+
+- **自定义 Provider / hook** 需要读取 `options.signal` 或 `context.signal` 才能及时中止，不合作的外部 I/O 只保证停止后续调度并丢弃迟到结果。
+- **修正轮** 使用独立的 `revision` provider 时，`signal` 仍会传递到该轮。
+- **并发** 同一个 Engine/Provider 的不同请求互不影响；中止一个不会传递到兄弟。
+- **服务端已启动的任务** 本地 fetch 会中止，但厂商服务端是否停算/停止计费不在 SDK 保证范围内。
 
 ## 参见
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Venus Contributors
 
-import type { AgentCallResult, AgentConfig, Genre, LLMProvider, StreamChunk } from '../types.js';
+import type { AgentCallResult, AgentConfig, CancellationOptions, Genre, LLMProvider, StreamChunk } from '../types.js';
 import { BaseAgent } from './base-agent.js';
 import { GenreEnum } from '../schema/index.js';
 import { getGenreDetectorSystemPrompt, getGenreDetectorUserPrompt } from '../prompts/genre-detector.js';
@@ -29,12 +29,16 @@ export class GenreDetectorAgent extends BaseAgent {
    * @param imageUrl - 单张图片的 URL，或组图场景下的 URL 数组
    * @returns AgentCallResult 包含检测结果和可选思维链
    */
-  async detect(imageUrl: string | string[]): Promise<AgentCallResult<GenreDetectionResult>> {
+  async detect(
+    imageUrl: string | string[],
+    options?: CancellationOptions,
+  ): Promise<AgentCallResult<GenreDetectionResult>> {
     return await this.call<GenreDetectionResult>(
       getGenreDetectorSystemPrompt(),
       getGenreDetectorUserPrompt(),
       imageUrl,
       GenreDetectionSchema,
+      options,
     );
   }
 
@@ -43,12 +47,16 @@ export class GenreDetectorAgent extends BaseAgent {
    * @param imageUrl - 单张图片的 URL，或组图场景下的 URL 数组
    * @returns AsyncGenerator yielding StreamChunk，最终返回 AgentCallResult
    */
-  detectStream(imageUrl: string | string[]): AsyncGenerator<StreamChunk, AgentCallResult<GenreDetectionResult>, unknown> {
+  detectStream(
+    imageUrl: string | string[],
+    options?: CancellationOptions,
+  ): AsyncGenerator<StreamChunk, AgentCallResult<GenreDetectionResult>, unknown> {
     return this.callStream<GenreDetectionResult>(
       getGenreDetectorSystemPrompt(),
       getGenreDetectorUserPrompt(),
       imageUrl,
       GenreDetectionSchema,
+      options,
     );
   }
 }
