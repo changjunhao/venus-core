@@ -26,13 +26,13 @@ graph LR
     E --> F[Evaluation Result]
 ```
 
-| Round | Agent | Role |
-|------:|-------|------|
-| 0 | Genre Detector | Auto-detects the photography genre via VLM (optional) |
-| 1 | **Proposer** | Analyzes the image and produces an initial score with per-dimension breakdowns |
-| 2 | **Critic** | Challenges the proposal, identifying scoring biases and errors |
-| 3 | **Revision** _(conditional)_ | If the critique severity is `HIGH`, the proposer revises its assessment |
-| 4 | **Arbiter** | Makes the final ruling, synthesizing all preceding evidence |
+| Round | Agent                        | Role                                                                           |
+| ----: | ---------------------------- | ------------------------------------------------------------------------------ |
+|     0 | Genre Detector               | Auto-detects the photography genre via VLM (optional)                          |
+|     1 | **Proposer**                 | Analyzes the image and produces an initial score with per-dimension breakdowns |
+|     2 | **Critic**                   | Challenges the proposal, identifying scoring biases and errors                 |
+|     3 | **Revision** _(conditional)_ | If the critique severity is `HIGH`, the proposer revises its assessment        |
+|     4 | **Arbiter**                  | Makes the final ruling, synthesizing all preceding evidence                    |
 
 The engine supports **8 photography genres**, each with genre-specific scoring dimensions, scene subtypes, and professional evaluation standards. The same pipeline also powers **group evaluation** over 2 to 10 images at once.
 
@@ -44,8 +44,9 @@ The engine supports **8 photography genres**, each with genre-specific scoring d
 - **Multi-Provider Reasoning** — Auto-adapts reasoning params to Qwen (DashScope), Kimi (Moonshot), Xiaomi MIMO, StepFun, MiniMax, Doubao (Volcano Ark), Baidu Qianfan (ERNIE), Zhipu (BigModel), Grok (xAI), Gemini, DeepSeek, and OpenRouter
 - **OpenAI Responses API** — First-class `/v1/responses` provider for reasoning models (o-series, GPT-5) with strict JSON Schema structured output; auto-adapts to Doubao (Volcano Ark), Xiaomi MiMo, and DeepSeek Responses endpoints (including the `deepseek-v4-flash-vision-exp` vision model, with per-endpoint structured-output degradation)
 - **Native Anthropic & Gemini Providers** — Claude Messages API with extended thinking and Google Gemini Interactions API, both with strict JSON Schema structured output; the Anthropic provider also drives DashScope and Zhipu Anthropic-compatible endpoints out of the box
-- **Structured Output Modes** — `json_schema` providers get single-call schema-guaranteed output; `json_object` providers keep Zod validation with automatic repair retries
-- **Dual Evaluation API** — `evaluate()` for synchronous results, `evaluateStream()` for SSE-ready streaming
+- **Structured Output Modes** — Both modes validate output locally with Zod: `json_schema` requests strict output in a single agent attempt; `json_object` adds automatic repair attempts
+- **Dual Evaluation API** — `evaluate()` returns a Promise with the complete result; `evaluateStream()` provides SSE-ready streaming
+- **End-to-End Cancellation** — Per-request `AbortSignal` support across single-image/group evaluation, agents, and all built-in providers; adapters propagate client disconnects and streams support early termination
 - **Group Evaluation** — Score 2 to 10 images in one run with `evaluateGroup()` / `evaluateGroupStream()`: `joint` mode judges them as a single series, `compare` mode ranks them against each other, and `includePerImage` toggles per-image details at the schema level to save tokens
 - **Streaming Granularity** — Two streaming modes: `values` (milestone events only) and `updates` (real-time reasoning + JSON partials)
 - **Context Extension** — Rich `EvaluationContext` with EXIF metadata, user notes, and custom data with genre-aware injection depth
@@ -78,14 +79,14 @@ const engine = createVenusEngine({
 });
 
 const result = await engine.evaluate('https://example.com/photo.jpg');
-console.log(result.totalScore);                         // 8.2
-console.log(result.genre);                              // 'landscape'
-console.log(result.dimensions);                         // { composition_depth: 8.5, ... }
-console.log(result.critique);                           // Detailed textual critique
-console.log(result.suggestions);                        // ['Improve ...', 'Consider ...']
-console.log(result.arbitrationNotes.sceneTypeRuling);   // Scene-type ruling
-console.log(result.arbitrationNotes.decisions);         // Structured arbitration decisions
-console.log(result.arbitrationNotes.finalRationale);    // Final rationale
+console.log(result.totalScore); // 8.2
+console.log(result.genre); // 'landscape'
+console.log(result.dimensions); // { composition_depth: 8.5, ... }
+console.log(result.critique); // Detailed textual critique
+console.log(result.suggestions); // ['Improve ...', 'Consider ...']
+console.log(result.arbitrationNotes.sceneTypeRuling); // Scene-type ruling
+console.log(result.arbitrationNotes.decisions); // Structured arbitration decisions
+console.log(result.arbitrationNotes.finalRationale); // Final rationale
 ```
 
 You can also stream evaluation progress for real-time updates:
@@ -115,15 +116,15 @@ const images = [
 // 'joint' — judge the images as one series
 const joint = await engine.evaluateGroup(images, 'joint');
 if (joint.mode === 'joint') {
-  console.log(joint.totalScore);     // 8.4
-  console.log(joint.groupAnalysis);  // Narrative and consistency across the set
+  console.log(joint.totalScore); // 8.4
+  console.log(joint.groupAnalysis); // Narrative and consistency across the set
 }
 
 // 'compare' — rank the images against each other
 const compare = await engine.evaluateGroup(images, 'compare', { includePerImage: true });
 if (compare.mode === 'compare') {
-  console.log(compare.ranking);      // [{ index: 2, rank: 1, score: 8.8, rationale: '...' }, ...]
-  console.log(compare.perImage);     // Per-image details, only present with includePerImage
+  console.log(compare.ranking); // [{ index: 2, rank: 1, score: 8.8, rationale: '...' }, ...]
+  console.log(compare.perImage); // Per-image details, only present with includePerImage
 }
 ```
 
@@ -131,30 +132,54 @@ Both group modes expose `suggestions` as `string[]` and `arbitrationNotes` as th
 
 `index` always refers to the 0-based position in the input array, so results map back to the original order.
 
+### Cancelling an Evaluation
+
+Pass cancellation options as the fourth argument to `evaluate()`; the other three evaluation methods accept `signal` in their existing options object:
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 30_000);
+
+try {
+  const result = await engine.evaluate('https://example.com/photo.jpg', undefined, undefined, {
+    signal: controller.signal,
+  });
+  console.log(result.totalScore);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+} finally {
+  clearTimeout(timer);
+}
+```
+
+Call `controller.abort()` to stop an active request. In streaming evaluations, signal cancellation rejects iteration with `AbortError`; it does not emit an `error` or completion event. Breaking out of `for await` also cancels unfinished work. Custom providers and hooks must forward the signal to their I/O. See the [cancellation guide](./docs/en/usage-guide.md#end-to-end-cancellation) for streaming, group, and HTTP examples.
+
 ---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [API Reference](./docs/en/api-reference.md) | Complete type signatures for engine, providers, schemas, and errors |
-| [Usage Guide](./docs/en/usage-guide.md) | Streaming, group evaluation, web framework integration, adapter hooks, context extension, event system |
-| [Configuration](./docs/en/configuration.md) | `VenusEngineConfig` full reference and reasoning configuration |
+| Document                                    | Description                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [API Reference](./docs/en/api-reference.md) | Complete type signatures for engine, providers, schemas, and errors                   |
+| [Usage Guide](./docs/en/usage-guide.md)     | Streaming, group evaluation, cancellation, web frameworks, hooks, context, and events |
+| [Configuration](./docs/en/configuration.md) | Engine/model setup, reasoning, provider timeouts, and retry behavior                  |
 
 ---
 
 ## Photography Genres
 
-| Genre | Key | Dimensions | Subtypes |
-|-------|-----|-----------|----------|
-| Portrait | `portrait` | Expression, Pose, Lighting, Color, Composition | Studio, Environmental, Wedding |
-| Landscape | `landscape` | Composition, Light, Color, Sharpness, Emotion | Natural, Urban, Seascape, Astro |
-| Documentary | `documentary` | Storytelling, Moment, Composition, Authenticity, Emotion | News, Street, Social |
-| Fine Art | `fine_art` | Concept, Visual Language, Craft, Originality, Aesthetics | Conceptual, Abstract, Experimental |
-| Commercial | `commercial` | Subject, Lighting, Styling, Color, Market Appeal | Product, Fashion |
-| Architecture | `architecture` | Perspective, Space, Light/Material, Context, Narrative | Interior, Exterior |
-| Nature | `nature` | Capture, Focus, Habitat, Technical, Natural Wonder | Wildlife, Flora, Macro |
-| Sports | `sports` | Peak Action, Timing, Framing, Technical, Drama | Action, Extreme |
+| Genre        | Key            | Dimensions                                               | Subtypes                           |
+| ------------ | -------------- | -------------------------------------------------------- | ---------------------------------- |
+| Portrait     | `portrait`     | Expression, Pose, Lighting, Color, Composition           | Studio, Environmental, Wedding     |
+| Landscape    | `landscape`    | Composition, Light, Color, Sharpness, Emotion            | Natural, Urban, Seascape, Astro    |
+| Documentary  | `documentary`  | Storytelling, Moment, Composition, Authenticity, Emotion | News, Street, Social               |
+| Fine Art     | `fine_art`     | Concept, Visual Language, Craft, Originality, Aesthetics | Conceptual, Abstract, Experimental |
+| Commercial   | `commercial`   | Subject, Lighting, Styling, Color, Market Appeal         | Product, Fashion                   |
+| Architecture | `architecture` | Perspective, Space, Light/Material, Context, Narrative   | Interior, Exterior                 |
+| Nature       | `nature`       | Capture, Focus, Habitat, Technical, Natural Wonder       | Wildlife, Flora, Macro             |
+| Sports       | `sports`       | Peak Action, Timing, Framing, Technical, Drama           | Action, Extreme                    |
 
 ---
 
@@ -172,11 +197,11 @@ Core dependencies (`openai`, `@anthropic-ai/sdk`, `@google/genai`, `zod`, `vecto
 
 ### Optional Peer Dependencies
 
-| Package                    | Required | Notes |
-|----------------------------|----------|-------|
-| `hono` ^4.12               | Optional | For Hono adapter (`@theogony/venus-core/hono`) |
-| `express` ^5.2             | Optional | For Express adapter (`@theogony/venus-core/express`) |
-| `h3` ^1.15                 | Optional | For Nitro adapter (`@theogony/venus-core/nitro`) |
+| Package          | Required | Notes                                                |
+| ---------------- | -------- | ---------------------------------------------------- |
+| `hono` ^4.13.13  | Optional | For Hono adapter (`@theogony/venus-core/hono`)       |
+| `express` ^5.3.0 | Optional | For Express adapter (`@theogony/venus-core/express`) |
+| `h3` ^1.15.0     | Optional | For Nitro adapter (`@theogony/venus-core/nitro`)     |
 
 ### Runtime Support
 

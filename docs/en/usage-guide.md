@@ -6,6 +6,8 @@
 
 ## Basic Evaluation
 
+The examples below assume an engine configured as in the [Quick Start](../../README.md#quick-start). Set `defaultModel` on the engine (or supply per-agent `models`); a provider's `defaultModel` does not configure the engine.
+
 Pass an image URL and optionally specify a genre. If omitted, the engine auto-detects the genre.
 
 ```ts
@@ -137,7 +139,7 @@ for await (const event of engine.evaluateGroupStream(imageUrls, 'compare', {
 }
 ```
 
-Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Errors — including an image count outside 2–10 — surface as a final `error` event.
+Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Non-cancellation errors — including an image count outside 2–10 — surface as a final `error` event. Signal cancellation instead rejects iteration with `AbortError`; see [End-to-End Cancellation](#end-to-end-cancellation).
 
 ## Web Framework Integration
 
@@ -153,6 +155,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
 });
 
 const app = new Hono();
@@ -183,6 +186,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
 });
 
 const app = express();
@@ -214,6 +218,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
 });
 
 const venus = createNitroAdapter(engine, {
@@ -290,8 +295,14 @@ curl -X POST http://localhost:3000/api/evaluate/group \
   "dimensions": { "facial_expression": 8.5, "pose_body": 8.0, "lighting_quality": 8.5 },
   "groupAnalysis": "The two frames form a coherent narrative ...",
   "critique": "...",
-  "suggestions": "...",
-  "arbitrationNotes": "...",
+  "suggestions": ["Simplify the background to keep attention on the subject"],
+  "arbitrationNotes": {
+    "sceneTypeRuling": "The images are wedding portraits",
+    "decisions": [
+      { "target": "lighting_quality", "decision": "partial", "reason": "Light control varies between frames" }
+    ],
+    "finalRationale": "The final assessment balances expression and light control"
+  },
   "process": { "proposal": {}, "critique": {}, "arbitration": {} },
   "metadata": {
     "evaluatedAt": "2026-07-29T09:12:34.567Z",
@@ -315,8 +326,14 @@ curl -X POST http://localhost:3000/api/evaluate/group \
     { "index": 0, "rank": 2, "score": 7.5, "rationale": "Flatter expression, busier frame" }
   ],
   "comparisonSummary": "The second frame leads on light control ...",
-  "suggestions": "...",
-  "arbitrationNotes": "...",
+  "suggestions": ["Simplify the background to keep attention on the subject"],
+  "arbitrationNotes": {
+    "sceneTypeRuling": "The images are wedding portraits",
+    "decisions": [
+      { "target": "lighting_quality", "decision": "partial", "reason": "Light control varies between frames" }
+    ],
+    "finalRationale": "The final assessment balances expression and light control"
+  },
   "process": { "proposal": {}, "critique": {}, "arbitration": {} },
   "metadata": {
     "evaluatedAt": "2026-07-29T09:14:02.001Z",
@@ -342,7 +359,7 @@ curl -N -X POST http://localhost:3000/api/evaluate/group/stream \
   }'
 ```
 
-Each event is a `data:` line terminated by a blank line:
+Each event is a `data:` line terminated by a blank line (abridged events below; some intermediate events and result fields are omitted):
 
 ```text
 data: {"type":"agent_call","round":0,"agent":"genreDetector","timestamp":1785000000000}
@@ -374,7 +391,7 @@ curl -N -X POST http://localhost:3000/api/evaluate/group/stream/jsonl \
 {"type":"group_evaluation_complete","data":{"mode":"joint","totalScore":8.4},"timestamp":1785000040000}
 ```
 
-On both stream endpoints a mid-flight failure is appended as a final `error` event, and the HTTP status stays `200` because the headers are already sent.
+On both stream endpoints a non-cancellation failure is appended as a final `error` event, and the HTTP status stays `200` because the headers are already sent. Cancellation or client disconnect stops writing without an error or synthetic completion frame. A cancellation before headers may map to HTTP `499 ABORTED` if a response is still possible; disconnected clients should not expect to receive it.
 
 ## Adapter Hooks
 
@@ -391,15 +408,20 @@ interface AdapterHooks {
    * Use cases: upload image to provider file API, inject EXIF context,
    * override genre, switch streaming granularity, etc.
    */
-  beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+  beforeEvaluate?: (params: EvaluateParams, context?: CancellationOptions) => Promise<EvaluateParams> | EvaluateParams;
 
   /**
    * Called before a group evaluation starts (both sync and stream endpoints).
    * Receives the validated group request params, can transform and return modified params.
    */
-  beforeEvaluateGroup?: (params: GroupEvaluateParams) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
+  beforeEvaluateGroup?: (
+    params: GroupEvaluateParams,
+    context?: CancellationOptions,
+  ) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
 }
 ```
+
+The optional second argument contains `signal`; existing one-argument hooks remain compatible. This execution context is separate from `params.context` (EXIF/user metadata). Forward the signal to your upload, metadata, or other I/O helpers. These application-defined helpers must pass it to their underlying `fetch`/SDK calls; adding an unused parameter does not cancel I/O.
 
 ### `EvaluateParams`
 
@@ -434,10 +456,10 @@ import { createHonoAdapter } from '@theogony/venus-core/hono';
 
 const adapter = createHonoAdapter(engine, {
   hooks: {
-    beforeEvaluate: async (params) => {
-      // Upload image to provider file API
-      const fileId = await uploadToFileAPI(params.imageUrl);
-      return { ...params, imageUrl: fileId };
+    beforeEvaluate: async (params, context) => {
+      // Return an image URL supported by the selected provider
+      const imageUrl = await uploadToFileAPI(params.imageUrl, { signal: context?.signal });
+      return { ...params, imageUrl };
     },
   },
 });
@@ -450,8 +472,8 @@ Automatically inject EXIF context based on the image URL:
 ```ts
 const adapter = createExpressAdapter(engine, {
   hooks: {
-    beforeEvaluate: async (params) => {
-      const exif = await fetchExifData(params.imageUrl);
+    beforeEvaluate: async (params, context) => {
+      const exif = await fetchExifData(params.imageUrl, { signal: context?.signal });
       return {
         ...params,
         context: { ...params.context, exif },
@@ -470,9 +492,11 @@ The hook fires on **all single-image endpoints** (`/evaluate`, `/evaluate/stream
 ```ts
 const adapter = createHonoAdapter(engine, {
   hooks: {
-    beforeEvaluateGroup: async (params) => {
+    beforeEvaluateGroup: async (params, context) => {
       // Upload each image and force per-image details for premium tenants
-      const imageUrls = await Promise.all(params.imageUrls.map(uploadToFileAPI));
+      const imageUrls = await Promise.all(
+        params.imageUrls.map((url) => uploadToFileAPI(url, { signal: context?.signal })),
+      );
       return { ...params, imageUrls, includePerImage: true };
     },
   },
@@ -571,6 +595,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
   onEvent(event) {
     console.log(`[${event.type}] round=${event.round} agent=${event.agent}`);
   },
@@ -586,61 +611,133 @@ const engine = createVenusEngine({
 | `error`          | `{ agent, data: { error } }`                                              |
 | `cancelled`      | `{ agent: 'engine', data: { code: 'ABORTED' } }` (at most once per scope) |
 
-`onEvent` fires for both `evaluate()` and `evaluateStream()` — streaming evaluations emit the same pipeline-stage events alongside the yielded `EvaluationStreamEvent` stream.
+`onEvent` observes all four single-image/group entry points. Every observation includes `timestamp`; stream events are delivered separately through the iterator. `cancelled` is only an observation event, not a stream frame. It is emitted at most once for an active evaluation, not for pre-aborted calls or cancellation during a hook before the engine starts.
 
 ## End-to-End Cancellation
 
-All four Engine entry points accept `{ signal?: AbortSignal }`; the three Adapters automatically attach HTTP-client `AbortSignal` and `reader.cancel()` to the same scope. See [API Reference · End-to-End Cancellation](./api-reference.md#end-to-end-cancellation) for the full behaviour matrix and type signatures.
+All four entry points support per-request cancellation. Use a fresh controller or timeout signal for each independent request; an aborted signal cannot be reset. See the [API reference](./api-reference.md#end-to-end-cancellation) for signatures and the behavior matrix.
+
+### Non-Streaming Evaluation
 
 ```ts
-import { AbortError, isAbortError } from '@theogony/venus-core';
+import { isAbortError } from '@theogony/venus-core';
 
 const controller = new AbortController();
-setTimeout(() => controller.abort('user left'), 30_000);
+const timer = setTimeout(() => controller.abort(), 30_000);
 
-// 1. Non-streaming
 try {
-  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
-} catch (err) {
-  if (!isAbortError(err)) throw err;
-}
-
-// 2. Streaming — capture the single reject in for-await; release the iterator in finally
-const stream = engine.evaluateStream(imageUrl, { mode: 'updates', signal: controller.signal });
-try {
-  for await (const event of stream) renderEvent(event);
-} catch (err) {
-  if (!(err instanceof AbortError)) throw err;
+  const result = await engine.evaluate(imageUrl, 'portrait', undefined, {
+    signal: controller.signal,
+  });
+  console.log(result.totalScore);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
 } finally {
-  await stream.return(undefined as never);
-}
-
-// 3. Client disconnect — both AbortController and reader.cancel abort the server engine
-const response = await fetch('/api/evaluate/stream', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ imageUrl, genre: 'portrait' }),
-  signal: controller.signal,
-});
-const reader = response.body!.getReader();
-try {
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    handleChunk(value);
-  }
-} finally {
-  // After disconnect: no more frames, no error frame, no synthetic evaluation_complete
-  await reader.cancel('user disconnect');
+  clearTimeout(timer);
 }
 ```
 
+Call `controller.abort()` from a cancel action to stop early. When only a deadline is needed, pass `AbortSignal.timeout(ms)` instead; the engine reports it as `AbortError`, not the SDK's `TimeoutError` class.
+
+### Streaming and Early Exit
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  for await (const event of engine.evaluateStream(imageUrl, {
+    mode: 'updates',
+    signal: AbortSignal.timeout(30_000),
+  })) {
+    console.log(event);
+    if (event.type === 'agent_complete') break; // Stop after the first agent
+  }
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+`for await` calls the iterator's `return()` on `break`, cancelling unfinished work without requiring a separate controller. Signal cancellation rejects iteration once with `AbortError`, then subsequent reads return `done`. No `error`, `evaluation_complete`, or `group_evaluation_complete` is synthesized. If you manually drive an iterator, call `await stream.return()` in `finally` and handle any pending `next()` rejection.
+
+### Group Evaluation
+
+The signal belongs in the third argument; group mode and streaming granularity remain separate:
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  const result = await engine.evaluateGroup(imageUrls, 'joint', {
+    genre: 'portrait',
+    signal: AbortSignal.timeout(60_000),
+  });
+  console.log(result);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+For a separate streaming request:
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  for await (const event of engine.evaluateGroupStream(imageUrls, 'compare', {
+    mode: 'updates',
+    signal: AbortSignal.timeout(60_000),
+  })) {
+    console.log(event);
+  }
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+### HTTP Client Cancellation
+
+Pass `signal` to `fetch`, not the JSON request body. This browser example works with the SSE endpoint; JSONL and group endpoints use the same cancellation mechanism:
+
+```ts
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 30_000);
+let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+try {
+  const response = await fetch('/api/evaluate/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageUrl, genre: 'portrait' }),
+    signal: controller.signal,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.body) throw new Error('Missing response body');
+  reader = response.body.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    console.log(value); // Raw bytes; decode and parse SSE/JSONL in your application
+  }
+} catch (error) {
+  if (!controller.signal.aborted) throw error;
+} finally {
+  clearTimeout(timer);
+  if (reader) {
+    // Cleanup must not replace a read error if the stream is already aborted
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+```
+
+Wire a cancel action to `controller.abort()`. Cancelling the response reader also stops consumption and signals disconnect through the transport. Hono uses `Request.signal` and response-stream cancellation; Express uses Node request/response events; Nitro selects the Web or Node mechanism. Your runtime and reverse proxy must forward disconnects for cancellation to reach the adapter.
+
 Notes:
 
-- **Custom Providers / hooks** must read `options.signal` or `context.signal` to be interrupted promptly; uncooperative external I/O is only guaranteed to stop further scheduling and drop late-arriving results.
-- **Revision round** still receives the signal even when routed to a dedicated `revision` provider.
-- **Concurrency** — requests sharing the same Engine or Provider remain independent; aborting one does not propagate to siblings.
-- **Server-side tasks** — local fetch is aborted, but whether the vendor's server also halts generation or stops billing is outside SDK guarantees.
+- **Custom providers / hooks** must forward `params.signal` / the hook's second argument `context?.signal` to actual I/O. Otherwise the engine only stops waiting, stops further scheduling, and discards late results.
+- **Revision round** receives the signal even when routed to a dedicated `revision` provider.
+- **Concurrency** — requests sharing an engine/provider remain independent unless the caller deliberately shares a signal. Returning one stream does not abort its parent's signal or sibling requests.
+- **Server-side tasks** — local requests are aborted, but vendor-side generation and billing are outside SDK guarantees.
 
 ## See Also
 

@@ -8,22 +8,27 @@
 
 `VenusEngineConfig` full reference:
 
-| Option         | Type                               | Default    | Description                                                                                                                                                                                                                                                            |
-| -------------- | ---------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`     | `LLMProvider`                      | _required_ | LLM provider instance (use `createOpenAIChatProvider` or `defineProvider`)                                                                                                                                                                                             |
-| `defaultModel` | `string`                           | —          | Default model for all agents (recommended)                                                                                                                                                                                                                             |
-| `models`       | `ModelConfig`                      | —          | Per-agent model overrides (`genreDetector`, `proposer`, `critic`, `arbiter`, `revision`)                                                                                                                                                                               |
-| `providers`    | `ProviderConfig`                   | —          | Per-agent custom provider instances, falls back to `provider` if not set (`revision` falls back to the proposer's provider)                                                                                                                                            |
-| `reasoning`    | `ReasoningConfig`                  | —          | Reasoning config with global `enabled`/`effort`/`budgetTokens` and per-agent `agents` overrides                                                                                                                                                                        |
-| `maxRetries`   | `number`                           | —          | Max retry attempts per agent LLM call. Only applies to providers in `json_object` structured output mode; providers declaring `structuredOutput: 'json_schema'` use a single call without retries (see [API Reference](./api-reference.md#structuredoutput-semantics)) |
-| `onEvent`      | `(event: EvaluationEvent) => void` | —          | Event callback for observability                                                                                                                                                                                                                                       |
+| Option         | Type                               | Default    | Description                                                                                                                                                                                                                                                  |
+| -------------- | ---------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`     | `LLMProvider`                      | _required_ | LLM provider instance (use `createOpenAIChatProvider` or `defineProvider`)                                                                                                                                                                                   |
+| `defaultModel` | `string`                           | —          | Default model for all agents (recommended)                                                                                                                                                                                                                   |
+| `models`       | `ModelConfig`                      | —          | Per-agent model overrides (`genreDetector`, `proposer`, `critic`, `arbiter`, `revision`)                                                                                                                                                                     |
+| `providers`    | `ProviderConfig`                   | —          | Per-agent custom provider instances, falls back to `provider` if not set (`revision` falls back to the proposer's provider)                                                                                                                                  |
+| `reasoning`    | `ReasoningConfig`                  | —          | Reasoning config with global `enabled`/`effort`/`budgetTokens` and per-agent `agents` overrides                                                                                                                                                              |
+| `maxRetries`   | `number`                           | `3`        | Total agent attempt limit, including the first call, in `json_object` mode. `1` means one attempt without repair; `json_schema` always uses one agent attempt with local Zod validation (see [API Reference](./api-reference.md#structuredoutput-semantics)) |
+| `onEvent`      | `(event: EvaluationEvent) => void` | —          | Event callback for observability                                                                                                                                                                                                                             |
+
+### Model Resolution
+
+Set `defaultModel` on the engine or provide `models` entries for the roles it initializes. The engine does not read a provider's `defaultModel`; missing model configuration raises `VenusError` with `code: 'CONFIG_ERROR'` when that role is resolved. Use a vision-capable model for image evaluation.
+
+Configuration is supplied as objects. Loading environment variables and keeping API keys on the server are the caller's responsibility.
 
 ### Event System and Streaming
 
-`onEvent` fires for both `evaluate()` and `evaluateStream()`. For streaming evaluations
-the engine emits the same pipeline-stage events (`round_start`, `agent_call`,
-`agent_complete`, `round_complete`, `error`) alongside the yielded
-`EvaluationStreamEvent` stream, so observability hooks work without parsing the SSE body.
+`onEvent` observes `evaluate()`, `evaluateStream()`, `evaluateGroup()`, and `evaluateGroupStream()`. Pipeline events include `round_start`, `agent_call`, `agent_complete`, `round_complete`, `error`, and `cancelled`, each with a `timestamp`. Stream iterators separately yield single-image or group stream events, so observability does not require parsing SSE/JSONL.
+
+`cancelled` is an observation event only: it is emitted at most once for an active evaluation, not for a pre-aborted request or a hook cancelled before the engine starts. Cancellation does not emit an `error` observation or a completion frame.
 
 ## Reasoning Configuration
 
@@ -32,7 +37,7 @@ interface ReasoningConfig {
   /** Whether reasoning is enabled globally (default: true when this object is present). Set to `false` to disable reasoning for all agents. */
   enabled?: boolean;
   /** Default reasoning effort applied to all agents (when set) */
-  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
+  effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
   /** Default token budget for reasoning */
   budgetTokens?: number;
   /** Per-agent overrides; set to `false` to disable reasoning for a specific agent */
@@ -40,7 +45,7 @@ interface ReasoningConfig {
     Record<
       AgentRole,
       | {
-          effort: 'minimal' | 'low' | 'medium' | 'high' | 'max'; // Required
+          effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max' | 'xhigh'; // Required
           budgetTokens?: number;
         }
       | false
@@ -76,7 +81,7 @@ const engine = createVenusEngine({
 
 The engine automatically adapts reasoning parameters to different provider APIs:
 
-- **OpenAI**: Uses `reasoning_effort` (minimal/low/medium/high/max)
+- **OpenAI**: Chat Completions uses `reasoning_effort`; Responses uses `reasoning: { effort }`. The public `ReasoningEffort` union is `none/minimal/low/medium/high/max/xhigh`; supported values depend on the selected model
 - **Qwen (DashScope)**: Uses `enable_thinking` and `thinking_budget`
 - **Kimi (Moonshot)**: Uses `thinking: { type: "enabled" }`
 - **Xiaomi MiMo**: Chat Completions uses `thinking: { type: "enabled" }` (same format as Kimi); the Responses API endpoint (`https://api.xiaomimimo.com/v1` via `createOpenAIResponsesProvider`) uses nested `reasoning: { effort }` only (`none` disables thinking, minimal→none, max/xhigh→high; `reasoning.summary` is never sent and temperature is managed internally by the model)
@@ -90,7 +95,7 @@ The engine automatically adapts reasoning parameters to different provider APIs:
 - **DeepSeek**: Chat Completions uses the `thinking.type` toggle + `reasoning_effort` (only low/high/max supported; client-side mapping: none/minimal→thinking disabled, medium/xhigh→high); the Responses API endpoint (`https://api.deepseek.com` via `createOpenAIResponsesProvider`) uses nested `reasoning: { effort }` (none/low/high/max; `none` disables thinking, `reasoning.summary` is never sent). DeepSeek v4 models (including the vision model `deepseek-v4-flash-vision-exp`) default to thinking enabled — an explicit disable parameter is sent when reasoning is not configured
 - **OpenRouter**: Uses `reasoning: { effort, max_tokens, enabled: true }`
 
-> **Note**: When reasoning is not configured, the adapter explicitly disables thinking for endpoints whose models default to enabled (DashScope, Qianfan, Kimi, MIMO, Zhipu, MiniMax, Volcano Ark, Grok, DeepSeek), ensuring predictable behavior.
+> **Note**: When reasoning is not configured, the provider explicitly disables thinking for endpoints whose models default to enabled (DashScope, Qianfan, Kimi, MIMO, Zhipu, MiniMax, Volcano Ark, Grok, DeepSeek), ensuring predictable behavior.
 
 ### Doubao (Volcano Ark) Responses API
 
@@ -175,7 +180,7 @@ Set `baseURL` up to `/apps/anthropic` (do not end with `/v1/`). Besides the Beij
 DashScope specifics handled automatically:
 
 - `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (some qwen models default to thinking enabled), with `temperature` forwarded as usual; when reasoning is configured the behavior matches the official API (`thinking: { type: 'enabled', budget_tokens }`, `temperature` omitted)
-- Structured output keeps the strict `json_schema` strategy via `output_config.format` — the provider reports `structuredOutput: 'json_schema'` (single call, no retries). JSON Schema keywords rejected by DashScope's validator (e.g. `multipleOf`) are stripped client-side before sending. Note the enforcement level depends on the model series: deepseek/glm enforce the schema strictly, while the qwen series only guarantees valid JSON output
+- Structured output keeps the strict `json_schema` strategy via `output_config.format` — the provider reports `structuredOutput: 'json_schema'` (one agent attempt with local Zod validation, no agent-level repair). JSON Schema keywords rejected by DashScope's validator (e.g. `multipleOf`) are stripped client-side before sending. Note the enforcement level depends on the model series: deepseek/glm enforce the schema strictly, while the qwen series only guarantees valid JSON output
 - Authentication uses the SDK's default `x-api-key` header (pass your Model Studio API key); streaming events match the official Messages API
 
 ### Zhipu (BigModel) Anthropic-Compatible Endpoint
@@ -195,15 +200,58 @@ Set `baseURL` up to `/api/anthropic` (do not end with `/v1/`).
 Zhipu specifics handled automatically:
 
 - `thinking: { type: 'disabled' }` is sent explicitly when reasoning is not configured (GLM models default to thinking enabled, some even force it), with `temperature` forwarded as usual; when reasoning is configured, `thinking: { type: 'enabled' }` is sent without `budget_tokens` (GLM has no tunable thinking budget, `temperature` omitted), and `max_tokens` still grows by the effort's budget to leave room for thinking
-- Structured output keeps the strict `json_schema` strategy via `output_config.format`, enforced server-side by the GLM series — the provider reports `structuredOutput: 'json_schema'` (single call, no retries)
+- Structured output keeps the strict `json_schema` strategy via `output_config.format`, enforced server-side by the GLM series — the provider reports `structuredOutput: 'json_schema'` (one agent attempt with local Zod validation, no agent-level repair)
 - Authentication uses the SDK's default `x-api-key` header (pass your Zhipu API key); streaming events match the official Messages API
 
 ## Cancellation and Timeouts
 
-- **Per-request cancellation**: `signal?: AbortSignal` is not configured on `VenusEngineConfig` or Provider constructors — it is passed via `CancellationOptions` on each entry point (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`). Adapters automatically attach HTTP-client `Request.signal` or `reader.cancel()`. See [API Reference · End-to-End Cancellation](./api-reference.md#end-to-end-cancellation).
-- **Provider timeouts**: `OpenAIChatProviderOptions.timeout` / `OpenAIResponsesProviderOptions.timeout` / `GeminiProviderOptions.timeout` control SDK-side HTTP timeouts and remain orthogonal to cancellation; `AbortSignal.timeout(ms)` wraps the internal TimeoutError as cancellation instead.
-- **Agent retries** (`VenusEngineConfig.maxRetries` or `AgentConfig.maxRetries`): only JSON/Schema failures retry. `AbortError` never enters retry and is never wrapped as `SchemaError`.
-- **Gemini request-level retry**: the Provider takes over `@google/genai` Interactions connection retry — initial attempt + up to 4 retries for 408/409/429/5xx, connection errors, and request timeouts. Each attempt has an independent deadline, and `signal` can cancel backoff. User cancellation never retries; established streams are never reconnected or replayed. SDK internal `maxRetries` is pinned to 0 to prevent un-cancellable backoff leakage.
+Cancellation, transport deadlines, and agent attempts are separate controls:
+
+| Control                   | Where to configure                                                                   | Scope and outcome                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `signal`                  | Fourth argument to `evaluate()`; options object for the other three methods          | Cancels the whole evaluation, including later rounds; rejects with `AbortError` (`ABORTED`)                      |
+| `AbortSignal.timeout(ms)` | Pass the returned signal at the same request-level location                          | An overall deadline reported as `AbortError`; the original DOM `TimeoutError` remains in `reason`/`cause`        |
+| Provider `timeout`        | Options for OpenAI Chat, OpenAI Responses, Anthropic, or Gemini; default `60_000` ms | Transport timeout, classified as `ProviderError` with `errorCode: 'timeout'`; not an overall evaluation deadline |
+| `maxRetries`              | `VenusEngineConfig` (or `AgentConfig` for an agent instance)                         | Total `json_object` agent attempt limit, default `3`; independent of provider/SDK transport retries              |
+
+`signal` is not a field on `VenusEngineConfig`, provider constructor options, `EvaluationContext`, or the HTTP JSON body. Adapters derive it from Web request/stream cancellation or Node connection events and supply it to hooks as the second argument. See the [API reference](./api-reference.md#end-to-end-cancellation).
+
+### Agent Attempts
+
+- `json_schema`: one agent attempt followed by local Zod validation; no agent-level repair. Provider transport retries may still occur.
+- `json_object`: at most `maxRetries` total attempts. Non-streaming calls retry provider, JSON parsing, and validation failures; streaming calls retry completed-output parsing/validation failures, but transport failures propagate immediately.
+- Cancellation never enters the retry loop or becomes `SchemaError`. Other `json_object` failures that exhaust the attempt limit become `SchemaError`, so a provider timeout may not remain a `ProviderError` at the engine boundary.
+
+### Gemini Transport Retry
+
+The provider manages Interactions transport retries: initial attempt + up to 4 retries for HTTP 408/409/429/5xx, connection errors, and request timeouts. Each attempt has its own `timeout` deadline; for an established stream, that deadline stays active through response-body consumption. SDK-internal `maxRetries` is set to `0` to avoid a second retry loop.
+
+Backoff honors `retry-after-ms` / `retry-after`, otherwise uses exponential delay with jitter, capped at 8 seconds. A caller signal cancels both requests and backoff. User cancellation never retries, and established streams are never reconnected or replayed.
+
+An overall deadline can bound all rounds and transport attempts:
+
+```ts
+import { createGeminiProvider, createVenusEngine, isAbortError } from '@theogony/venus-core';
+
+const engine = createVenusEngine({
+  provider: createGeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY!,
+    timeout: 20_000,
+  }),
+  defaultModel: 'gemini-3-flash-preview',
+});
+
+try {
+  const result = await engine.evaluate(imageUrl, undefined, undefined, {
+    signal: AbortSignal.timeout(60_000),
+  });
+  console.log(result.totalScore);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+The SDK's exported `TimeoutError` class is distinct from the DOM timeout reason and provider timeout classification. Setting a provider timeout does not impose a deadline on the entire multi-round evaluation.
 
 ## See Also
 

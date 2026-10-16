@@ -17,7 +17,7 @@
 | 参数       | 类型                  | 说明                                                 |
 | ---------- | --------------------- | ---------------------------------------------------- |
 | `imageUrl` | `string`              | 待评估图片的 URL                                     |
-| `genre`    | `Genre`               | 可选的门类覆盖；省略时自动检测                       |
+| `genre`    | `Genre \| null`       | 可选的门类覆盖；省略或为 `null` 时自动检测           |
 | `context`  | `EvaluationContext`   | 可选的上下文，包含 EXIF 数据、用户备注和自定义元数据 |
 | `options`  | `CancellationOptions` | 可选的 `{ signal?: AbortSignal }`，用于端到端取消    |
 
@@ -63,7 +63,7 @@ interface EvaluationResult {
 }
 ```
 
-### `engine.evaluateStream(imageUrl, options?): AsyncGenerator<EvaluationStreamEvent>`
+### `engine.evaluateStream(imageUrl, options?): AsyncGenerator<EvaluationStreamEvent, void, unknown>`
 
 流式评估，在每个阶段产出事件：
 
@@ -186,7 +186,7 @@ interface PerImageDetail {
 
 `ranking` 与 `perImage` 中的 `index` 始终表示**输入 `imageUrls` 数组中从 0 开始的下标**，因此无论排名如何都能映射回原始顺序。
 
-### `engine.evaluateGroupStream(imageUrls, mode, options?): AsyncGenerator<GroupEvaluationStreamEvent>`
+### `engine.evaluateGroupStream(imageUrls, mode, options?): AsyncGenerator<GroupEvaluationStreamEvent, void, unknown>`
 
 流式组图评估。`GroupEvaluateStreamOptions` 在 `GroupEvaluateOptions` 基础上增加流式粒度：
 
@@ -196,6 +196,7 @@ interface PerImageDetail {
 | `context`         | `EvaluationContext`     | —          | 附加评估上下文                                         |
 | `includePerImage` | `boolean`               | `false`    | 是否要求逐图明细                                       |
 | `mode`            | `'values' \| 'updates'` | `'values'` | 流式粒度模式（组图模式是第二个位置参数，二者互不冲突） |
+| `signal`          | `AbortSignal`           | —          | 从 `GroupEvaluateOptions` 继承的请求级取消信号         |
 
 | 事件类型                    | 说明                                           |
 | --------------------------- | ---------------------------------------------- |
@@ -208,11 +209,11 @@ interface PerImageDetail {
 | `group_evaluation_complete` | 最终 `GroupEvaluationResult` 就绪              |
 | `error`                     | 发生错误（图片数量越界也走此事件）             |
 
-事件顺序：第 0 轮 `agent_call` / `agent_complete` 与 `genre_detected`（仅在自动检测门类时）→ `group_evaluation_start` → 各轮 `agent_call` / `agent_complete` → `group_evaluation_complete`。失败（包括图片数量不在 2–10 范围内）以末尾的 `error` 事件形式产出，而不是抛出异常。
+事件顺序：第 0 轮 `agent_call` / `agent_complete` 与 `genre_detected`（仅在自动检测门类时）→ `group_evaluation_start` → 各轮 `agent_call` / `agent_complete` → `group_evaluation_complete`。非取消类失败（包括图片数量不在 2–10 范围内）以末尾的 `error` 事件形式产出，而不是抛出异常。信号取消则以 `AbortError` 拒绝迭代，不产出 `error` 或 `group_evaluation_complete`。
 
 ```ts
 for await (const event of engine.evaluateGroupStream(imageUrls, 'compare')) {
-  if (event.type === 'group_evaluation_complete') {
+  if (event.type === 'group_evaluation_complete' && event.data.mode === 'compare') {
     console.log(event.data.ranking);
   }
 }
@@ -261,7 +262,13 @@ const { proposalSchema, arbiterSchema } = getGroupJointSchemas('portrait', true,
 proposalSchema.parse({
   scene_type: 'wedding',
   total_score: 8.4,
-  dimensions: { facial_expression: 8.5 /* ... */ },
+  dimensions: {
+    facial_expression: 8.5,
+    pose_body: 8.3,
+    lighting_quality: 8.5,
+    color_mood: 8.4,
+    composition_focus: 8.3,
+  },
   group_analysis: '...',
   critique: '...',
   suggestions: ['...'],
@@ -310,22 +317,23 @@ proposalSchema.parse({
 | `suggestions` 必须是包含 1–8 个非空单行字符串的数组                                            | 两种模式               |
 | `arbitration_notes` 必须包含场景判定、裁决数组和最终理由                                       | 仲裁 Schema            |
 
-### `getProposerResultSchema(genre: Genre)`
+### 组图最终结果 Schema
 
-返回指定门类的完整评估结果 Zod Schema,包括所有嵌套的 `process` 和 `metadata` 字段。适用于验证自定义评估结果或构建自定义适配器。
+- `getGroupJointResultSchema(genre, includePerImage, imageCount)` 校验完整的 `GroupJointEvaluationResult`。
+- `getGroupCompareResultSchema(includePerImage, imageCount)` 校验完整的 `GroupCompareEvaluationResult`。注意它的参数顺序与 `getGroupCompareSchemas(imageCount, includePerImage)` 不同。
+
+两者均包含 `process` 和 `metadata`。顶层结果字段使用 camelCase，`process` 内的智能体输出使用 snake_case。
 
 ```ts
-import { getProposerResultSchema } from '@theogony/venus-core';
+import { getGroupCompareResultSchema } from '@theogony/venus-core';
 
-const schema = getProposerResultSchema('portrait');
-const validated = schema.parse({
-  imageUrl: '...',
-  genre: 'portrait',
-  sceneType: 'studio',
-  totalScore: 8.5,
-  // ... 完整评估结果结构
-});
+const result = await engine.evaluateGroup(imageUrls, 'compare');
+const validated = getGroupCompareResultSchema(false, imageUrls.length).parse(result);
 ```
+
+### 建议与仲裁 Schema
+
+同时导出 `SuggestionSchema`、`SuggestionsSchema`、`ArbitrationDecisionSchema`、`RawArbitrationNotesSchema` 和 `ArbitrationNotesSchema`。智能体侧的 snake_case 字段使用 `RawArbitrationNotesSchema`，公共结果的 camelCase 字段使用 `ArbitrationNotesSchema`。
 
 ### `getGenreConfig(genre: Genre): GenreConfig`
 
@@ -395,7 +403,7 @@ const provider = createOpenAIChatProvider({
 
 ### `createOpenAIResponsesProvider(options: OpenAIResponsesProviderOptions): LLMProvider`
 
-使用 OpenAI Responses API（`/v1/responses`）创建提供商，适用于推理型模型（o 系列、GPT-5）。声明 `structuredOutput: 'json_schema'`，通过 `text.format` 支持严格 JSON Schema 输出。
+使用 OpenAI Responses API（`/v1/responses`）创建提供商，适用于推理型模型（o 系列、GPT-5）。默认声明 `structuredOutput: 'json_schema'`，通过 `text.format` 请求严格 JSON Schema 输出。小米 MiMo 和 DeepSeek 端点改为声明 `'json_object'`，启用本地校验和修复尝试。
 
 ```ts
 import { createOpenAIResponsesProvider } from '@theogony/venus-core';
@@ -493,21 +501,19 @@ interface ProviderCapabilities {
 
 `structuredOutput` 能力决定智能体如何请求和校验 JSON 输出：
 
-| 取值                   | 智能体行为                                                                                                                                                                                                                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `'json_object'` 或省略 | 请求 `response_format: { type: 'json_object' }`。智能体解析 JSON、用 Zod schema 校验，并在失败时携带修复提示重试最多 `maxRetries` 次；全部失败后抛出 `SchemaError`。                                                                                                            |
-| `'json_schema'`        | 智能体从 Zod schema 构建严格 JSON Schema，发送 `response_format: { type: 'json_schema', ... }`，**单次调用 — 不重试、不做本地 Zod 校验**（`maxRetries` 不适用）。schema 合规性完全信任提供商/API。若响应不是合法 JSON，立即抛出 `errorCode: 'parse_error'` 的 `ProviderError`。 |
+| 取值                   | 智能体行为                                                                                                                                                                                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'json_object'` 或省略 | 请求 `response_format: { type: 'json_object' }`，每次尝试均解析 JSON 并执行 Zod 校验。`maxRetries` 是总尝试次数上限（默认 3，包含首次调用），不是额外重试次数。解析或校验失败后携带修复提示继续尝试；耗尽后抛出 `SchemaError`。                                   |
+| `'json_schema'`        | 发送 `response_format: { type: 'json_schema', ... }`，**单次智能体尝试后仍执行本地 Zod 校验**（`maxRetries` 不适用）。非法 JSON 抛出 `errorCode: 'parse_error'` 的 `ProviderError`，Schema 不合规时透传 `ZodError`。提供商或 SDK 的传输层重试独立于该智能体策略。 |
 
-> **警告**：仅当底层 API 确实保证 schema 合规输出时（如 OpenAI Responses API），才应在
-> 自定义提供商上声明 `structuredOutput: 'json_schema'`。声明后会完全禁用智能体侧的
-> 校验/修复循环。
+> 仅当底层 API 支持严格结构化输出时，才应声明 `structuredOutput: 'json_schema'`。该声明禁用智能体层的修复尝试，但不禁用本地校验。`json_object` 模式下，非流式调用也会重试提供商错误；流式传输错误则直接向上传播，不进入修复循环。取消始终不重试。
 
 内置提供商支持情况：
 
 | 提供商                          | `structuredOutput` | 说明                                                                                                                               |
 | ------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `createOpenAIChatProvider`      | `'json_object'`    | `json_schema` response_format 会降级为 `json_object` 并输出警告                                                                    |
-| `createOpenAIResponsesProvider` | `'json_schema'`    | 通过 `text.format` 支持严格 schema；小米 MiMo 端点声明 `'json_object'`（其 `text.format` 不支持 json_schema 强约束）               |
+| `createOpenAIResponsesProvider` | `'json_schema'`    | 默认通过 `text.format` 请求严格 Schema；小米 MiMo 和 DeepSeek 端点声明 `'json_object'` 并降级 `json_schema` 请求                   |
 | `createAnthropicProvider`       | `'json_schema'`    | 通过 `output_config.format` 由服务端强制执行严格 schema；DashScope 兼容端点会在客户端剥离不支持的 schema 关键字（如 `multipleOf`） |
 | `createGeminiProvider`          | `'json_schema'`    | 通过 `response_format` 支持严格 schema（Interactions API）                                                                         |
 
@@ -538,6 +544,7 @@ const myProvider = defineProvider({
     const res = await fetch('https://my-llm-api.com/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: params.signal,
       body: JSON.stringify({
         model: params.model,
         messages: params.messages,
@@ -557,6 +564,7 @@ const engine = createVenusEngine({
     baseURL: 'https://api.openai.com/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
   providers: {
     proposer: myProvider,
     critic: myProvider,
@@ -567,7 +575,7 @@ const engine = createVenusEngine({
 
 ## 错误类
 
-所有错误均继承 `VenusError` 并带有 `code` 属性：
+SDK 自定义错误类均继承 `VenusError` 并带有 `code` 属性。本地 Zod 校验也可能抛出不继承 `VenusError` 的 `ZodError`：
 
 | 错误类            | 代码               | 说明                                                                   |
 | ----------------- | ------------------ | ---------------------------------------------------------------------- |
@@ -599,57 +607,66 @@ try {
     console.error(`提供商 ${err.provider} 调用失败: [${err.errorCode}] ${err.message}`);
   } else if (err instanceof ValidationError) {
     console.error(`输入无效: ${err.message}`);
+  } else {
+    throw err;
   }
 }
 ```
 
 ## 端到端取消
 
-所有四个 Engine 入口 (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`) 都接收 `CancellationOptions = { signal?: AbortSignal }`，Adapter 会自动把 HTTP 客户端取消（Express/Hono/Nitro 上的 `AbortSignal` 或 `reader.cancel()`）接到同一取消作用域。
+取消属于请求级控制，不属于引擎或提供商配置，也不属于业务上下文：
 
 ```ts
-import { AbortError, isAbortError } from '@theogony/venus-core';
-
-const controller = new AbortController();
-setTimeout(() => controller.abort(), 5_000);
-
-// 非流式
-try {
-  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
-} catch (err) {
-  if (isAbortError(err)) {
-    // 取消：不再启动新的轮次、不重试、也不产生合成结果
-  }
-}
-
-// 流式：主动 signal 取消会使 iterator.next() 抛出一次 AbortError
-try {
-  for await (const event of engine.evaluateStream(imageUrl, { signal: controller.signal })) {
-    // …
-  }
-} catch (err) {
-  if (err instanceof AbortError) {
-    // 已发出的事件保留；缺失的 agent_complete / evaluation_complete 是预期行为
-  }
+interface CancellationOptions {
+  readonly signal?: AbortSignal;
 }
 ```
 
+| 入口                                                                         | 信号位置                        |
+| ---------------------------------------------------------------------------- | ------------------------------- |
+| `evaluate(imageUrl, genre?, context?, options?)`                             | 第四个参数：`{ signal }`        |
+| `evaluateStream(imageUrl, options?)`                                         | `options.signal`                |
+| `evaluateGroup(imageUrls, mode, options?)`                                   | `options.signal`                |
+| `evaluateGroupStream(imageUrls, mode, options?)`                             | `options.signal`                |
+| `provider.chat(params)` / `provider.chatStream(params)`                      | `params.signal`（`ChatParams`） |
+| `beforeEvaluate(params, context?)` / `beforeEvaluateGroup(params, context?)` | 第二个参数：`context?.signal`   |
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  await engine.evaluate(imageUrl, 'portrait', undefined, {
+    signal: AbortSignal.timeout(30_000),
+  });
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+`new AbortError(reason?)` 的 `name` 为 `'AbortError'`、`code` 为 `'ABORTED'`，消息固定为 `'Operation aborted'`。`reason` 与 `cause` 在本地保留原始原因，适配器错误响应不会序列化它。
+
+`isAbortError(error: unknown): boolean` 可识别 SDK 取消错误、`name: 'AbortError'` / `'APIUserAbortError'` 和 `code: 'ABORT_ERR'` / `'ABORTED'`。它不匹配消息文本，也不是 TypeScript 类型谓词；需要访问 SDK 专属字段时使用 `instanceof AbortError`。
+
 行为矩阵：
 
-| 场景                      | 结果                                                                |
-| ------------------------- | ------------------------------------------------------------------- |
-| 非流式主动取消            | `Promise` 以 `AbortError` reject                                    |
-| 流式 signal 主动取消      | `next()` 以 `AbortError` reject 一次；不产出 `error` 或合成完成事件 |
-| 消费者 `break` / `return` | 同步中止底层请求；已有 `next()` 允许以 `AbortError` 拒绝            |
-| 预先 aborted              | 不调用 hook、Agent 或 Provider；非流式立即拒绝，流式首次消费时拒绝  |
-| HTTP 客户端断连           | 服务器静默清理，不再写帧；未提交的非流式响应返回 `499 ABORTED`      |
-| 完成后再取消              | 不改变已提交结果，不影响并发请求                                    |
+| 场景                      | 结果                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 非流式主动取消            | `Promise` 以 `AbortError` reject                                                                                                                 |
+| 流式 signal 主动取消      | `next()` 以 `AbortError` reject 一次；不产出 `error` 或合成完成事件                                                                              |
+| 消费者 `break` / `return` | 同步中止底层请求；已有 `next()` 允许以 `AbortError` 拒绝                                                                                         |
+| 预先 aborted              | 不调用 hook、Agent 或 Provider；非流式立即拒绝，流式首次消费时拒绝                                                                               |
+| HTTP 客户端断连           | 服务端中止上游工作并静默清理，不再写入流事件                                                                                                     |
+| 响应头发送前取消          | 仍可发送响应时映射为 HTTP `499`，响应体为 `{ "error": { "code": "ABORTED", "message": "Operation aborted" } }`；已断开的客户端可能收不到任何响应 |
+| 完成后再取消              | 不改变已提交结果，不影响并发请求                                                                                                                 |
 
-`onEvent` 会额外收到 `{ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } }`；同一作用域至多一次，取消不再产生 `error` 观测事件。
+对于已启动的评估作用域，`onEvent` 至多收到一次 `{ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' }, timestamp }`。它是观测事件，不属于 `EvaluationStreamEvent` / `GroupEvaluationStreamEvent`，也不是 SSE/JSONL 帧。预先取消的请求，或引擎启动前在钩子阶段取消，不产生该引擎事件；取消也不会产生 `error` 观测事件。
 
-内置 Provider（OpenAI Chat / OpenAI Responses / Anthropic / Gemini）把 `signal` 交给底层 SDK，中止尚未完成的 fetch 与响应体读取；已启动的本地网络操作会中止，厂商服务端是否立即停算/停止计费不在 SDK 保证范围内。自定义 Provider 与 `beforeEvaluate` hook 需读取 `options.signal` 才能被及时打断；不合作的外部 I/O 只保证停止后续调度并丢弃迟到结果。
+Hono 使用 `Request.signal` 和响应流取消；Express 监听请求中止与响应提前关闭；Nitro 根据运行时使用 Web 信号或 Node 连接事件。HTTP 客户端通过 `fetch` 的信号或响应 reader 取消，不通过 JSON `signal` 字段取消。经代理和托管运行时的传播依赖它们继续转发断连。
 
-> Gemini Provider 会接管 SDK 内部的连接重试：传 `signal` 后仍遵守 `options.timeout`（默认 60s）并使用可取消的指数退避（首次尝试 + 最多 4 次 HTTP 状态码重试，覆盖 408/409/429/5xx）；Agent 层的 `maxRetries` 语义（Schema 自修复）保持不变。
+内置提供商将取消传给 SDK 传输层，中止尚未完成的请求和响应体读取。自定义提供商必须传递 `params.signal`，两个钩子必须把第二个参数中的 `context?.signal` 继续传给外部 I/O。引擎可以停止等待并丢弃迟到结果，但无法强制终止不配合取消的 I/O；厂商服务端是否停算或停止计费也不在保证范围内。
+
+> Gemini 对 HTTP 408/409/429/5xx、连接错误和请求超时最多执行 5 次传输尝试（首次 + 4 次重试）。每次尝试有独立截止时间，退避可取消，已建立的流不会重连或重放。参见[取消与超时](./configuration.md#取消与超时)和[使用示例](./usage-guide.md#端到端取消)。
 
 ## 类型导出
 
@@ -666,6 +683,8 @@ import type {
   ExifData,
   EvaluationContext,
   EvaluationResult,
+  EvaluationEvent,
+  CancellationOptions,
   EvaluationStreamEvent,
   EvaluateStreamOptions,
   StreamMode,
@@ -689,6 +708,7 @@ import type {
   LLMProvider,
   ProviderCapabilities,
   ChatParams,
+  ResponseFormat,
   ChatResponse,
   ChatMessage,
   ChatContentPart,
@@ -708,11 +728,17 @@ import type {
   VenusEngineConfig,
   AgentRole,
   AgentConfig,
+  CallConfig,
   AgentCallResult,
   ModelConfig,
   ProviderConfig,
 
   // 结果类型
+  Suggestions,
+  ArbitrationDecisionType,
+  ArbitrationDecision,
+  RawArbitrationNotes,
+  ArbitrationNotes,
   ProposerResult,
   ArbitrationResult,
   CritiqueResult,
@@ -726,11 +752,13 @@ import type {
   ProviderError,
   SchemaError,
   TimeoutError,
+  AbortError,
 
   // 适配器类型
   AdapterOptions,
   AdapterHooks,
   EvaluateParams,
+  EvaluateRequestBody,
   GroupEvaluateParams,
   GroupEvaluateRequestBody,
   MetadataResponse,

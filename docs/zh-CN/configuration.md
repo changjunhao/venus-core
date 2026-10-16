@@ -8,21 +8,27 @@
 
 `VenusEngineConfig` 完整参考：
 
-| 选项           | 类型                               | 默认值 | 说明                                                                                                                                                                                                         |
-| -------------- | ---------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `provider`     | `LLMProvider`                      | _必填_ | LLM provider 实例（使用 `createOpenAIChatProvider` 或 `defineProvider`）                                                                                                                                     |
-| `defaultModel` | `string`                           | —      | 所有智能体的默认模型（建议）                                                                                                                                                                                 |
-| `models`       | `ModelConfig`                      | —      | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`）                                                                                                                             |
-| `providers`    | `ProviderConfig`                   | —      | 按智能体自定义提供商实例，未设置时回退到 `provider`（`revision` 未设置时沿用 proposer 的提供商）                                                                                                             |
-| `reasoning`    | `ReasoningConfig`                  | —      | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖                                                                                                                                |
-| `maxRetries`   | `number`                           | —      | 每次智能体 LLM 调用的最大重试次数。仅适用于 `json_object` 结构化输出模式的提供商；声明 `structuredOutput: 'json_schema'` 的提供商单次调用不重试（参见 [API 参考](./api-reference.md#structuredoutput-语义)） |
-| `onEvent`      | `(event: EvaluationEvent) => void` | —      | 用于可观测性的事件回调                                                                                                                                                                                       |
+| 选项           | 类型                               | 默认值 | 说明                                                                                                                                                                                                 |
+| -------------- | ---------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`     | `LLMProvider`                      | _必填_ | LLM provider 实例（使用 `createOpenAIChatProvider` 或 `defineProvider`）                                                                                                                             |
+| `defaultModel` | `string`                           | —      | 所有智能体的默认模型（建议）                                                                                                                                                                         |
+| `models`       | `ModelConfig`                      | —      | 按智能体覆盖模型（`genreDetector`、`proposer`、`critic`、`arbiter`、`revision`）                                                                                                                     |
+| `providers`    | `ProviderConfig`                   | —      | 按智能体自定义提供商实例，未设置时回退到 `provider`（`revision` 未设置时沿用 proposer 的提供商）                                                                                                     |
+| `reasoning`    | `ReasoningConfig`                  | —      | 推理配置，支持全局 `enabled`/`effort`/`budgetTokens` 和按智能体 `agents` 覆盖                                                                                                                        |
+| `maxRetries`   | `number`                           | `3`    | `json_object` 模式下包含首次调用在内的智能体总尝试次数上限；`1` 表示只尝试一次、不修复。`json_schema` 始终仅尝试一次并执行本地 Zod 校验（参见 [API 参考](./api-reference.md#structuredoutput-语义)） |
+| `onEvent`      | `(event: EvaluationEvent) => void` | —      | 用于可观测性的事件回调                                                                                                                                                                               |
+
+### 模型解析
+
+在引擎上设置 `defaultModel`，或为其初始化的智能体角色提供 `models`。引擎不会读取提供商的 `defaultModel`；角色解析时缺少模型配置会产生 `code: 'CONFIG_ERROR'` 的 `VenusError`。图片评估需使用支持视觉输入的模型。
+
+配置通过对象传入。环境变量加载和 API 密钥的服务端保管由调用方负责。
 
 ### 事件系统与流式评估
 
-`onEvent` 在 `evaluate()` 与 `evaluateStream()` 中都会触发。流式评估时，引擎会在产出
-`EvaluationStreamEvent` 流的同时发出相同的管线阶段事件（`round_start`、`agent_call`、
-`agent_complete`、`round_complete`、`error`），可观测性钩子无需解析 SSE 响应体即可工作。
+`onEvent` 可观测 `evaluate()`、`evaluateStream()`、`evaluateGroup()` 和 `evaluateGroupStream()`。管线事件包含 `round_start`、`agent_call`、`agent_complete`、`round_complete`、`error` 和 `cancelled`，每条均带有 `timestamp`。流迭代器单独产出单图或组图流事件，可观测性无需依赖 SSE/JSONL 解析。
+
+`cancelled` 仅为观测事件：已启动的评估至多发出一次，预先取消或引擎启动前在钩子阶段取消不会触发它。取消不产生 `error` 观测事件或完成帧。
 
 ## 推理配置
 
@@ -31,7 +37,7 @@ interface ReasoningConfig {
   /** 推理是否全局启用（存在此对象时默认为 true）。设置为 `false` 可禁用所有智能体的推理。 */
   enabled?: boolean;
   /** 应用于所有智能体的默认推理 effort（设置时） */
-  effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
+  effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
   /** 推理的默认 token 预算 */
   budgetTokens?: number;
   /** 按智能体覆盖；设置为 `false` 可禁用特定智能体的推理 */
@@ -39,7 +45,7 @@ interface ReasoningConfig {
     Record<
       AgentRole,
       | {
-          effort: 'minimal' | 'low' | 'medium' | 'high' | 'max'; // 必填
+          effort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'max' | 'xhigh'; // 必填
           budgetTokens?: number;
         }
       | false
@@ -75,7 +81,7 @@ const engine = createVenusEngine({
 
 引擎会自动将推理参数适配到不同的提供商 API：
 
-- **OpenAI**：使用 `reasoning_effort`（minimal/low/medium/high/max）
+- **OpenAI**：Chat Completions 使用 `reasoning_effort`，Responses 使用 `reasoning: { effort }`。公共 `ReasoningEffort` 联合类型为 `none/minimal/low/medium/high/max/xhigh`，可用取值取决于所选模型
 - **Qwen（通义千问）**：使用 `enable_thinking` 和 `thinking_budget`
 - **Kimi（月之暗面）**：使用 `thinking: { type: "enabled" }`
 - **小米 MiMo**：Chat Completions 使用 `thinking: { type: "enabled" }`（格式与 Kimi 相同）；Responses API 端点（通过 `createOpenAIResponsesProvider` 配合 `https://api.xiaomimimo.com/v1`）仅使用嵌套 `reasoning: { effort }`（`none` 关闭思考，minimal→none，max/xhigh→high；不会发送 `reasoning.summary`，temperature 由模型内部管理）
@@ -89,7 +95,7 @@ const engine = createVenusEngine({
 - **DeepSeek**：Chat Completions 使用 `thinking.type` 开关 + `reasoning_effort`（仅支持 low/high/max；客户端映射：none/minimal→关闭思考，medium/xhigh→high）；Responses API 端点（`createOpenAIResponsesProvider` 配合 `https://api.deepseek.com`）使用嵌套 `reasoning: { effort }`（none/low/high/max；`none` 关闭思考，不会发送 `reasoning.summary`）。DeepSeek v4 系列（含视觉模型 `deepseek-v4-flash-vision-exp`）默认开启思考，未配置推理时会显式发送禁用参数
 - **OpenRouter**：使用 `reasoning: { effort, max_tokens, enabled: true }`
 
-> **注意**：当未配置推理时，适配器会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、火山方舟、Grok、DeepSeek）显式禁用推理，确保行为可预测。
+> **注意**：当未配置推理时，提供商会对默认启用思考的端点（DashScope、Qianfan、Kimi、MIMO、Zhipu、MiniMax、火山方舟、Grok、DeepSeek）显式禁用推理，确保行为可预测。
 
 ### 豆包（火山方舟）Responses API
 
@@ -174,7 +180,7 @@ const provider = createAnthropicProvider({
 自动处理的 DashScope 特性：
 
 - 未配置推理时显式发送 `thinking: { type: 'disabled' }`（部分 qwen 模型默认开启思考），此时 `temperature` 照常转发；配置推理时与官方一致（`thinking: { type: 'enabled', budget_tokens }`，省略 `temperature`）
-- 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，provider 声明 `structuredOutput: 'json_schema'`（单次调用，不重试）。DashScope 校验器不支持的 JSON Schema 关键字（如 `multipleOf`）会在发送前于客户端剥离。注意约束强度取决于模型系列：deepseek/glm 系列严格执行 schema，qwen 系列仅保证输出合法 JSON
+- 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，provider 声明 `structuredOutput: 'json_schema'`（单次智能体尝试后执行本地 Zod 校验，不进行智能体层修复）。DashScope 校验器不支持的 JSON Schema 关键字（如 `multipleOf`）会在发送前于客户端剥离。注意约束强度取决于模型系列：deepseek/glm 系列严格执行 schema，qwen 系列仅保证输出合法 JSON
 - 认证使用 SDK 默认的 `x-api-key` 请求头（传入百炼 API Key 即可）；流式事件与官方 Messages API 一致
 
 ### 智谱（BigModel）Anthropic 兼容端点
@@ -194,15 +200,58 @@ const provider = createAnthropicProvider({
 自动处理的智谱特性：
 
 - 未配置推理时显式发送 `thinking: { type: 'disabled' }`（GLM 系列默认开启思考，部分型号强制思考），此时 `temperature` 照常转发；配置推理时发送 `thinking: { type: 'enabled' }`（GLM 不支持思考预算，不发送 `budget_tokens`，`temperature` 省略），`max_tokens` 仍按 effort 对应的预算扩容以为思考留出空间
-- 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，由 GLM 系列在服务端严格执行，provider 声明 `structuredOutput: 'json_schema'`（单次调用，不重试）
+- 结构化输出保持严格 `json_schema` 策略——通过 `output_config.format` 下发，由 GLM 系列在服务端严格执行，provider 声明 `structuredOutput: 'json_schema'`（单次智能体尝试后执行本地 Zod 校验，不进行智能体层修复）
 - 认证使用 SDK 默认的 `x-api-key` 请求头（传入智谱 API Key 即可）；流式事件与官方 Messages API 一致
 
 ## 取消与超时
 
-- **请求级取消**：`signal?: AbortSignal` 不在 `VenusEngineConfig` 或 Provider 构造器中配置，而是每次评估入口 (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`) 的 `CancellationOptions` 中传入。Adapter 会自动接入 HTTP 客户端的 `Request.signal` 或 `reader.cancel()`。参见[API 参考 · 端到端取消](./api-reference.md#端到端取消)。
-- **Provider 超时**：`OpenAIChatProviderOptions.timeout` / `OpenAIResponsesProviderOptions.timeout` / `GeminiProviderOptions.timeout` 控制 SDK 侧的 HTTP 超时，与取消不冲突；`AbortSignal.timeout(ms)` 则会把内部 TimeoutError 封装为取消。
-- **Agent 重试** (`VenusEngineConfig.maxRetries` 或 `AgentConfig.maxRetries`)：只重试 JSON/Schema 失败；`AbortError` 不进入重试也不会包为 `SchemaError`。
-- **Gemini 请求级重试**：Provider 内部接管 `@google/genai` Interactions 的连接重试，默认首次尝试 + 最多 4 次重试（覆盖 408/409/429/5xx、连接错误及请求超时），每次尝试使用独立 deadline，退避可由 `signal` 取消；用户取消不重试，流建立后不重连或重放。SDK 内部的 `maxRetries` 固定为 0，避免不可取消的退避泄漏。
+取消、传输截止时间和智能体尝试次数是相互独立的控制项：
+
+| 控制项                    | 配置位置                                                                        | 作用范围与结果                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `signal`                  | `evaluate()` 的第四个参数；其余三个方法的选项对象                               | 取消整次评估及后续轮次，以 `AbortError`（`ABORTED`）拒绝                                |
+| `AbortSignal.timeout(ms)` | 将返回的信号传到上述请求级位置                                                  | 整体截止时间，表现为 `AbortError`；原始 DOM `TimeoutError` 保留在 `reason` / `cause` 中 |
+| 提供商 `timeout`          | OpenAI Chat、OpenAI Responses、Anthropic 或 Gemini 的构造选项，默认 `60_000` ms | 传输超时，归类为 `errorCode: 'timeout'` 的 `ProviderError`，不是整次评估的截止时间      |
+| `maxRetries`              | `VenusEngineConfig`（智能体实例则为 `AgentConfig`）                             | `json_object` 智能体总尝试次数上限，默认 `3`，独立于提供商或 SDK 的传输层重试           |
+
+`signal` 不属于 `VenusEngineConfig`、提供商构造选项、`EvaluationContext` 或 HTTP JSON 请求体。适配器从 Web 请求/流取消或 Node 连接事件生成信号，并通过第二个参数传给钩子。参见 [API 参考](./api-reference.md#端到端取消)。
+
+### 智能体尝试次数
+
+- `json_schema`：单次智能体尝试后执行本地 Zod 校验，不进行智能体层修复；提供商传输层仍可能重试。
+- `json_object`：最多执行 `maxRetries` 次总尝试。非流式调用重试提供商、JSON 解析及校验错误；流式调用仅重试完整输出的解析或校验错误，传输错误直接向上传播。
+- 取消不进入重试循环，也不会包装为 `SchemaError`。其他耗尽尝试次数的 `json_object` 错误会变成 `SchemaError`，因此提供商超时到达引擎边界时不一定仍是 `ProviderError`。
+
+### Gemini 传输层重试
+
+提供商管理 Interactions 传输重试：首次尝试后，对 HTTP 408/409/429/5xx、连接错误和请求超时最多再重试 4 次。每次尝试有独立的 `timeout` 截止时间，流建立后该截止时间持续覆盖响应体消费。SDK 内部 `maxRetries` 设为 `0`，避免叠加第二层重试循环。
+
+退避优先读取 `retry-after-ms` / `retry-after`，否则使用带抖动的指数延迟，上限为 8 秒。调用方信号可同时取消请求和退避等待；用户取消不重试，已建立的流不重连或重放。
+
+可用整体截止时间限制全部轮次和传输尝试：
+
+```ts
+import { createGeminiProvider, createVenusEngine, isAbortError } from '@theogony/venus-core';
+
+const engine = createVenusEngine({
+  provider: createGeminiProvider({
+    apiKey: process.env.GEMINI_API_KEY!,
+    timeout: 20_000,
+  }),
+  defaultModel: 'gemini-3-flash-preview',
+});
+
+try {
+  const result = await engine.evaluate(imageUrl, undefined, undefined, {
+    signal: AbortSignal.timeout(60_000),
+  });
+  console.log(result.totalScore);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+SDK 导出的 `TimeoutError` 类、DOM 超时原因和提供商超时分类是不同概念。设置提供商超时不会自动限制整个多轮评估的耗时。
 
 ## 参见
 

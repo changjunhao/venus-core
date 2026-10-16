@@ -6,6 +6,8 @@
 
 ## 基本评估
 
+以下示例假设已按[快速开始](../../README.zh-CN.md#快速开始)配置引擎。请在引擎上设置 `defaultModel`（或按智能体提供 `models`）；提供商的 `defaultModel` 不会自动配置引擎。
+
 传入图片 URL，可选指定门类。省略时引擎会自动检测。
 
 ```ts
@@ -137,7 +139,7 @@ for await (const event of engine.evaluateGroupStream(imageUrls, 'compare', {
 }
 ```
 
-事件顺序：第 0 轮 `agent_call` / `agent_complete` 与 `genre_detected`（仅在自动检测门类时）→ `group_evaluation_start` → 各轮 `agent_call` / `agent_complete` → `group_evaluation_complete`。错误（包括图片数量不在 2–10 范围内）以末尾的 `error` 事件形式产出。
+事件顺序：第 0 轮 `agent_call` / `agent_complete` 与 `genre_detected`（仅在自动检测门类时）→ `group_evaluation_start` → 各轮 `agent_call` / `agent_complete` → `group_evaluation_complete`。非取消类错误（包括图片数量不在 2–10 范围内）以末尾的 `error` 事件形式产出。信号取消则以 `AbortError` 拒绝迭代，参见[端到端取消](#端到端取消)。
 
 ## Web 框架集成
 
@@ -153,6 +155,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
 });
 
 const app = new Hono();
@@ -183,6 +186,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
 });
 
 const app = express();
@@ -214,6 +218,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
 });
 
 const venus = createNitroAdapter(engine, {
@@ -290,8 +295,12 @@ curl -X POST http://localhost:3000/api/evaluate/group \
   "dimensions": { "facial_expression": 8.5, "pose_body": 8.0, "lighting_quality": 8.5 },
   "groupAnalysis": "两张照片构成了连贯的叙事 ...",
   "critique": "...",
-  "suggestions": "...",
-  "arbitrationNotes": "...",
+  "suggestions": ["简化背景，让注意力集中在主体上"],
+  "arbitrationNotes": {
+    "sceneTypeRuling": "这组照片属于婚礼人像",
+    "decisions": [{ "target": "lighting_quality", "decision": "partial", "reason": "各张照片的光线控制存在差异" }],
+    "finalRationale": "最终评估综合考虑人物神态与光线控制"
+  },
   "process": { "proposal": {}, "critique": {}, "arbitration": {} },
   "metadata": {
     "evaluatedAt": "2026-07-29T09:12:34.567Z",
@@ -315,8 +324,12 @@ curl -X POST http://localhost:3000/api/evaluate/group \
     { "index": 0, "rank": 2, "score": 7.5, "rationale": "神态偏平，画面元素更杂" }
   ],
   "comparisonSummary": "第二张在光线控制上领先 ...",
-  "suggestions": "...",
-  "arbitrationNotes": "...",
+  "suggestions": ["简化背景，让注意力集中在主体上"],
+  "arbitrationNotes": {
+    "sceneTypeRuling": "这组照片属于婚礼人像",
+    "decisions": [{ "target": "lighting_quality", "decision": "partial", "reason": "各张照片的光线控制存在差异" }],
+    "finalRationale": "最终评估综合考虑人物神态与光线控制"
+  },
   "process": { "proposal": {}, "critique": {}, "arbitration": {} },
   "metadata": {
     "evaluatedAt": "2026-07-29T09:14:02.001Z",
@@ -342,7 +355,7 @@ curl -N -X POST http://localhost:3000/api/evaluate/group/stream \
   }'
 ```
 
-每个事件是一行 `data:`，以空行结尾：
+每个事件是一行 `data:`，以空行结尾（以下为节选，省略部分中间事件和结果字段）：
 
 ```text
 data: {"type":"agent_call","round":0,"agent":"genreDetector","timestamp":1785000000000}
@@ -374,7 +387,7 @@ curl -N -X POST http://localhost:3000/api/evaluate/group/stream/jsonl \
 {"type":"group_evaluation_complete","data":{"mode":"joint","totalScore":8.4},"timestamp":1785000040000}
 ```
 
-两个流式端点在中途失败时都会追加一条末尾 `error` 事件，且 HTTP 状态码仍为 `200`（响应头已发送）。
+两个流式端点在发生非取消类失败时都会追加一条末尾 `error` 事件，且 HTTP 状态码仍为 `200`（响应头已发送）。取消或客户端断连后停止写入，不补发错误或完成帧。响应头发送前的取消在仍可响应时可能映射为 HTTP `499 ABORTED`；已断开的客户端不应期待收到该响应。
 
 ## 适配器钩子
 
@@ -391,15 +404,20 @@ interface AdapterHooks {
    * 使用场景：上传图片到提供商文件 API、注入 EXIF 上下文、
    * 覆盖门类、切换流式粒度等。
    */
-  beforeEvaluate?: (params: EvaluateParams) => Promise<EvaluateParams> | EvaluateParams;
+  beforeEvaluate?: (params: EvaluateParams, context?: CancellationOptions) => Promise<EvaluateParams> | EvaluateParams;
 
   /**
    * 在组图评估开始前调用（同步和流式端点均适用）。
    * 接收已验证的组图请求参数，可转换并返回修改后的参数。
    */
-  beforeEvaluateGroup?: (params: GroupEvaluateParams) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
+  beforeEvaluateGroup?: (
+    params: GroupEvaluateParams,
+    context?: CancellationOptions,
+  ) => Promise<GroupEvaluateParams> | GroupEvaluateParams;
 }
 ```
+
+可选的第二个参数包含 `signal`，原有单参数钩子保持兼容。这个执行上下文与 `params.context`（EXIF、用户元数据）不同。请将信号传给上传、元数据读取等 I/O 辅助函数；这些由应用实现的函数必须继续传给底层 `fetch` 或 SDK，仅增加但不使用参数无法中止 I/O。
 
 ### `EvaluateParams`
 
@@ -434,10 +452,10 @@ import { createHonoAdapter } from '@theogony/venus-core/hono';
 
 const adapter = createHonoAdapter(engine, {
   hooks: {
-    beforeEvaluate: async (params) => {
-      // 上传图片到提供商文件 API
-      const fileId = await uploadToFileAPI(params.imageUrl);
-      return { ...params, imageUrl: fileId };
+    beforeEvaluate: async (params, context) => {
+      // 返回当前提供商支持的图片 URL
+      const imageUrl = await uploadToFileAPI(params.imageUrl, { signal: context?.signal });
+      return { ...params, imageUrl };
     },
   },
 });
@@ -450,8 +468,8 @@ const adapter = createHonoAdapter(engine, {
 ```ts
 const adapter = createExpressAdapter(engine, {
   hooks: {
-    beforeEvaluate: async (params) => {
-      const exif = await fetchExifData(params.imageUrl);
+    beforeEvaluate: async (params, context) => {
+      const exif = await fetchExifData(params.imageUrl, { signal: context?.signal });
       return {
         ...params,
         context: { ...params.context, exif },
@@ -470,9 +488,11 @@ const adapter = createExpressAdapter(engine, {
 ```ts
 const adapter = createHonoAdapter(engine, {
   hooks: {
-    beforeEvaluateGroup: async (params) => {
+    beforeEvaluateGroup: async (params, context) => {
       // 逐张上传图片，并为高级租户强制开启逐图明细
-      const imageUrls = await Promise.all(params.imageUrls.map(uploadToFileAPI));
+      const imageUrls = await Promise.all(
+        params.imageUrls.map((url) => uploadToFileAPI(url, { signal: context?.signal })),
+      );
       return { ...params, imageUrls, includePerImage: true };
     },
   },
@@ -571,6 +591,7 @@ const engine = createVenusEngine({
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
   onEvent(event) {
     console.log(`[${event.type}] 轮次=${event.round} 智能体=${event.agent}`);
   },
@@ -586,61 +607,133 @@ const engine = createVenusEngine({
 | `error`          | `{ agent, data: { error } }`                                           |
 | `cancelled`      | `{ agent: 'engine', data: { code: 'ABORTED' } }`（同一作用域至多一次） |
 
-`onEvent` 在 `evaluate()` 与 `evaluateStream()` 中都会触发——流式评估会在产出 `EvaluationStreamEvent` 流的同时发出相同的管线阶段事件。
+`onEvent` 可观测全部四个单图和组图入口。每条观测事件均包含 `timestamp`，流事件则通过迭代器单独交付。`cancelled` 仅为观测事件，不是流帧；已启动的评估至多发出一次，预先取消或引擎启动前在钩子阶段取消不会发出该事件。
 
 ## 端到端取消
 
-四个 Engine 入口都接收 `{ signal?: AbortSignal }`；三种 Adapter 会自动将 HTTP 客户端的 `AbortSignal` 与 `reader.cancel()` 接入同一个取消作用域。完整的行为矩阵与类型签名参见 [API 参考 · 端到端取消](./api-reference.md#端到端取消)。
+四个入口均支持请求级取消。每个独立请求应新建控制器或超时信号，已取消的信号无法重置。完整签名和行为矩阵参见 [API 参考](./api-reference.md#端到端取消)。
+
+### 非流式评估
 
 ```ts
-import { AbortError, isAbortError } from '@theogony/venus-core';
+import { isAbortError } from '@theogony/venus-core';
 
 const controller = new AbortController();
-setTimeout(() => controller.abort('user left'), 30_000);
+const timer = setTimeout(() => controller.abort(), 30_000);
 
-// 1. 非流式
 try {
-  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
-} catch (err) {
-  if (!isAbortError(err)) throw err;
-}
-
-// 2. 流式：for-await 中捕获一次 reject；finally 里手动释放迭代器确保早退
-const stream = engine.evaluateStream(imageUrl, { mode: 'updates', signal: controller.signal });
-try {
-  for await (const event of stream) renderEvent(event);
-} catch (err) {
-  if (!(err instanceof AbortError)) throw err;
+  const result = await engine.evaluate(imageUrl, 'portrait', undefined, {
+    signal: controller.signal,
+  });
+  console.log(result.totalScore);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
 } finally {
-  await stream.return(undefined as never);
-}
-
-// 3. 客户端断开：AbortController + reader.cancel 都会中止服务端引擎
-const response = await fetch('/api/evaluate/stream', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ imageUrl, genre: 'portrait' }),
-  signal: controller.signal,
-});
-const reader = response.body!.getReader();
-try {
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    handleChunk(value);
-  }
-} finally {
-  // 断连后不再写帧，不补发 error，也不伪造 evaluation_complete
-  await reader.cancel('user disconnect');
+  clearTimeout(timer);
 }
 ```
 
+取消操作可调用 `controller.abort()` 提前中止。仅需要截止时间时可改用 `AbortSignal.timeout(ms)`；引擎会将其作为 `AbortError` 上报，而非 SDK 的 `TimeoutError` 类。
+
+### 流式评估与提前退出
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  for await (const event of engine.evaluateStream(imageUrl, {
+    mode: 'updates',
+    signal: AbortSignal.timeout(30_000),
+  })) {
+    console.log(event);
+    if (event.type === 'agent_complete') break; // 第一个智能体完成后主动停止
+  }
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+`for await` 在 `break` 时调用迭代器的 `return()`，无需额外控制器即可取消未完成的工作。信号取消会以 `AbortError` 拒绝一次迭代，后续读取返回 `done`；不会补发 `error`、`evaluation_complete` 或 `group_evaluation_complete`。如果手动驱动迭代器，请在 `finally` 中调用 `await stream.return()`，并处理尚未完成的 `next()` 拒绝。
+
+### 组图评估
+
+信号放在第三个参数中，组图模式与流式粒度仍相互独立：
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  const result = await engine.evaluateGroup(imageUrls, 'joint', {
+    genre: 'portrait',
+    signal: AbortSignal.timeout(60_000),
+  });
+  console.log(result);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+独立的流式请求示例：
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  for await (const event of engine.evaluateGroupStream(imageUrls, 'compare', {
+    mode: 'updates',
+    signal: AbortSignal.timeout(60_000),
+  })) {
+    console.log(event);
+  }
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+### HTTP 客户端取消
+
+将 `signal` 传给 `fetch`，不要放进 JSON 请求体。以下浏览器示例使用 SSE 端点，JSONL 和组图端点采用相同的取消方式：
+
+```ts
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 30_000);
+let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+try {
+  const response = await fetch('/api/evaluate/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageUrl, genre: 'portrait' }),
+    signal: controller.signal,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.body) throw new Error('Missing response body');
+  reader = response.body.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    console.log(value); // 原始字节；由应用解码并解析 SSE/JSONL
+  }
+} catch (error) {
+  if (!controller.signal.aborted) throw error;
+} finally {
+  clearTimeout(timer);
+  if (reader) {
+    // 流已中止时，清理错误不应覆盖原始读取错误
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+```
+
+将取消操作绑定到 `controller.abort()`。取消响应 reader 也会停止消费，并通过传输层通知断连。Hono 使用 `Request.signal` 和响应流取消，Express 使用 Node 请求/响应事件，Nitro 根据运行时选择 Web 或 Node 机制。运行时和反向代理必须继续转发断连，取消才能到达适配器。
+
 注意事项：
 
-- **自定义 Provider / hook** 需要读取 `options.signal` 或 `context.signal` 才能及时中止，不合作的外部 I/O 只保证停止后续调度并丢弃迟到结果。
-- **修正轮** 使用独立的 `revision` provider 时，`signal` 仍会传递到该轮。
-- **并发** 同一个 Engine/Provider 的不同请求互不影响；中止一个不会传递到兄弟。
-- **服务端已启动的任务** 本地 fetch 会中止，但厂商服务端是否停算/停止计费不在 SDK 保证范围内。
+- **自定义提供商与钩子** 必须将 `params.signal` 或钩子第二个参数中的 `context?.signal` 传给实际 I/O；否则引擎只能停止等待和后续调度，并丢弃迟到结果。
+- **修正轮** 使用独立 `revision` 提供商时仍会接收信号。
+- **并发** 共用引擎或提供商的请求互不影响，除非调用方主动共用信号。提前结束一个流不会中止其父信号或其他请求。
+- **服务端任务** 本地请求会中止，但厂商服务端是否停算或停止计费不在 SDK 保证范围内。
 
 ## 参见
 

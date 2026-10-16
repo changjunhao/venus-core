@@ -26,13 +26,13 @@ graph LR
     E --> F[评估结果]
 ```
 
-| 轮次 | 智能体 | 职责 |
-|------:|--------|------|
-| 0 | 门类检测器 | 通过 VLM 自动识别摄影门类（可选） |
-| 1 | **提案者** | 分析图片并给出带有各维度分数的初始评估 |
-| 2 | **批判者** | 挑战提案，识别评分偏差与错误 |
-| 3 | **修正** _(条件触发)_ | 当批判严重程度为 `HIGH` 时，提案者修正其评估 |
-| 4 | **仲裁者** | 综合所有证据做出最终裁决 |
+| 轮次 | 智能体                | 职责                                         |
+| ---: | --------------------- | -------------------------------------------- |
+|    0 | 门类检测器            | 通过 VLM 自动识别摄影门类（可选）            |
+|    1 | **提案者**            | 分析图片并给出带有各维度分数的初始评估       |
+|    2 | **批判者**            | 挑战提案，识别评分偏差与错误                 |
+|    3 | **修正** _(条件触发)_ | 当批判严重程度为 `HIGH` 时，提案者修正其评估 |
+|    4 | **仲裁者**            | 综合所有证据做出最终裁决                     |
 
 引擎支持 **8 大摄影门类**，每个门类均有专属的评分维度、场景子类型和专业评审标准。同一套管线也支撑**组图评估**，可一次处理 2 到 10 张图片。
 
@@ -44,8 +44,9 @@ graph LR
 - **多提供商推理适配** — 自动适配 Qwen（通义千问）、Kimi（月之暗面）、小米 MiMo、阶跃星辰（StepFun）、MiniMax、豆包（火山方舟）、百度千帆（ERNIE）、智谱（BigModel）、Grok（xAI）、Gemini、DeepSeek 和 OpenRouter 的推理参数
 - **OpenAI Responses API** — 原生 `/v1/responses` 提供商，适用于推理型模型（o 系列、GPT-5），支持严格 JSON Schema 结构化输出；自动适配豆包（火山方舟）、小米 MiMo 和 DeepSeek 的 Responses 端点（含 `deepseek-v4-flash-vision-exp` 视觉模型，按端点自动降级结构化输出策略）
 - **原生 Anthropic 与 Gemini 提供商** — Claude Messages API（支持扩展思考）与 Google Gemini Interactions API，均支持严格 JSON Schema 结构化输出；Anthropic 提供商还可直接对接阿里云百炼（DashScope）和智谱的 Anthropic 兼容端点
-- **结构化输出双模式** — `json_schema` 提供商单次调用即获得 schema 保证的输出；`json_object` 提供商保留 Zod 校验与自动修复重试
-- **双模式评估 API** — `evaluate()` 同步返回结果，`evaluateStream()` 支持 SSE 流式输出
+- **结构化输出双模式** — 两种模式均执行本地 Zod 校验：`json_schema` 在单次智能体尝试中请求严格结构化输出；`json_object` 额外支持自动修复尝试
+- **双模式评估 API** — `evaluate()` 通过 Promise 返回完整结果，`evaluateStream()` 支持 SSE 流式输出
+- **端到端取消** — 单图、组图、智能体和全部内置提供商均支持请求级 `AbortSignal`；适配器传递客户端断连，流式评估支持提前终止
 - **组图评估** — 通过 `evaluateGroup()` / `evaluateGroupStream()` 一次评估 2 到 10 张图片：`joint` 模式把整组当作一个系列评判，`compare` 模式让组内图片相互排名，`includePerImage` 在 Schema 层面控制是否输出逐图明细以节省 token
 - **流式粒度控制** — 两种流模式：`values`（仅里程碑事件）和 `updates`（实时推理 + JSON 增量）
 - **上下文扩展** — 丰富的 `EvaluationContext`，支持 EXIF 元数据、用户备注和自定义数据，按门类智能注入
@@ -78,14 +79,14 @@ const engine = createVenusEngine({
 });
 
 const result = await engine.evaluate('https://example.com/photo.jpg');
-console.log(result.totalScore);                         // 8.2
-console.log(result.genre);                              // 'landscape'
-console.log(result.dimensions);                         // { composition_depth: 8.5, ... }
-console.log(result.critique);                           // 详细文字点评
-console.log(result.suggestions);                        // ['改进……', '建议……']
-console.log(result.arbitrationNotes.sceneTypeRuling);   // 场景类型裁定
-console.log(result.arbitrationNotes.decisions);         // 结构化仲裁决定
-console.log(result.arbitrationNotes.finalRationale);    // 最终裁定理由
+console.log(result.totalScore); // 8.2
+console.log(result.genre); // 'landscape'
+console.log(result.dimensions); // { composition_depth: 8.5, ... }
+console.log(result.critique); // 详细文字点评
+console.log(result.suggestions); // ['改进……', '建议……']
+console.log(result.arbitrationNotes.sceneTypeRuling); // 场景类型裁定
+console.log(result.arbitrationNotes.decisions); // 结构化仲裁决定
+console.log(result.arbitrationNotes.finalRationale); // 最终裁定理由
 ```
 
 你也可以流式获取评估进度，适合实时更新：
@@ -115,15 +116,15 @@ const images = [
 // 'joint' — 把整组当作一个系列评判
 const joint = await engine.evaluateGroup(images, 'joint');
 if (joint.mode === 'joint') {
-  console.log(joint.totalScore);     // 8.4
-  console.log(joint.groupAnalysis);  // 整组的叙事性与一致性分析
+  console.log(joint.totalScore); // 8.4
+  console.log(joint.groupAnalysis); // 整组的叙事性与一致性分析
 }
 
 // 'compare' — 组内图片相互排名
 const compare = await engine.evaluateGroup(images, 'compare', { includePerImage: true });
 if (compare.mode === 'compare') {
-  console.log(compare.ranking);      // [{ index: 2, rank: 1, score: 8.8, rationale: '...' }, ...]
-  console.log(compare.perImage);     // 逐图明细，仅在 includePerImage 为 true 时存在
+  console.log(compare.ranking); // [{ index: 2, rank: 1, score: 8.8, rationale: '...' }, ...]
+  console.log(compare.perImage); // 逐图明细，仅在 includePerImage 为 true 时存在
 }
 ```
 
@@ -131,30 +132,54 @@ if (compare.mode === 'compare') {
 
 `index` 始终表示输入数组中从 0 开始的下标，因此结果可映射回原始顺序。
 
+### 取消评估
+
+`evaluate()` 的取消选项放在第四个参数；其余三个评估方法直接在已有的选项对象中接收 `signal`：
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 30_000);
+
+try {
+  const result = await engine.evaluate('https://example.com/photo.jpg', undefined, undefined, {
+    signal: controller.signal,
+  });
+  console.log(result.totalScore);
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+} finally {
+  clearTimeout(timer);
+}
+```
+
+调用 `controller.abort()` 可中止进行中的请求。流式评估通过 `AbortError` 拒绝迭代，不会产出 `error` 或完成事件；提前退出 `for await` 也会取消尚未完成的工作。自定义提供商和钩子需要将信号继续传给实际 I/O。流式、组图和 HTTP 示例参见[取消指南](./docs/zh-CN/usage-guide.md#端到端取消)。
+
 ---
 
 ## 文档
 
-| 文档 | 说明 |
-|----------|-------------|
-| [API 参考](./docs/zh-CN/api-reference.md) | 引擎、提供商、Schema 和错误的完整类型签名 |
-| [使用指南](./docs/zh-CN/usage-guide.md) | 流式评估、组图评估、Web 框架集成、适配器钩子、上下文扩展、事件系统 |
-| [配置参考](./docs/zh-CN/configuration.md) | `VenusEngineConfig` 完整参考和推理配置 |
+| 文档                                      | 说明                                                   |
+| ----------------------------------------- | ------------------------------------------------------ |
+| [API 参考](./docs/zh-CN/api-reference.md) | 引擎、提供商、Schema 和错误的完整类型签名              |
+| [使用指南](./docs/zh-CN/usage-guide.md)   | 流式评估、组图评估、取消、Web 框架、钩子、上下文和事件 |
+| [配置参考](./docs/zh-CN/configuration.md) | 引擎与模型设置、推理配置、提供商超时和重试行为         |
 
 ---
 
 ## 摄影门类
 
-| 门类 | 键名 | 评分维度 | 子类型 |
-|-------|-----|-----------|----------|
-| 人像 | `portrait` | 神态、姿态、光影、色彩、构图 | 棚拍/写真、环境人像/旅拍、婚礼 |
-| 风光 | `landscape` | 构图纵深、光线气氛、色彩和谐、锐度细节、情感共鸣 | 自然风光、城市风光、海景、星空/天文 |
-| 纪实 | `documentary` | 叙事、瞬间、构图、真实、情感 | 新闻纪实、街头摄影、社会纪实 |
-| 艺术 | `fine_art` | 概念、视觉、工艺、原创、美学 | 观念摄影、抽象摄影、实验摄影 |
-| 商业 | `commercial` | 主体、布光、造型、色彩、市场 | 产品摄影、时尚摄影 |
-| 建筑 | `architecture` | 透视、空间、光材、环境、叙事 | 室内建筑、室外建筑 |
-| 自然 | `nature` | 捕捉、对焦、环境、技术、自然美 | 野生动物、植物、微距 |
-| 体育 | `sports` | 巅峰动作、时机、取景、执行、戏剧 | 竞技运动、极限运动 |
+| 门类 | 键名           | 评分维度                                         | 子类型                              |
+| ---- | -------------- | ------------------------------------------------ | ----------------------------------- |
+| 人像 | `portrait`     | 神态、姿态、光影、色彩、构图                     | 棚拍/写真、环境人像/旅拍、婚礼      |
+| 风光 | `landscape`    | 构图纵深、光线气氛、色彩和谐、锐度细节、情感共鸣 | 自然风光、城市风光、海景、星空/天文 |
+| 纪实 | `documentary`  | 叙事、瞬间、构图、真实、情感                     | 新闻纪实、街头摄影、社会纪实        |
+| 艺术 | `fine_art`     | 概念、视觉、工艺、原创、美学                     | 观念摄影、抽象摄影、实验摄影        |
+| 商业 | `commercial`   | 主体、布光、造型、色彩、市场                     | 产品摄影、时尚摄影                  |
+| 建筑 | `architecture` | 透视、空间、光材、环境、叙事                     | 室内建筑、室外建筑                  |
+| 自然 | `nature`       | 捕捉、对焦、环境、技术、自然美                   | 野生动物、植物、微距                |
+| 体育 | `sports`       | 巅峰动作、时机、取景、执行、戏剧                 | 竞技运动、极限运动                  |
 
 ---
 
@@ -172,11 +197,11 @@ deno add jsr:@theogony/venus-core
 
 ### 可选 Peer 依赖
 
-| 包名                         | 是否必需 | 说明 |
-|----------------------------|----------|-------|
-| `hono` ^4.12               | 可选 | 用于 Hono 适配器（`@theogony/venus-core/hono`） |
-| `express` ^5.2             | 可选 | 用于 Express 适配器（`@theogony/venus-core/express`） |
-| `h3` ^1.15                 | 可选 | 用于 Nitro 适配器（`@theogony/venus-core/nitro`） |
+| 包名             | 是否必需 | 说明                                                  |
+| ---------------- | -------- | ----------------------------------------------------- |
+| `hono` ^4.13.13  | 可选     | 用于 Hono 适配器（`@theogony/venus-core/hono`）       |
+| `express` ^5.3.0 | 可选     | 用于 Express 适配器（`@theogony/venus-core/express`） |
+| `h3` ^1.15.0     | 可选     | 用于 Nitro 适配器（`@theogony/venus-core/nitro`）     |
 
 ### 运行时支持
 

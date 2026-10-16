@@ -17,7 +17,7 @@ Run a full evaluation. Returns when all rounds complete.
 | Parameter  | Type                  | Description                                                      |
 | ---------- | --------------------- | ---------------------------------------------------------------- |
 | `imageUrl` | `string`              | URL of the image to evaluate                                     |
-| `genre`    | `Genre`               | Optional genre override; auto-detected if omitted                |
+| `genre`    | `Genre \| null`       | Optional genre override; auto-detected if omitted or `null`      |
 | `context`  | `EvaluationContext`   | Optional context with EXIF data, user notes, and custom metadata |
 | `options`  | `CancellationOptions` | Optional `{ signal?: AbortSignal }` for end-to-end cancellation  |
 
@@ -63,7 +63,7 @@ interface EvaluationResult {
 }
 ```
 
-### `engine.evaluateStream(imageUrl, options?): AsyncGenerator<EvaluationStreamEvent>`
+### `engine.evaluateStream(imageUrl, options?): AsyncGenerator<EvaluationStreamEvent, void, unknown>`
 
 Streaming evaluation that yields events at each stage:
 
@@ -186,7 +186,7 @@ interface PerImageDetail {
 
 `index` in `ranking` and `perImage` always refers to the **0-based position in the input `imageUrls` array**, so results can be mapped back to the original order regardless of ranking.
 
-### `engine.evaluateGroupStream(imageUrls, mode, options?): AsyncGenerator<GroupEvaluationStreamEvent>`
+### `engine.evaluateGroupStream(imageUrls, mode, options?): AsyncGenerator<GroupEvaluationStreamEvent, void, unknown>`
 
 Streaming group evaluation. `GroupEvaluateStreamOptions` extends `GroupEvaluateOptions` with the streaming granularity:
 
@@ -196,6 +196,7 @@ Streaming group evaluation. `GroupEvaluateStreamOptions` extends `GroupEvaluateO
 | `context`         | `EvaluationContext`     | —          | Additional evaluation context                                                                           |
 | `includePerImage` | `boolean`               | `false`    | Whether to request per-image details                                                                    |
 | `mode`            | `'values' \| 'updates'` | `'values'` | Streaming granularity mode (the group mode is the positional second argument, so the two never collide) |
+| `signal`          | `AbortSignal`           | —          | Per-request cancellation signal, inherited from `GroupEvaluateOptions`                                  |
 
 | Event Type                  | Description                                                 |
 | --------------------------- | ----------------------------------------------------------- |
@@ -208,11 +209,11 @@ Streaming group evaluation. `GroupEvaluateStreamOptions` extends `GroupEvaluateO
 | `group_evaluation_complete` | Final `GroupEvaluationResult` available                     |
 | `error`                     | An error occurred (also used for out-of-range image counts) |
 
-Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Failures — including an image count outside 2–10 — are reported as a final `error` event instead of a thrown exception.
+Event order: round-0 `agent_call` / `agent_complete` + `genre_detected` (only when the genre is auto-detected) → `group_evaluation_start` → per-round `agent_call` / `agent_complete` → `group_evaluation_complete`. Non-cancellation failures — including an image count outside 2–10 — are reported as a final `error` event instead of a thrown exception. Signal cancellation rejects iteration with `AbortError` and does not emit `error` or `group_evaluation_complete`.
 
 ```ts
 for await (const event of engine.evaluateGroupStream(imageUrls, 'compare')) {
-  if (event.type === 'group_evaluation_complete') {
+  if (event.type === 'group_evaluation_complete' && event.data.mode === 'compare') {
     console.log(event.data.ranking);
   }
 }
@@ -261,7 +262,13 @@ const { proposalSchema, arbiterSchema } = getGroupJointSchemas('portrait', true,
 proposalSchema.parse({
   scene_type: 'wedding',
   total_score: 8.4,
-  dimensions: { facial_expression: 8.5 /* ... */ },
+  dimensions: {
+    facial_expression: 8.5,
+    pose_body: 8.3,
+    lighting_quality: 8.5,
+    color_mood: 8.4,
+    composition_focus: 8.3,
+  },
   group_analysis: '...',
   critique: '...',
   suggestions: ['...'],
@@ -310,22 +317,23 @@ Validation rules enforced by both:
 | `suggestions` must be an array of 1–8 non-empty single-line strings                                        | both modes             |
 | `arbitration_notes` must contain a scene ruling, decision array, and final rationale                       | arbiter schemas        |
 
-### `getProposerResultSchema(genre: Genre)`
+### Final Group Result Schemas
 
-Returns the complete evaluation result Zod schema for the given genre, including all nested `process` and `metadata` fields. Useful for validating custom evaluation results or building custom adapters.
+- `getGroupJointResultSchema(genre, includePerImage, imageCount)` validates a complete `GroupJointEvaluationResult`.
+- `getGroupCompareResultSchema(includePerImage, imageCount)` validates a complete `GroupCompareEvaluationResult`. Note that its argument order differs from `getGroupCompareSchemas(imageCount, includePerImage)`.
+
+Both include `process` and `metadata`. Top-level result fields use camelCase; agent outputs inside `process` use snake_case.
 
 ```ts
-import { getProposerResultSchema } from '@theogony/venus-core';
+import { getGroupCompareResultSchema } from '@theogony/venus-core';
 
-const schema = getProposerResultSchema('portrait');
-const validated = schema.parse({
-  imageUrl: '...',
-  genre: 'portrait',
-  sceneType: 'studio',
-  totalScore: 8.5,
-  // ... full evaluation result structure
-});
+const result = await engine.evaluateGroup(imageUrls, 'compare');
+const validated = getGroupCompareResultSchema(false, imageUrls.length).parse(result);
 ```
+
+### Suggestions and Arbitration Schemas
+
+`SuggestionSchema`, `SuggestionsSchema`, `ArbitrationDecisionSchema`, `RawArbitrationNotesSchema`, and `ArbitrationNotesSchema` are also exported. Use `RawArbitrationNotesSchema` for agent-facing snake_case fields and `ArbitrationNotesSchema` for public camelCase fields.
 
 ### `getGenreConfig(genre: Genre): GenreConfig`
 
@@ -396,7 +404,7 @@ const provider = createOpenAIChatProvider({
 
 ### `createOpenAIResponsesProvider(options: OpenAIResponsesProviderOptions): LLMProvider`
 
-Create a provider using the OpenAI Responses API (`/v1/responses`), for reasoning-capable models (o-series, GPT-5). Declares `structuredOutput: 'json_schema'` and honors strict JSON Schema output via `text.format`.
+Create a provider using the OpenAI Responses API (`/v1/responses`), for reasoning-capable models (o-series, GPT-5). Declares `structuredOutput: 'json_schema'` and requests strict JSON Schema output via `text.format` by default. Xiaomi MiMo and DeepSeek endpoints instead declare `'json_object'`, enabling local validation and repair attempts.
 
 ```ts
 import { createOpenAIResponsesProvider } from '@theogony/venus-core';
@@ -494,21 +502,19 @@ interface ProviderCapabilities {
 
 The `structuredOutput` capability controls how agents request and validate JSON output:
 
-| Value                      | Agent behavior                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `'json_object'` or omitted | Requests `response_format: { type: 'json_object' }`. The agent parses JSON, validates it against the Zod schema, and retries up to `maxRetries` times with repair prompts. Failure after all attempts throws `SchemaError`.                                                                                                                                                    |
-| `'json_schema'`            | The agent builds a strict JSON Schema from the Zod schema and sends `response_format: { type: 'json_schema', ... }` in a **single call — no retries and no local Zod validation** (`maxRetries` does not apply). Schema compliance is trusted to the provider/API. If the response is not valid JSON, a `ProviderError` with `errorCode: 'parse_error'` is thrown immediately. |
+| Value                      | Agent behavior                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'json_object'` or omitted | Requests `response_format: { type: 'json_object' }`. Parses JSON and validates with Zod on each attempt. `maxRetries` is the total attempt limit (default 3, including the first call), not the number of additional retries. Parse/validation failures receive repair prompts; exhaustion throws `SchemaError`.                                          |
+| `'json_schema'`            | The agent sends `response_format: { type: 'json_schema', ... }` in a **single agent attempt, followed by local Zod validation** (`maxRetries` does not apply). Invalid JSON throws `ProviderError` with `errorCode: 'parse_error'`; schema violations propagate as `ZodError`. Provider/SDK transport retries are independent of this agent-level policy. |
 
-> **Warning**: only declare `structuredOutput: 'json_schema'` on a custom provider if the
-> underlying API actually guarantees schema-compliant output (e.g. OpenAI Responses API).
-> Declaring it disables the agent-side validation/repair loop entirely.
+> Declare `structuredOutput: 'json_schema'` only when the underlying API supports strict structured output. It disables agent-level repair attempts, not local validation. In `json_object` mode, non-streaming calls also retry provider failures; streaming transport failures propagate immediately instead of entering the repair loop. Cancellation never retries.
 
 Built-in provider support:
 
 | Provider                        | `structuredOutput` | Notes                                                                                                                                                                      |
 | ------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createOpenAIChatProvider`      | `'json_object'`    | `json_schema` response_format is downgraded to `json_object` with a warning                                                                                                |
-| `createOpenAIResponsesProvider` | `'json_schema'`    | Strict schema via `text.format`; the Xiaomi MiMo endpoint declares `'json_object'` (its `text.format` has no json_schema enforcement)                                      |
+| `createOpenAIResponsesProvider` | `'json_schema'`    | Strict schema via `text.format` by default; Xiaomi MiMo and DeepSeek endpoints declare `'json_object'` and downgrade `json_schema` requests                                |
 | `createAnthropicProvider`       | `'json_schema'`    | Strict schema enforced server-side via `output_config.format`; on DashScope-compatible endpoints, unsupported schema keywords (e.g. `multipleOf`) are stripped client-side |
 | `createGeminiProvider`          | `'json_schema'`    | Strict schema via `response_format` (Interactions API)                                                                                                                     |
 
@@ -541,6 +547,7 @@ const myProvider = defineProvider({
     const res = await fetch('https://my-llm-api.com/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: params.signal,
       body: JSON.stringify({
         model: params.model,
         messages: params.messages,
@@ -560,6 +567,7 @@ const engine = createVenusEngine({
     baseURL: 'https://api.openai.com/v1',
     apiKey: process.env.API_KEY!,
   }),
+  defaultModel: '<your-model>',
   providers: {
     proposer: myProvider,
     critic: myProvider,
@@ -570,7 +578,7 @@ const engine = createVenusEngine({
 
 ## Error Classes
 
-All errors extend `VenusError` with a `code` property:
+The SDK's own error classes extend `VenusError` with a `code` property. Local Zod validation may also throw `ZodError`, which is not a `VenusError`:
 
 | Error Class       | Code               | Description                                                                                     |
 | ----------------- | ------------------ | ----------------------------------------------------------------------------------------------- |
@@ -603,57 +611,66 @@ try {
     console.error(`Provider ${err.provider} failed: [${err.errorCode}] ${err.message}`);
   } else if (err instanceof ValidationError) {
     console.error(`Invalid input: ${err.message}`);
+  } else {
+    throw err;
   }
 }
 ```
 
 ## End-to-End Cancellation
 
-All four Engine entry points (`evaluate` / `evaluateStream` / `evaluateGroup` / `evaluateGroupStream`) accept `CancellationOptions = { signal?: AbortSignal }`, and the Adapters automatically attach HTTP-client cancellation (`AbortSignal` or `reader.cancel()` on Express/Hono/Nitro) to the same scope.
+Cancellation is per request, not engine/provider configuration or business context:
 
 ```ts
-import { AbortError, isAbortError } from '@theogony/venus-core';
-
-const controller = new AbortController();
-setTimeout(() => controller.abort(), 5_000);
-
-// Non-streaming
-try {
-  await engine.evaluate(imageUrl, 'portrait', undefined, { signal: controller.signal });
-} catch (err) {
-  if (isAbortError(err)) {
-    // Cancelled: no new rounds, no retry, no synthesised result
-  }
-}
-
-// Streaming: an active signal abort makes iterator.next() throw once
-try {
-  for await (const event of engine.evaluateStream(imageUrl, { signal: controller.signal })) {
-    // …
-  }
-} catch (err) {
-  if (err instanceof AbortError) {
-    // Previously emitted events are kept; missing agent_complete / evaluation_complete is expected
-  }
+interface CancellationOptions {
+  readonly signal?: AbortSignal;
 }
 ```
 
+| Entry point                                                                  | Signal location                    |
+| ---------------------------------------------------------------------------- | ---------------------------------- |
+| `evaluate(imageUrl, genre?, context?, options?)`                             | Fourth argument: `{ signal }`      |
+| `evaluateStream(imageUrl, options?)`                                         | `options.signal`                   |
+| `evaluateGroup(imageUrls, mode, options?)`                                   | `options.signal`                   |
+| `evaluateGroupStream(imageUrls, mode, options?)`                             | `options.signal`                   |
+| `provider.chat(params)` / `provider.chatStream(params)`                      | `params.signal` (`ChatParams`)     |
+| `beforeEvaluate(params, context?)` / `beforeEvaluateGroup(params, context?)` | Second argument: `context?.signal` |
+
+```ts
+import { isAbortError } from '@theogony/venus-core';
+
+try {
+  await engine.evaluate(imageUrl, 'portrait', undefined, {
+    signal: AbortSignal.timeout(30_000),
+  });
+} catch (error) {
+  if (!isAbortError(error)) throw error;
+}
+```
+
+`new AbortError(reason?)` has `name: 'AbortError'`, `code: 'ABORTED'`, and the fixed message `'Operation aborted'`. Its `reason` and `cause` retain the original reason locally; adapter error responses do not serialize it.
+
+`isAbortError(error: unknown): boolean` recognizes the SDK error, `name: 'AbortError'` / `'APIUserAbortError'`, and `code: 'ABORT_ERR'` / `'ABORTED'`. It does not match message text or act as a TypeScript type predicate; use `instanceof AbortError` to access SDK-specific fields.
+
 Behaviour matrix:
 
-| Scenario                    | Result                                                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Non-streaming active abort  | `Promise` rejects with `AbortError`                                                                           |
-| Streaming signal abort      | `next()` rejects once with `AbortError`; no `error` or synthetic completion events emitted                    |
-| Consumer `break` / `return` | Underlying request is aborted synchronously; a pending `next()` may reject with `AbortError`                  |
-| Pre-aborted signal          | Hook, Agent, and Provider are not invoked; non-streaming rejects immediately, stream rejects on first consume |
-| HTTP client disconnect      | Server cleans up silently; uncommitted non-streaming responses return `499 ABORTED`                           |
-| Abort after terminal commit | Committed result is unchanged; concurrent requests unaffected                                                 |
+| Scenario                             | Result                                                                                                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Non-streaming active abort           | `Promise` rejects with `AbortError`                                                                                                                                       |
+| Streaming signal abort               | `next()` rejects once with `AbortError`; no `error` or synthetic completion events emitted                                                                                |
+| Consumer `break` / `return`          | Underlying request is aborted synchronously; a pending `next()` may reject with `AbortError`                                                                              |
+| Pre-aborted signal                   | Hook, Agent, and Provider are not invoked; non-streaming rejects immediately, stream rejects on first consume                                                             |
+| HTTP client disconnect               | Server stops upstream work and cleans up silently; no further stream frames are written                                                                                   |
+| Cancellation before response headers | Maps to HTTP `499` with `{ "error": { "code": "ABORTED", "message": "Operation aborted" } }` when a response can still be sent; a disconnected client may receive nothing |
+| Abort after terminal commit          | Committed result is unchanged; concurrent requests unaffected                                                                                                             |
 
-`onEvent` additionally receives `{ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' } }` at most once per scope; cancellation does not emit the `error` observation event.
+`onEvent` receives `{ type: 'cancelled', agent: 'engine', data: { code: 'ABORTED' }, timestamp }` at most once for an active evaluation scope. It is an observation event, not an `EvaluationStreamEvent` / `GroupEvaluationStreamEvent` or SSE/JSONL frame. A pre-aborted request or cancellation during a hook before the engine starts does not emit this engine event; cancellation does not emit the `error` observation event.
 
-Built-in Providers (OpenAI Chat / OpenAI Responses / Anthropic / Gemini) pass `signal` down to the SDK, which aborts pending fetches and response-body reads. In-flight local network operations are aborted; whether the vendor's server-side task also halts or stops billing is outside SDK guarantees. Custom Providers and `beforeEvaluate` hooks must consume `options.signal` to be interrupted promptly; uncooperative external I/O is only guaranteed to stop further scheduling and drop late-arriving results.
+Hono uses `Request.signal` and response-stream cancellation; Express observes aborted requests and premature response closure; Nitro uses Web signals or Node connection events depending on its runtime. HTTP clients cancel via `fetch`'s signal or response reader cancellation, not a JSON `signal` field. Propagation through proxies and hosting runtimes depends on them forwarding disconnects.
 
-> The Gemini Provider now owns the SDK's connection retry: passing `signal` still honours `options.timeout` (default 60s) and uses a cancellable exponential backoff (initial attempt + up to 4 HTTP-status retries covering 408/409/429/5xx). The Agent-level `maxRetries` semantic (schema self-repair) is unchanged.
+Built-in providers forward cancellation to their SDK transports, aborting pending requests and response-body reads. Custom providers must forward `params.signal`; both hooks must forward their second argument's `context?.signal` to external I/O. The engine can stop waiting and discard late results, but cannot forcibly stop uncooperative I/O. Vendor-side generation and billing are outside these guarantees.
+
+> Gemini uses up to 5 transport attempts (initial + 4 retries) for HTTP 408/409/429/5xx, connection errors, and request timeouts. Each attempt has its own deadline, backoff is cancellable, and established streams are never reconnected or replayed. See [Cancellation and Timeouts](./configuration.md#cancellation-and-timeouts) and the [usage examples](./usage-guide.md#end-to-end-cancellation).
 
 ## Type Exports
 
@@ -670,6 +687,8 @@ import type {
   ExifData,
   EvaluationContext,
   EvaluationResult,
+  EvaluationEvent,
+  CancellationOptions,
   EvaluationStreamEvent,
   EvaluateStreamOptions,
   StreamMode,
@@ -693,6 +712,7 @@ import type {
   LLMProvider,
   ProviderCapabilities,
   ChatParams,
+  ResponseFormat,
   ChatResponse,
   ChatMessage,
   ChatContentPart,
@@ -712,11 +732,17 @@ import type {
   VenusEngineConfig,
   AgentRole,
   AgentConfig,
+  CallConfig,
   AgentCallResult,
   ModelConfig,
   ProviderConfig,
 
   // Result types
+  Suggestions,
+  ArbitrationDecisionType,
+  ArbitrationDecision,
+  RawArbitrationNotes,
+  ArbitrationNotes,
   ProposerResult,
   ArbitrationResult,
   CritiqueResult,
@@ -730,11 +756,13 @@ import type {
   ProviderError,
   SchemaError,
   TimeoutError,
+  AbortError,
 
   // Adapter types
   AdapterOptions,
   AdapterHooks,
   EvaluateParams,
+  EvaluateRequestBody,
   GroupEvaluateParams,
   GroupEvaluateRequestBody,
   MetadataResponse,
