@@ -429,7 +429,7 @@ const provider = createOpenAIResponsesProvider({
 
 为 Anthropic Claude 模型创建提供商，基于 `@anthropic-ai/sdk` 的 Messages API（`client.messages.create`）实现。声明 `structuredOutput: 'json_schema'`，通过 `output_config.format` 在服务端强制执行严格 JSON Schema 输出。
 
-首个 system/developer 消息会被提升为顶层 `system` 参数（Messages API 无 `system` 角色），其余轮次映射为 `user`/`assistant`。公网图片 URL 以 `{ type: 'image', source: { type: 'url' } }` 块直接透传（无需客户端下载）；`data:` URL 转为内联 base64 图片源。推理努力级别映射为扩展思考（`thinking: { type: 'enabled', budget_tokens }`，预算取自 `budgetTokens` 或 effort 等级，并限定 ≥ 1024）；思考块作为 `reasoning` 内容返回，`usage.output_tokens_details.thinking_tokens` 作为 `reasoningTokens` 上报。启用思考时会省略 `temperature`（API 要求其为 1）。Messages API 要求 `max_tokens`，依次取自 `extra.max_tokens`、`defaultMaxTokens`，默认 4096，并会自动提升至高于思考预算。
+首个 system/developer 消息会被提升为顶层 `system` 参数（Messages API 无 `system` 角色），其余轮次映射为 `user`/`assistant`。官方端点会将系统提示词作为带 ephemeral `cache_control` 断点的文本块发送，启用提示词缓存以便跨请求复用稳定的 system 前缀（低于最小可缓存长度的提示词仅不被缓存，不会报错）；DashScope/Zhipu 兼容端点保留纯字符串形式。公网图片 URL 以 `{ type: 'image', source: { type: 'url' } }` 块直接透传（无需客户端下载）；`data:` URL 转为内联 base64 图片源。推理努力级别映射为扩展思考（`thinking: { type: 'enabled', budget_tokens }`，预算取自 `budgetTokens` 或 effort 等级，并限定 ≥ 1024）；思考块作为 `reasoning` 内容返回，`usage.output_tokens_details.thinking_tokens` 作为 `reasoningTokens` 上报。启用思考时会省略 `temperature`（API 要求其为 1）。Messages API 要求 `max_tokens`，依次取自 `extra.max_tokens`、`defaultMaxTokens`，默认 4096，并会自动提升至高于思考预算。
 
 ```ts
 import { createAnthropicProvider } from '@theogony/venus-core';

@@ -199,9 +199,9 @@ deno add jsr:@theogony/venus-core
 
 | 包名             | 是否必需 | 说明                                                  |
 | ---------------- | -------- | ----------------------------------------------------- |
-| `hono` ^4.13.13  | 可选     | 用于 Hono 适配器（`@theogony/venus-core/hono`）       |
+| `hono` ^4.13.18  | 可选     | 用于 Hono 适配器（`@theogony/venus-core/hono`）       |
 | `express` ^5.3.0 | 可选     | 用于 Express 适配器（`@theogony/venus-core/express`） |
-| `h3` ^1.15.0     | 可选     | 用于 Nitro 适配器（`@theogony/venus-core/nitro`）     |
+| `h3` ^1.15.11    | 可选     | 用于 Nitro 适配器（`@theogony/venus-core/nitro`）     |
 
 ### 运行时支持
 

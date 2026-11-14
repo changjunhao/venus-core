@@ -199,9 +199,9 @@ Core dependencies (`openai`, `@anthropic-ai/sdk`, `@google/genai`, `zod`, `vecto
 
 | Package          | Required | Notes                                                |
 | ---------------- | -------- | ---------------------------------------------------- |
-| `hono` ^4.13.13  | Optional | For Hono adapter (`@theogony/venus-core/hono`)       |
+| `hono` ^4.13.18  | Optional | For Hono adapter (`@theogony/venus-core/hono`)       |
 | `express` ^5.3.0 | Optional | For Express adapter (`@theogony/venus-core/express`) |
-| `h3` ^1.15.0     | Optional | For Nitro adapter (`@theogony/venus-core/nitro`)     |
+| `h3` ^1.15.11    | Optional | For Nitro adapter (`@theogony/venus-core/nitro`)     |
 
 ### Runtime Support
 
