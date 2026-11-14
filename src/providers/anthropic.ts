@@ -10,7 +10,10 @@
  * Highlights:
  * - The first system/developer message is lifted into the top-level `system`
  *   parameter (the Messages API has no `system` role); later turns map to
- *   `user`/`assistant`.
+ *   `user`/`assistant`. On the official Anthropic endpoint the system prompt is
+ *   sent as a text block with an ephemeral `cache_control` breakpoint so the
+ *   stable system prefix is reused across requests (prompt caching); compatible
+ *   endpoints (DashScope/Zhipu) keep the plain-string form.
  * - Public image URLs are passed directly as `{ type: 'image', source: { type: 'url' } }`
  *   blocks (no client-side download); `data:` URLs become inline base64 image blocks.
  * - Reasoning effort maps to extended thinking (`thinking: { type: 'enabled', budget_tokens }`),
@@ -305,7 +308,15 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): LLMP
     };
 
     if (system) {
-      body.system = system;
+      // Prompt caching: mark the stable system prefix with an ephemeral cache
+      // breakpoint so repeated requests (same agent + genre) reuse the KV cache.
+      // Prompts below the minimum cacheable length are simply not cached (no
+      // error). cache_control is Anthropic-specific — DashScope/Zhipu compatible
+      // endpoints keep the plain-string system form.
+      body.system =
+        behavior === 'dashscope' || behavior === 'zhipu'
+          ? system
+          : [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
     }
 
     // Extended thinking requires temperature to be 1 (or unset); only forward

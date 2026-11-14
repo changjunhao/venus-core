@@ -117,7 +117,10 @@ describe('Skeleton Providers', () => {
 
       expect(capturedBody.model).toBe('claude-sonnet-4-5');
       expect(capturedBody.max_tokens).toBe(4096);
-      expect(capturedBody.system).toBe('You are a photography judge.');
+      // System prompt is sent as a text block with an ephemeral cache breakpoint
+      expect(capturedBody.system).toEqual([
+        { type: 'text', text: 'You are a photography judge.', cache_control: { type: 'ephemeral' } },
+      ]);
       expect(capturedBody.messages).toHaveLength(1);
       expect(capturedBody.messages[0].role).toBe('user');
       expect(capturedBody.messages[0].content).toEqual([
@@ -125,6 +128,64 @@ describe('Skeleton Providers', () => {
         // Public URL passed through directly as a url image source
         { type: 'image', source: { type: 'url', url: 'https://example.com/photo.jpg' } },
       ]);
+    });
+
+    it('should mark the system prompt with an ephemeral cache_control breakpoint in streaming requests', async () => {
+      let capturedBody: any = null;
+      mockFetch(async (input: any, init: any) => {
+        capturedBody = await readRequestBody(input, init);
+        return makeMessageSSEResponse([
+          {
+            type: 'message_start',
+            message: {
+              id: 'msg_test',
+              type: 'message',
+              role: 'assistant',
+              content: [],
+              model: 'claude-sonnet-4-5',
+              stop_reason: null,
+              usage: { input_tokens: 10, output_tokens: 1 },
+            },
+          },
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '{"score": 8}' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 20 } },
+          { type: 'message_stop' },
+        ]);
+      });
+
+      const provider = makeAnthropicProvider();
+      for await (const _chunk of provider.chatStream!({
+        model: 'claude-sonnet-4-5',
+        messages: [
+          { role: 'system', content: 'You are a photography judge.' },
+          { role: 'user', content: 'rate this' },
+        ],
+      })) {
+        // drain
+      }
+
+      expect(capturedBody.stream).toBe(true);
+      expect(capturedBody.system).toEqual([
+        { type: 'text', text: 'You are a photography judge.', cache_control: { type: 'ephemeral' } },
+      ]);
+    });
+
+    it('should omit the system field entirely when no system message is present', async () => {
+      let capturedBody: any = null;
+      mockFetch(async (input: any, init: any) => {
+        capturedBody = await readRequestBody(input, init);
+        return makeMessageResponse();
+      });
+
+      const provider = makeAnthropicProvider();
+      await provider.chat({
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+
+      expect(capturedBody.system).toBeUndefined();
     });
 
     it('should convert data: URLs to base64 image sources and keep string content', async () => {
@@ -504,6 +565,26 @@ describe('Skeleton Providers', () => {
         expect(provider.capabilities.structuredOutput).toBe('json_schema');
       });
 
+      it('should keep plain-string system without cache_control for DashScope', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeDashScopeProvider();
+        await provider.chat({
+          model: 'qwen3.7-plus',
+          messages: [
+            { role: 'system', content: 'You are a photography judge.' },
+            { role: 'user', content: 'hi' },
+          ],
+        });
+
+        // cache_control is Anthropic-specific — compatible endpoints keep plain text
+        expect(capturedBody.system).toBe('You are a photography judge.');
+      });
+
       it('should send thinking disabled explicitly and forward temperature when reasoning is not configured', async () => {
         let capturedBody: any = null;
         mockFetch(async (input: any, init: any) => {
@@ -651,6 +732,26 @@ describe('Skeleton Providers', () => {
         expect(provider.capabilities.reasoningBudget).toBe(false);
       });
 
+      it('should keep plain-string system without cache_control for Zhipu', async () => {
+        let capturedBody: any = null;
+        mockFetch(async (input: any, init: any) => {
+          capturedBody = await readRequestBody(input, init);
+          return makeMessageResponse();
+        });
+
+        const provider = makeZhipuProvider();
+        await provider.chat({
+          model: 'glm-4.6',
+          messages: [
+            { role: 'system', content: 'You are a photography judge.' },
+            { role: 'user', content: 'hi' },
+          ],
+        });
+
+        // cache_control is Anthropic-specific — compatible endpoints keep plain text
+        expect(capturedBody.system).toBe('You are a photography judge.');
+      });
+
       it('should send thinking disabled explicitly and forward temperature when reasoning is not configured', async () => {
         let capturedBody: any = null;
         mockFetch(async (input: any, init: any) => {
@@ -738,9 +839,11 @@ describe('Skeleton Providers', () => {
 
     describe('sanitizeDashScopeSchema()', () => {
       it('removes multipleOf but keeps sibling constraints', () => {
-        expect(
-          sanitizeDashScopeSchema({ type: 'number', minimum: 0, maximum: 10, multipleOf: 0.1 }),
-        ).toEqual({ type: 'number', minimum: 0, maximum: 10 });
+        expect(sanitizeDashScopeSchema({ type: 'number', minimum: 0, maximum: 10, multipleOf: 0.1 })).toEqual({
+          type: 'number',
+          minimum: 0,
+          maximum: 10,
+        });
       });
 
       it('preserves a property literally named multipleOf while stripping the keyword inside it', () => {

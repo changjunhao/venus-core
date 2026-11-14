@@ -131,10 +131,12 @@ export class ArbiterAgent extends BaseAgent {
         : getGroupCompareSchemas(imageCount, includePerImage);
     return {
       schema: arbiterSchema,
-      systemPrompt: getGroupArbiterSystemPrompt(mode, genre, imageCount, includePerImage),
+      systemPrompt: getGroupArbiterSystemPrompt(mode, genre, includePerImage),
       userPrompt: getGroupArbiterUserPrompt(
         mode,
         genre,
+        imageCount,
+        includePerImage,
         proposal,
         critique,
         revision,

@@ -145,8 +145,8 @@ export class ProposerAgent extends BaseAgent {
         : getGroupCompareSchemas(imageCount, includePerImage);
     return {
       schema: proposalSchema,
-      systemPrompt: getGroupProposerSystemPrompt(mode, genre, imageCount, includePerImage),
-      userPrompt: getGroupProposerUserPrompt(mode, genre, imageCount, context),
+      systemPrompt: getGroupProposerSystemPrompt(mode, genre, includePerImage),
+      userPrompt: getGroupProposerUserPrompt(mode, genre, imageCount, includePerImage, context),
     };
   }
 
@@ -167,8 +167,17 @@ export class ProposerAgent extends BaseAgent {
         : getGroupCompareSchemas(imageCount, includePerImage);
     return {
       schema: proposalSchema,
-      systemPrompt: getGroupProposerSystemPrompt(mode, genre, imageCount, includePerImage),
-      userPrompt: getGroupRevisionUserPrompt(mode, genre, originalProposal, critiqueResult, critiqueReasoning, context),
+      systemPrompt: getGroupProposerSystemPrompt(mode, genre, includePerImage),
+      userPrompt: getGroupRevisionUserPrompt(
+        mode,
+        genre,
+        imageCount,
+        includePerImage,
+        originalProposal,
+        critiqueResult,
+        critiqueReasoning,
+        context,
+      ),
     };
   }
 

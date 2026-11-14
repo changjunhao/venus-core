@@ -79,8 +79,8 @@ describe('Group Prompts', () => {
   // ── Proposer 系统提示词 ──
   describe('getGroupProposerSystemPrompt()', () => {
     it.each(ALL_GENRES)('should generate joint & compare system prompts for "%s"', (genre) => {
-      const joint = getGroupProposerSystemPrompt('joint', genre, 3, false);
-      const compare = getGroupProposerSystemPrompt('compare', genre, 3, false);
+      const joint = getGroupProposerSystemPrompt('joint', genre, false);
+      const compare = getGroupProposerSystemPrompt('compare', genre, false);
       expect(joint.length).toBeGreaterThan(500);
       expect(compare.length).toBeGreaterThan(500);
       expect(joint).toContain(getGenreConfig(genre).label);
@@ -88,7 +88,7 @@ describe('Group Prompts', () => {
     });
 
     it('joint prompt should emphasize group narrative and consistency', () => {
-      const prompt = getGroupProposerSystemPrompt('joint', 'portrait', 4, false);
+      const prompt = getGroupProposerSystemPrompt('joint', 'portrait', false);
       expect(prompt).toContain('整体叙事');
       expect(prompt).toContain('风格一致性');
       expect(prompt).toContain('组照完成度');
@@ -98,7 +98,7 @@ describe('Group Prompts', () => {
     });
 
     it('compare prompt should emphasize ranking under a unified standard', () => {
-      const prompt = getGroupProposerSystemPrompt('compare', 'portrait', 4, false);
+      const prompt = getGroupProposerSystemPrompt('compare', 'portrait', false);
       expect(prompt).toContain('同一标准');
       expect(prompt).toContain('排名');
       expect(prompt).toContain('ranking');
@@ -107,61 +107,90 @@ describe('Group Prompts', () => {
       expect(prompt).not.toContain('group_analysis');
     });
 
-    it('should include the image reference protocol with imageCount', () => {
+    it('should include a count-agnostic image reference protocol', () => {
       for (const mode of ['joint', 'compare'] as const) {
-        const prompt = getGroupProposerSystemPrompt(mode, 'landscape', 5, false);
-        expect(prompt).toContain('你将看到 5 张图片');
+        const prompt = getGroupProposerSystemPrompt(mode, 'landscape', false);
+        expect(prompt).toContain('图片引用协议');
         expect(prompt).toContain('index 从 0 开始');
-        expect(prompt).toContain('第 5 张');
+        expect(prompt).toContain('以用户消息中的说明为准');
+        expect(prompt).not.toContain('你将看到 5 张图片');
+      }
+    });
+
+    it('should not embed imageCount-specific bounds (cache-stable system prefix)', () => {
+      for (const mode of ['joint', 'compare'] as const) {
+        const prompt = getGroupProposerSystemPrompt(mode, 'portrait', true);
+        expect(prompt).not.toContain('数组长度必须为');
+        expect(prompt).not.toMatch(/0 到 \d+/);
+        expect(prompt).not.toMatch(/1 到 \d+/);
       }
     });
 
     it('should mention per_image only when includePerImage=true', () => {
       for (const mode of ['joint', 'compare'] as const) {
-        const withPerImage = getGroupProposerSystemPrompt(mode, 'portrait', 3, true);
-        const withoutPerImage = getGroupProposerSystemPrompt(mode, 'portrait', 3, false);
+        const withPerImage = getGroupProposerSystemPrompt(mode, 'portrait', true);
+        const withoutPerImage = getGroupProposerSystemPrompt(mode, 'portrait', false);
         expect(withPerImage).toContain('per_image');
-        expect(withPerImage).toContain('per_image 数组长度必须为 3');
         expect(withoutPerImage).not.toContain('per_image');
       }
     });
 
-    it('compare prompt should constrain ranking length and index/rank bounds', () => {
-      const prompt = getGroupProposerSystemPrompt('compare', 'portrait', 4, false);
-      expect(prompt).toContain('ranking 数组长度必须为 4');
-      expect(prompt).toContain('0 到 3');
-      expect(prompt).toContain('1 到 4');
+    it('compare prompt should keep generic ranking coverage and uniqueness constraints', () => {
+      const prompt = getGroupProposerSystemPrompt('compare', 'portrait', false);
+      expect(prompt).toContain('ranking 数组必须覆盖全部输入图片');
+      expect(prompt).toContain('不得重复');
     });
 
     it('should include strict JSON output requirement', () => {
-      const prompt = getGroupProposerSystemPrompt('joint', 'portrait', 3, false);
+      const prompt = getGroupProposerSystemPrompt('joint', 'portrait', false);
       expect(prompt).toContain('必须且只能输出一个严格的 JSON 对象');
     });
 
     it('should throw for unknown genre', () => {
       // @ts-expect-error testing runtime error for invalid genre
-      expect(() => getGroupProposerSystemPrompt('joint', 'unknown_genre', 3, false)).toThrow('Unknown genre');
+      expect(() => getGroupProposerSystemPrompt('joint', 'unknown_genre', false)).toThrow('Unknown genre');
     });
   });
 
   // ── Proposer 用户提示词 ──
   describe('getGroupProposerUserPrompt()', () => {
     it('should include image count and genre label', () => {
-      const prompt = getGroupProposerUserPrompt('joint', 'landscape', 4);
+      const prompt = getGroupProposerUserPrompt('joint', 'landscape', 4, false);
       expect(prompt).toContain('4 张');
       expect(prompt).toContain('风光');
     });
 
     it('should differ between joint and compare instructions', () => {
-      const joint = getGroupProposerUserPrompt('joint', 'portrait', 3);
-      const compare = getGroupProposerUserPrompt('compare', 'portrait', 3);
+      const joint = getGroupProposerUserPrompt('joint', 'portrait', 3, false);
+      const compare = getGroupProposerUserPrompt('compare', 'portrait', 3, false);
       expect(joint).toContain('整体评估');
       expect(compare).toContain('对比评估');
       expect(joint).not.toBe(compare);
     });
 
+    it('should carry imageCount-specific index bounds moved out of the system prompt', () => {
+      const prompt = getGroupProposerUserPrompt('joint', 'portrait', 5, false);
+      expect(prompt).toContain('你将看到 5 张图片');
+      expect(prompt).toContain('第 5 张');
+      expect(prompt).toContain('0 到 4');
+    });
+
+    it('compare should constrain ranking length and index/rank bounds', () => {
+      const prompt = getGroupProposerUserPrompt('compare', 'portrait', 4, false);
+      expect(prompt).toContain('ranking 数组长度必须为 4');
+      expect(prompt).toContain('0 到 3');
+      expect(prompt).toContain('1 到 4');
+    });
+
+    it('should constrain per_image length only when includePerImage=true', () => {
+      const withPerImage = getGroupProposerUserPrompt('joint', 'portrait', 3, true);
+      const withoutPerImage = getGroupProposerUserPrompt('joint', 'portrait', 3, false);
+      expect(withPerImage).toContain('per_image 数组长度必须为 3');
+      expect(withoutPerImage).not.toContain('per_image');
+    });
+
     it('should include EXIF context when provided', () => {
-      const prompt = getGroupProposerUserPrompt('joint', 'portrait', 3, SAMPLE_EXIF);
+      const prompt = getGroupProposerUserPrompt('joint', 'portrait', 3, false, SAMPLE_EXIF);
       expect(prompt).toContain('1/2000');
       expect(prompt).toContain('f/2.8');
     });
@@ -215,7 +244,7 @@ describe('Group Prompts', () => {
   // ── Revision ──
   describe('getGroupRevisionUserPrompt()', () => {
     it('should embed original proposal and critique JSON', () => {
-      const prompt = getGroupRevisionUserPrompt('joint', 'portrait', JOINT_PROPOSAL, CRITIQUE_HIGH, null);
+      const prompt = getGroupRevisionUserPrompt('joint', 'portrait', 3, false, JOINT_PROPOSAL, CRITIQUE_HIGH, null);
       expect(prompt).toContain('"scene_type": "studio"');
       expect(prompt).toContain('"severity": "HIGH"');
     });
@@ -224,6 +253,8 @@ describe('Group Prompts', () => {
       const prompt = getGroupRevisionUserPrompt(
         'compare',
         'portrait',
+        3,
+        false,
         COMPARE_PROPOSAL,
         CRITIQUE_HIGH,
         '排名依据不足……',
@@ -232,8 +263,24 @@ describe('Group Prompts', () => {
       expect(prompt).toContain('排名依据不足……');
     });
 
+    it('should carry imageCount-specific ranking and per_image constraints', () => {
+      const prompt = getGroupRevisionUserPrompt('compare', 'portrait', 4, true, COMPARE_PROPOSAL, CRITIQUE_HIGH, null);
+      expect(prompt).toContain('你将看到 4 张图片');
+      expect(prompt).toContain('ranking 数组长度必须为 4');
+      expect(prompt).toContain('per_image 数组长度必须为 4');
+    });
+
     it('should include EXIF context when provided', () => {
-      const prompt = getGroupRevisionUserPrompt('joint', 'portrait', JOINT_PROPOSAL, CRITIQUE_HIGH, null, SAMPLE_EXIF);
+      const prompt = getGroupRevisionUserPrompt(
+        'joint',
+        'portrait',
+        3,
+        false,
+        JOINT_PROPOSAL,
+        CRITIQUE_HIGH,
+        null,
+        SAMPLE_EXIF,
+      );
       expect(prompt).toContain('1/2000');
     });
   });
@@ -242,7 +289,7 @@ describe('Group Prompts', () => {
   describe('getGroupArbiterSystemPrompt()', () => {
     it('should require structured suggestions and arbitration notes for both modes', () => {
       for (const mode of ['joint', 'compare'] as const) {
-        const prompt = getGroupArbiterSystemPrompt(mode, 'portrait', 3, false);
+        const prompt = getGroupArbiterSystemPrompt(mode, 'portrait', false);
         expect(prompt).toContain('"suggestions": [');
         expect(prompt).toContain('"arbitration_notes": {');
         expect(prompt).toContain('accept|partial|reject|consensus');
@@ -252,28 +299,31 @@ describe('Group Prompts', () => {
     });
 
     it('compare prompt distinguishes zero-based index from one-based rank', () => {
-      const prompt = getGroupArbiterSystemPrompt('compare', 'portrait', 3, false);
+      const prompt = getGroupArbiterSystemPrompt('compare', 'portrait', false);
       expect(prompt).toContain('index 从 0 开始');
       expect(prompt).toContain('rank 1 为最佳');
       expect(prompt).toContain('排名整体争议使用 ranking');
       expect(prompt).toContain('ranking[].rationale');
     });
 
-    it('should include the image reference protocol', () => {
-      const prompt = getGroupArbiterSystemPrompt('joint', 'portrait', 4, false);
-      expect(prompt).toContain('你将看到 4 张图片');
+    it('should include a count-agnostic image reference protocol', () => {
+      const prompt = getGroupArbiterSystemPrompt('joint', 'portrait', false);
+      expect(prompt).toContain('图片引用协议');
+      expect(prompt).toContain('以用户消息中的说明为准');
+      expect(prompt).not.toContain('你将看到 4 张图片');
+      expect(prompt).not.toContain('数组长度必须为');
     });
 
     it('should mention per_image only when includePerImage=true', () => {
       for (const mode of ['joint', 'compare'] as const) {
-        expect(getGroupArbiterSystemPrompt(mode, 'portrait', 3, true)).toContain('per_image');
-        expect(getGroupArbiterSystemPrompt(mode, 'portrait', 3, false)).not.toContain('per_image');
+        expect(getGroupArbiterSystemPrompt(mode, 'portrait', true)).toContain('per_image');
+        expect(getGroupArbiterSystemPrompt(mode, 'portrait', false)).not.toContain('per_image');
       }
     });
 
     it('joint version should include scene_type fields; compare version should include ranking', () => {
-      const joint = getGroupArbiterSystemPrompt('joint', 'portrait', 3, false);
-      const compare = getGroupArbiterSystemPrompt('compare', 'portrait', 3, false);
+      const joint = getGroupArbiterSystemPrompt('joint', 'portrait', false);
+      const compare = getGroupArbiterSystemPrompt('compare', 'portrait', false);
       expect(joint).toContain('scene_type');
       expect(joint).toContain('group_analysis');
       expect(compare).toContain('ranking');
@@ -286,6 +336,8 @@ describe('Group Prompts', () => {
       const prompt = getGroupArbiterUserPrompt(
         'joint',
         'portrait',
+        3,
+        false,
         JOINT_PROPOSAL,
         CRITIQUE_HIGH,
         null,
@@ -301,6 +353,8 @@ describe('Group Prompts', () => {
       const prompt = getGroupArbiterUserPrompt(
         'joint',
         'portrait',
+        3,
+        false,
         JOINT_PROPOSAL,
         CRITIQUE_HIGH,
         JOINT_PROPOSAL,
@@ -317,6 +371,8 @@ describe('Group Prompts', () => {
       const prompt = getGroupArbiterUserPrompt(
         'joint',
         'portrait',
+        3,
+        false,
         JOINT_PROPOSAL,
         CRITIQUE_HIGH,
         null,
@@ -329,10 +385,23 @@ describe('Group Prompts', () => {
     });
 
     it('should include LOW severity fast-track hint', () => {
-      const low = getGroupArbiterUserPrompt('joint', 'portrait', JOINT_PROPOSAL, CRITIQUE_LOW, null, null, null, null);
+      const low = getGroupArbiterUserPrompt(
+        'joint',
+        'portrait',
+        3,
+        false,
+        JOINT_PROPOSAL,
+        CRITIQUE_LOW,
+        null,
+        null,
+        null,
+        null,
+      );
       const high = getGroupArbiterUserPrompt(
         'joint',
         'portrait',
+        3,
+        false,
         JOINT_PROPOSAL,
         CRITIQUE_HIGH,
         null,
@@ -344,10 +413,31 @@ describe('Group Prompts', () => {
       expect(high).not.toContain('严重程度为 LOW');
     });
 
+    it('should carry imageCount-specific constraints moved out of the system prompt', () => {
+      const prompt = getGroupArbiterUserPrompt(
+        'compare',
+        'portrait',
+        4,
+        true,
+        COMPARE_PROPOSAL,
+        CRITIQUE_LOW,
+        null,
+        null,
+        null,
+        null,
+      );
+      expect(prompt).toContain('你将看到 4 张图片');
+      expect(prompt).toContain('第 4 张');
+      expect(prompt).toContain('ranking 数组长度必须为 4');
+      expect(prompt).toContain('per_image 数组长度必须为 4');
+    });
+
     it('should include EXIF context when provided', () => {
       const prompt = getGroupArbiterUserPrompt(
         'compare',
         'portrait',
+        3,
+        false,
         COMPARE_PROPOSAL,
         CRITIQUE_LOW,
         null,

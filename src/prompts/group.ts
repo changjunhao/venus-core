@@ -30,10 +30,36 @@ function buildDimensionBullets(config: GenreConfig): string {
   return config.dimensions.map((dim) => `- ${dim}: ${config.dimensionNames[dim]}`).join('\n');
 }
 
-/** 图片引用协议段（所有组图系统提示词共用） */
-function buildImageProtocol(imageCount: number): string {
+/**
+ * 图片引用协议段（所有组图系统提示词共用）。
+ * 刻意不含具体图片数量：system 层保持与 imageCount 无关的稳定前缀，
+ * 利于提供商侧前缀缓存（KV Cache）跨请求复用；
+ * 具体数量与 index/rank 取值范围由用户消息中的约束段给出。
+ */
+function buildImageProtocol(): string {
   return `## 图片引用协议
-你将看到 ${imageCount} 张图片，按输入顺序称为第 1 张、第 2 张……第 ${imageCount} 张。JSON 输出中的 index 从 0 开始，对应输入顺序（第 1 张 → index 0，第 ${imageCount} 张 → index ${imageCount - 1}）。引用具体图片时必须使用“图像 index=N”；index 仅表示输入顺序，不表示优劣。对比模式中的 rank 从 1 开始，rank 1 为最佳。`;
+你将看到一组按输入顺序排列的照片，依次称为第 1 张、第 2 张……JSON 输出中的 index 从 0 开始，对应输入顺序（第 1 张 → index 0）。引用具体图片时必须使用“图像 index=N”；index 仅表示输入顺序，不表示优劣。对比模式中的 rank 从 1 开始，rank 1 为最佳。本组照片的实际数量与 index/rank 的具体取值范围以用户消息中的说明为准。`;
+}
+
+/**
+ * 图片数量约束段（注入用户消息）。
+ * 将随请求变化的 imageCount 约束从 system 层移到 user 层，
+ * 使系统提示词在不同图片数量的请求间保持逐字节一致。
+ */
+function buildImageCountConstraints(mode: GroupEvaluationMode, imageCount: number, includePerImage: boolean): string {
+  let section = `
+
+## 图片数量与索引约束（本组共 ${imageCount} 张）
+你将看到 ${imageCount} 张图片，按输入顺序称为第 1 张、第 2 张……第 ${imageCount} 张。JSON 输出中的 index 取值 0 到 ${imageCount - 1}，对应输入顺序（第 1 张 → index 0，第 ${imageCount} 张 → index ${imageCount - 1}）。`;
+  if (mode === 'compare') {
+    section += `
+ranking 数组长度必须为 ${imageCount}：index 取值 0 到 ${imageCount - 1} 且不得重复，rank 取值 1 到 ${imageCount} 且不得重复。`;
+  }
+  if (includePerImage) {
+    section += `
+per_image 数组长度必须为 ${imageCount}，每张图片恰好对应一个元素，index 与输入顺序一致（0 到 ${imageCount - 1}，不得重复）。`;
+  }
+  return section;
 }
 
 const SUGGESTIONS_JSON_FIELD = `"suggestions": [
@@ -75,27 +101,16 @@ function buildArbitrationNotesRequirement(mode: GroupEvaluationMode): string {
   }`;
 }
 
-/** per_image 字段的 JSON 示例行（includePerImage=true 时插入输出结构） */
-function buildPerImageJsonField(imageCount: number): string {
+/** per_image 字段的 JSON 示例行（includePerImage=true 时插入输出结构；index 范围由用户消息约束） */
+function buildPerImageJsonField(): string {
   return `,
   "per_image": [
-    { "index": <0 到 ${imageCount - 1} 的整数，对应输入顺序>, "score": <0-10的数值，保留1位小数>, "comment": "<该图的简短点评>" }
+    { "index": <图片 index，从 0 开始，对应输入顺序>, "score": <0-10的数值，保留1位小数>, "comment": "<该图的简短点评>" }
   ]`;
 }
 
-/** per_image 输出要求说明（includePerImage=true 时追加） */
-function buildPerImageRequirement(imageCount: number): string {
-  return `
-per_image 数组长度必须为 ${imageCount}，每张图片恰好对应一个元素，index 与输入顺序一致（0 到 ${imageCount - 1}，不得重复）。`;
-}
-
-/** joint 模式的 JSON 输出结构 */
-function buildJointJsonStructure(
-  config: GenreConfig,
-  imageCount: number,
-  includePerImage: boolean,
-  includeArbitration = false,
-): string {
+/** joint 模式的 JSON 输出结构（不含图片数量，具体 index 范围由用户消息约束） */
+function buildJointJsonStructure(config: GenreConfig, includePerImage: boolean, includeArbitration = false): string {
   const subtypeKeys = config.subtypes.join('|');
   const dimensionsExample = buildDimensionsExample(config);
   return `{
@@ -106,21 +121,21 @@ ${dimensionsExample}
   },
   "group_analysis": "<对组照整体叙事、风格一致性与组照完成度的分析>",
   "critique": "<对组照整体的专业点评>",
-  ${SUGGESTIONS_JSON_FIELD}${includeArbitration ? `,\n  ${buildArbitrationNotesJson('joint')}` : ''}${includePerImage ? buildPerImageJsonField(imageCount) : ''}
-}${includePerImage ? buildPerImageRequirement(imageCount) : ''}`;
+  ${SUGGESTIONS_JSON_FIELD}${includeArbitration ? `,\n  ${buildArbitrationNotesJson('joint')}` : ''}${includePerImage ? buildPerImageJsonField() : ''}
+}`;
 }
 
-/** compare 模式的 JSON 输出结构 */
-function buildCompareJsonStructure(imageCount: number, includePerImage: boolean, includeArbitration = false): string {
+/** compare 模式的 JSON 输出结构（不含图片数量，具体 index/rank 范围由用户消息约束） */
+function buildCompareJsonStructure(includePerImage: boolean, includeArbitration = false): string {
   return `{
   "ranking": [
-    { "index": <0 到 ${imageCount - 1} 的整数，对应输入顺序>, "rank": <1 到 ${imageCount} 的整数名次，1 为最佳>, "score": <0-10的数值，保留1位小数>, "rationale": "<排名依据>" }
+    { "index": <图片 index，从 0 开始，对应输入顺序>, "rank": <名次，从 1 开始，1 为最佳>, "score": <0-10的数值，保留1位小数>, "rationale": "<排名依据>" }
   ],
   "comparison_summary": "<对比总结：整组照片的相对优劣与共性问题>",
-  ${SUGGESTIONS_JSON_FIELD}${includeArbitration ? `,\n  ${buildArbitrationNotesJson('compare')}` : ''}${includePerImage ? buildPerImageJsonField(imageCount) : ''}
+  ${SUGGESTIONS_JSON_FIELD}${includeArbitration ? `,\n  ${buildArbitrationNotesJson('compare')}` : ''}${includePerImage ? buildPerImageJsonField() : ''}
 }
 
-ranking 数组长度必须为 ${imageCount}：index 取值 0 到 ${imageCount - 1} 且不得重复，rank 取值 1 到 ${imageCount} 且不得重复。${includePerImage ? buildPerImageRequirement(imageCount) : ''}`;
+ranking 数组必须覆盖全部输入图片：每张图片恰好对应一个元素，index 对应输入顺序且不得重复，rank 从 1 开始且不得重复。数组长度与 index/rank 的具体取值范围以用户消息中的说明为准。`;
 }
 
 const LANGUAGE_REQUIREMENT = `## 语言要求
@@ -133,7 +148,6 @@ const LANGUAGE_REQUIREMENT = `## 语言要求
 export function getGroupProposerSystemPrompt(
   mode: GroupEvaluationMode,
   genre: Genre,
-  imageCount: number,
   includePerImage: boolean,
 ): string {
   const standard = STANDARDS[genre];
@@ -149,11 +163,11 @@ export function getGroupProposerSystemPrompt(
 
 ${standard}
 
-${buildImageProtocol(imageCount)}
+${buildImageProtocol()}
 
 ## 你的工作流程（思维链 CoT）
 1. **首先识别这组照片的子类型**，这是评估的第一步
-2. 按输入顺序逐张浏览全部 ${imageCount} 张照片，形成整体印象
+2. 按输入顺序逐张浏览全部输入照片，形成整体印象
 3. 分析组照的整体叙事：这组照片是否讲述了一个完整的故事或主题
 4. 分析风格一致性：色调、构图语言、后期处理是否统一
 5. 分析组照完成度：作为一个系列是否完整、有无冗余或缺失
@@ -163,7 +177,7 @@ ${buildImageProtocol(imageCount)}
 ## 输出要求
 你必须且只能输出一个严格的 JSON 对象，不要输出任何其他内容。
 JSON 结构如下：
-${buildJointJsonStructure(config, imageCount, includePerImage)}
+${buildJointJsonStructure(config, includePerImage)}
 
 ${SUGGESTIONS_REQUIREMENT}
 
@@ -177,10 +191,10 @@ ${LANGUAGE_REQUIREMENT}`;
 
 ${standard}
 
-${buildImageProtocol(imageCount)}
+${buildImageProtocol()}
 
 ## 你的工作流程（思维链 CoT）
-1. 按输入顺序逐张浏览全部 ${imageCount} 张照片，记录每张的核心优缺点
+1. 按输入顺序逐张浏览全部输入照片，记录每张的核心优缺点
 2. 用同一标准从各维度（${dimensionList}）横向对比所有照片
 3. 基于对比给出每张照片的分数（0-10，保留1位小数）
 4. 按相对优劣给出完整排名（rank 1 为最佳），并为每张照片撰写排名依据
@@ -189,7 +203,7 @@ ${buildImageProtocol(imageCount)}
 ## 输出要求
 你必须且只能输出一个严格的 JSON 对象，不要输出任何其他内容。
 JSON 结构如下：
-${buildCompareJsonStructure(imageCount, includePerImage)}
+${buildCompareJsonStructure(includePerImage)}
 
 ${SUGGESTIONS_REQUIREMENT}
 
@@ -200,6 +214,7 @@ export function getGroupProposerUserPrompt(
   mode: GroupEvaluationMode,
   genre: Genre,
   imageCount: number,
+  includePerImage: boolean,
   context?: EvaluationContext,
 ): string {
   const config = getGenreConfig(genre);
@@ -208,6 +223,8 @@ export function getGroupProposerUserPrompt(
     mode === 'joint'
       ? `请对这组共 ${imageCount} 张的${label}组照进行专业整体评估。首先识别子类型，然后从整体叙事、风格一致性与组照完成度出发，按维度逐一分析，最后输出标准化 JSON 结果。`
       : `请对这组共 ${imageCount} 张的${label}照片进行横向对比评估。用同一标准逐张比较，给出完整排名与排名依据，最后输出标准化 JSON 结果。`;
+
+  prompt += buildImageCountConstraints(mode, imageCount, includePerImage);
 
   if (context) {
     prompt += formatContextForProposer(context, genre);
@@ -343,6 +360,8 @@ ${proposerReasoning}
 export function getGroupRevisionUserPrompt(
   mode: GroupEvaluationMode,
   genre: Genre,
+  imageCount: number,
+  includePerImage: boolean,
   originalProposal: GroupProposal,
   critiqueResult: CritiqueResult,
   critiqueReasoning: string | null,
@@ -369,6 +388,8 @@ ${critiqueReasoning}
 
 注意：你的思考过程和所有自然语言文本必须全程使用中文。`;
 
+  prompt += buildImageCountConstraints(mode, imageCount, includePerImage);
+
   if (context) {
     prompt += formatContextForProposer(context, genre);
   }
@@ -380,12 +401,7 @@ ${critiqueReasoning}
 // 公共 API — Arbiter
 // ============================================================
 
-export function getGroupArbiterSystemPrompt(
-  mode: GroupEvaluationMode,
-  genre: Genre,
-  imageCount: number,
-  includePerImage: boolean,
-): string {
+export function getGroupArbiterSystemPrompt(mode: GroupEvaluationMode, genre: Genre, includePerImage: boolean): string {
   const standard = STANDARDS[genre];
   if (!standard) throw new Error(`Unknown genre for group arbiter prompt: ${genre}`);
 
@@ -395,11 +411,11 @@ export function getGroupArbiterSystemPrompt(
 
   const jsonStructure =
     mode === 'joint'
-      ? `${buildJointJsonStructure(config, imageCount, includePerImage, true)}
+      ? `${buildJointJsonStructure(config, includePerImage, true)}
 
 scene_type 取值说明：
 ${subtypeExplanation}`
-      : buildCompareJsonStructure(imageCount, includePerImage, true);
+      : buildCompareJsonStructure(includePerImage, true);
 
   return `你是一位拥有 20 年经验、冷静客观的${label}终审主编（仲裁者 Arbiter Agent）。
 
@@ -407,7 +423,7 @@ ${subtypeExplanation}`
 
 ${standard}
 
-${buildImageProtocol(imageCount)}
+${buildImageProtocol()}
 
 ## 你的工作方式
 1. 按输入顺序仔细观察全部照片（你有独立判断权）
@@ -443,6 +459,8 @@ ${buildArbitrationNotesRequirement(mode)}
 export function getGroupArbiterUserPrompt(
   mode: GroupEvaluationMode,
   genre: Genre,
+  imageCount: number,
+  includePerImage: boolean,
   proposal: GroupProposal,
   critique: CritiqueResult,
   revision: GroupProposal | null,
@@ -508,6 +526,8 @@ ${revisionReasoning}
 
 请基于以上信息和你对这组照片本身的独立观察，给出最终的权威${mode === 'joint' ? '评分' : '排名'}。
 注意：你需要独立判断正确的子类型，并确保评分标准与场景匹配。输出标准化 JSON 结果。`;
+
+  prompt += buildImageCountConstraints(mode, imageCount, includePerImage);
 
   if (context) {
     prompt += formatContextForArbiter(context, genre);
