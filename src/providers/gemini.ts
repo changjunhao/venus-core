@@ -63,8 +63,10 @@ function mapThinkingLevel(effort: ReasoningEffort): string {
       return 'low';
     case 'medium':
       return 'medium';
+    case 'xhigh':
+      return 'xhigh';
     default:
-      // high / max / xhigh
+      // high / max
       return 'high';
   }
 }

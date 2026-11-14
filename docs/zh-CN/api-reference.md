@@ -454,7 +454,7 @@ const provider = createAnthropicProvider({
 
 为 Google Gemini 模型创建提供商，基于 `@google/genai` 的 Interactions API 实现。声明 `structuredOutput: 'json_schema'`，通过 `response_format` 强制执行严格 JSON Schema 输出。需使用 Gemini 2.5+ / 3.x 系列模型。
 
-公网图片 URL 会以 `{ type: 'image', uri }` 块直接透传给 API（无需客户端下载）；`data:` URL 会转换为内联 base64 图片块。推理努力级别映射到 `generation_config.thinking_level`（`none`/`minimal` → `minimal`，`high`/`max`/`xhigh` → `high`），思考摘要作为推理内容返回；`budgetTokens` 不被 Interactions API 支持，会被忽略。
+公网图片 URL 会以 `{ type: 'image', uri }` 块直接透传给 API（无需客户端下载）；`data:` URL 会转换为内联 base64 图片块。推理努力级别映射到 `generation_config.thinking_level`（`none`/`minimal` → `minimal`，`high`/`max` → `high`，`xhigh` → `xhigh`），思考摘要作为推理内容返回；`budgetTokens` 不被 Interactions API 支持，会被忽略。
 
 ```ts
 import { createGeminiProvider } from '@theogony/venus-core';

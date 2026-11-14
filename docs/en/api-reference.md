@@ -455,7 +455,7 @@ const provider = createAnthropicProvider({
 
 Create a provider for Google's Gemini models backed by the `@google/genai` Interactions API. Declares `structuredOutput: 'json_schema'` and enforces strict JSON Schema output via `response_format`. Requires Gemini 2.5+ / 3.x series models.
 
-Public image URLs are passed to the API directly as `{ type: 'image', uri }` blocks (no client-side download); `data:` URLs are converted to inline base64 image blocks. Reasoning effort maps to `generation_config.thinking_level` (`none`/`minimal` → `minimal`, `high`/`max`/`xhigh` → `high`) with thought summaries surfaced as reasoning content; `budgetTokens` is not supported by the Interactions API and is ignored.
+Public image URLs are passed to the API directly as `{ type: 'image', uri }` blocks (no client-side download); `data:` URLs are converted to inline base64 image blocks. Reasoning effort maps to `generation_config.thinking_level` (`none`/`minimal` → `minimal`, `high`/`max` → `high`, `xhigh` → `xhigh`) with thought summaries surfaced as reasoning content; `budgetTokens` is not supported by the Interactions API and is ignored.
 
 ```ts
 import { createGeminiProvider } from '@theogony/venus-core';

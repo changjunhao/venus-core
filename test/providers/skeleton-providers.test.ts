@@ -1089,7 +1089,7 @@ describe('Skeleton Providers', () => {
       expect(capturedBody.generation_config.thinking_budget).toBeUndefined();
     });
 
-    it('should map max/xhigh effort to thinking_level=high', async () => {
+    it('should map max effort to thinking_level=high', async () => {
       let capturedBody: any = null;
       mockFetch(async (input: any, init: any) => {
         capturedBody = await readRequestBody(input, init);
@@ -1104,6 +1104,23 @@ describe('Skeleton Providers', () => {
       });
 
       expect(capturedBody.generation_config.thinking_level).toBe('high');
+    });
+
+    it('should map xhigh effort to thinking_level=xhigh', async () => {
+      let capturedBody: any = null;
+      mockFetch(async (input: any, init: any) => {
+        capturedBody = await readRequestBody(input, init);
+        return makeInteractionResponse();
+      });
+
+      const provider = makeGeminiProvider();
+      await provider.chat({
+        model: 'gemini-3-flash-preview',
+        messages: [{ role: 'user', content: 'hi' }],
+        reasoning: { effort: 'xhigh' },
+      });
+
+      expect(capturedBody.generation_config.thinking_level).toBe('xhigh');
     });
 
     it('should omit thinking fields when reasoning is not configured', async () => {
