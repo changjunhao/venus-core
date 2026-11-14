@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-14
+
+### Added
+
+- **Gemini native `xhigh` thinking level**: the Gemini provider now maps the
+  Venus reasoning effort `xhigh` directly to `thinking_level: 'xhigh'`, which
+  the Interactions API supports since `@google/genai` 3.1.0, instead of folding
+  it into `high`. `high` and `max` still map to `high`. Bilingual configuration
+  and API reference docs updated to match.
+
+### Changed
+
+- **Prompt caching for group evaluations and Anthropic**: image-count-specific
+  constraints (image reference protocol, JSON index/rank bounds, ranking /
+  `per_image` length requirements) moved out of the group proposer/arbiter
+  system prompts into the user prompts via `buildImageCountConstraints`,
+  keeping the system prefix byte-identical across requests with different
+  image counts. On the official Anthropic endpoint the system prompt is now
+  sent as a text block with an ephemeral `cache_control` breakpoint so the
+  stable prefix is reused across requests; prompts below the minimum cacheable
+  length are simply not cached. DashScope/Zhipu compatible endpoints keep the
+  plain-string form.
+- Dependency updates: `@google/genai` ^3.3.0 (v1 API default),
+  `@anthropic-ai/sdk` ^1.8.0 (API version 2026-10-21), and `openai` ^7.57.0;
+  optional peer requirements updated to `hono` ^4.13.18 and `h3` ^1.15.11,
+  alongside development tooling. README peer dependency tables refreshed.
+
 ## [0.17.1] - 2026-10-16
 
 ### Fixed
